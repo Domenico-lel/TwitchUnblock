@@ -36,6 +36,9 @@ struct MainTabView: View {
     @State private var liveSourceUsed: String? = nil
     /// Feuille « Télécharger » (VOD en cours).
     @State private var showDownloadSheet = false
+    /// Multi-live : la sélection, et la mosaïque ouverte.
+    @ObservedObject private var multi = MultiLive.shared
+    @State private var showMultiLive = false
     @State private var liveStartedAt: Date? = nil
     @State private var liveUptimeText: String = ""
     @State private var refreshTimer: Timer? = nil
@@ -274,6 +277,11 @@ struct MainTabView: View {
                 miniBar.zIndex(99)
             }
 
+            // ── Multi-live : directs choisis, prêts à être lancés ─────
+            if !multi.entries.isEmpty && !playerVisible && !closingPlayer {
+                multiBar.zIndex(98)
+            }
+
             // ── Player overlay ────────────────────────────────────────
             if playerMode != nil {
                 playerOverlay
@@ -313,9 +321,20 @@ struct MainTabView: View {
                     store.liveSource = id
                     reloadCurrent()
                 },
-                onDownload: downloadAction
+                onDownload: downloadAction,
+                onMultiLive: multiLiveAction,
+                multiLiveOn: menuMultiLiveOn,
+                multiLiveFull: multi.isFull
             )
             .presentationDetents([.medium])
+        }
+        // Multi-live : jusqu'à quatre directs côte à côte.
+        .fullScreenCover(isPresented: $showMultiLive) {
+            MultiLiveView(onWatch: { login in
+                showMultiLive = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { playLive(login) }
+            })
+            .environmentObject(store)
         }
         // Télécharger un passage de la VOD en cours (menu ⋯ du lecteur).
         .sheet(isPresented: $showDownloadSheet) {
@@ -928,6 +947,22 @@ struct MainTabView: View {
         }
     }
 
+    /// Direct en cours : l'ajouter au multi-live, ou l'en retirer.
+    private var multiLiveAction: (() -> Void)? {
+        guard case .live(let ch)? = playerMode, dvrSourceChannel == nil else { return nil }
+        return {
+            showPlayerMenu = false
+            if multi.toggle(ch, name: ch) {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        }
+    }
+
+    private var menuMultiLiveOn: Bool {
+        guard case .live(let ch)? = playerMode else { return false }
+        return multi.contains(ch)
+    }
+
     private var downloadAction: (() -> Void)? {
         guard downloadContext != nil else { return nil }
         return {
@@ -1012,6 +1047,48 @@ struct MainTabView: View {
         }
         .padding(.horizontal, TSpace.md)
         .padding(.bottom, 92)
+    }
+
+    /// Multi-live en préparation : les directs choisis, et « Regarder ».
+    /// Au-dessus du mini-lecteur quand il est là.
+    private var multiBar: some View {
+        let miniShown = playerMode != nil && qualityLinks != nil
+        return HStack(spacing: TSpace.sm) {
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.tPurple)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(store.t("multi_title")) · \(multi.entries.count)/\(MultiLive.max)")
+                    .font(.tCardTitle).foregroundColor(.tText)
+                Text(multi.entries.map(\.name).joined(separator: ", "))
+                    .font(.tMeta).foregroundColor(.tMuted).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: openMultiLive) {
+                Label(store.t("multi_watch"), systemImage: "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(Capsule().fill(Color.tPrimary))
+            }
+            .buttonStyle(.plain)
+            TIconButton(icon: "xmark", size: 30) { multi.clear() }
+        }
+        .padding(.horizontal, TSpace.md)
+        .padding(.vertical, TSpace.sm)
+        .tGlass(in: RoundedRectangle(cornerRadius: TRadius.card, style: .continuous),
+                fallback: .tCard)
+        .overlay(RoundedRectangle(cornerRadius: TRadius.card, style: .continuous)
+            .stroke(Color.tPurple.opacity(0.35), lineWidth: 1))
+        .contentShape(Rectangle())
+        .padding(.horizontal, TSpace.md)
+        .padding(.bottom, miniShown ? 152 : 92)
+    }
+
+    /// Un seul son à la fois : le lecteur se ferme.
+    private func openMultiLive() {
+        if playerMode != nil { stopPlayer() }
+        showMultiLive = true
     }
 
     // MARK: – Playback

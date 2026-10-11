@@ -73,6 +73,11 @@ no key to paste. The backend is already hosted and shared by every install.
   pick, then watch it without a connection from the My VODs tab. Parts muted
   for copyrighted music keep their original sound when Twitch still has it
   (a day or two after the stream). Pause, resume and delete from the list.
+* 🧩 **Multi-live** — up to four lives side by side, on iPad as on iPhone:
+  long-press a live card (or use the player's ⋯ menu) to add it — a “+” then
+  shows on every card — and tap **Watch** in the bar at the bottom. Tap a
+  stream to hear it, open any of them with its chat, add a channel by name.
+  Side by side in landscape, stacked in portrait.
 
 ### Chat
 

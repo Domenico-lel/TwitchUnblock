@@ -25,6 +25,10 @@ struct PlayerMenuSheet: View {
     var onSelectSource: ((String) -> Void)? = nil
     /// VOD : télécharger un passage pour le regarder hors ligne.
     var onDownload: (() -> Void)? = nil
+    /// Direct : l'ajouter au multi-live (ou l'en retirer).
+    var onMultiLive: (() -> Void)? = nil
+    var multiLiveOn = false
+    var multiLiveFull = false
 
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -115,6 +119,14 @@ struct PlayerMenuSheet: View {
                     if let onDownload {
                         row(icon: "arrow.down.circle", title: store.t("dl_download"),
                             detail: store.t("dl_download_sub"), action: onDownload)
+                        divider
+                    }
+
+                    if let onMultiLive {
+                        row(icon: multiLiveOn ? "minus.square" : "square.grid.2x2",
+                            title: store.t(multiLiveOn ? "multi_remove" : "multi_add"),
+                            detail: store.t(multiLiveFull && !multiLiveOn ? "multi_full" : "multi_add_sub"),
+                            action: onMultiLive)
                         divider
                     }
 

@@ -102,6 +102,13 @@ struct StreamCardView: View {
                     TLiveBadge(compact: true)
                         .padding(TSpace.sm)
 
+                    // Multi-live : « + » en haut à droite, une fois un direct choisi.
+                    HStack {
+                        Spacer()
+                        MultiLiveCardToggle(login: stream.userLogin, name: stream.userName)
+                    }
+                    .padding(TSpace.sm)
+
                     // Spectateurs : en bas à droite, là où l'œil les cherche.
                     VStack {
                         Spacer()
@@ -154,6 +161,7 @@ struct StreamCardView: View {
             .cornerRadius(TRadius.card)
         }
         .buttonStyle(.plain)
+        .contextMenu { MultiLiveMenuButton(login: stream.userLogin, name: stream.userName) }
     }
 }
 
@@ -550,9 +558,11 @@ struct StreamRowView: View {
                     }
                 }
                 Spacer(minLength: 0)
+                MultiLiveCardToggle(login: stream.userLogin, name: stream.userName)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu { MultiLiveMenuButton(login: stream.userLogin, name: stream.userName) }
     }
 }
