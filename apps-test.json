@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.44",
+          "buildVersion": "269",
+          "date": "2026-10-11",
+          "localizedDescription": "- Téléchargements : l'app sait qu'elle est à l'écran dès son lancement",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-269/TwitchUnblock.ipa",
+          "size": 2864582,
+          "commit": "85526635a1b31e8ea6d1d8858b5d686e07316215"
+        },
+        {
           "version": "1.2.43",
           "buildVersion": "268",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-234/TwitchUnblock.ipa",
           "size": 1977408,
           "commit": "48f131039bd25a83235a56384d73d257c3b809d6"
-        },
-        {
-          "version": "1.2.13",
-          "buildVersion": "233",
-          "date": "2026-10-06",
-          "localizedDescription": "- The Categories tab is now available without a Twitch account\n- Deleted or hidden VODs now appear right among a channel's VODs, marked \"Unlisted VOD\" (the \"Deleted\" tab is gone)\n- Recovered VODs that start with a muted (copyrighted) part now play\n- Swipe down on the player to minimize it, like the back arrow\n- Auto chat sync no longer lags 10+ s behind on channels that stream with a delay",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-233/TwitchUnblock.ipa",
-          "size": 1909625,
-          "commit": "dc32c0605f64caa0700825455bc7d560d64dadf1"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.43",
+      "version": "1.2.44",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-268/TwitchUnblock.ipa",
-      "size": 2864633
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-269/TwitchUnblock.ipa",
+      "size": 2864582
     }
   ],
   "news": []
