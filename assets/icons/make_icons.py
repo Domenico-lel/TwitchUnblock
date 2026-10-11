@@ -6,10 +6,11 @@ est redessiné ici en formes simples. Le bouton lecture est toujours découpé
 dans le bouclier, d'une autre luminosité : en icônes transparentes ou
 teintées d'iOS 26, qui ne gardent que la luminosité, il reste lisible.
 
-Pour chaque icône : `<nom>.png` (normale), `<nom>-dark.png` (iOS 18+ en mode
-sombre : fond transparent, iOS pose le sien), `<nom>-tinted.png` (gris pur,
-pour les icônes teintées et transparentes), un aperçu 180 px pour le réglage
-et, pour les icônes au choix, leurs fichiers séparés (loose/). La CI
+Pour chaque icône : `<nom>.png` (normale) et un aperçu 180 px pour le
+réglage. L'icône par défaut a aussi `AppIcon-dark.png` (iOS 18+ en mode
+sombre : fond transparent, iOS pose le sien) et `AppIcon-tinted.png` (gris
+pur, pour les icônes teintées et transparentes) ; les icônes au choix, elles,
+ont leurs fichiers séparés (loose/), sans versions sombre ni teintée. La CI
 (build.yml) fait le catalogue de l'icône par défaut et des aperçus ;
 buildipa.sh ajoute les icônes au choix à l'app.
 
