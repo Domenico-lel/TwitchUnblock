@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.34",
+          "buildVersion": "259",
+          "date": "2026-10-11",
+          "localizedDescription": "- Multi-live: watch up to four streams side by side. Long-press a live card (or use the player's ⋯ menu) to add it, then tap Watch in the bar at the bottom; tap a stream to hear it.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-259/TwitchUnblock.ipa",
+          "size": 2596972,
+          "commit": "eaaf0d39e0ead64052b8bc59fdd320872d99eb91"
+        },
+        {
           "version": "1.2.33",
           "buildVersion": "258",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-222/TwitchUnblock.ipa",
           "size": 1707923,
           "commit": "d716dee6593d036cecbc64595f2903341ad4475d"
-        },
-        {
-          "version": "1.2.2",
-          "buildVersion": "220",
-          "date": "2026-10-04",
-          "localizedDescription": "- Backup: export and import your follows, followed categories and settings (Settings > General), compatible with the website.\n- Channel page now has VODs, Highlights, Playlists and Clips tabs.\n- Audio only is remembered: new streams start in audio only until you pick another quality.\n- The streamer's profile picture now loads on VODs without a Twitch account.\n- Offline channels show how long ago and the date of their last stream, on the channel page and in Home.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-220/TwitchUnblock.ipa",
-          "size": 1707540,
-          "commit": "9ca6b8d1976ebb867481aad344ffd0e7f9dbbcfe"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.33",
+      "version": "1.2.34",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-258/TwitchUnblock.ipa",
-      "size": 2542788
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-259/TwitchUnblock.ipa",
+      "size": 2596972
     }
   ],
   "news": []
