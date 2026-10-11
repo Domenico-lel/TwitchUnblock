@@ -104,10 +104,12 @@ struct VodDownloadPlan {
                 var url = abs
                 var original: URL? = nil
                 let s = abs.absoluteString
-                if let r = s.range(of: #"-(un)?muted\.ts"#, options: .regularExpression) {
+                // « N-muted.ts », ou « N-muted.mp4 » pour les VODs en fMP4.
+                if let r = s.range(of: #"-(un)?muted\.(ts|mp4)"#, options: .regularExpression) {
+                    let ext = s[r].hasSuffix(".mp4") ? "mp4" : "ts"
                     // « -unmuted » n'existe pas sur le CDN : la version muette sert de repli.
-                    url = URL(string: s.replacingCharacters(in: r, with: "-muted.ts")) ?? abs
-                    original = URL(string: s.replacingCharacters(in: r, with: ".ts"))
+                    url = URL(string: s.replacingCharacters(in: r, with: "-muted.\(ext)")) ?? abs
+                    original = URL(string: s.replacingCharacters(in: r, with: ".\(ext)"))
                 }
                 plan.segments.append(Segment(index: plan.segments.count, url: url, original: original,
                                              duration: pending, discontinuity: discontinuity && !plan.segments.isEmpty))
