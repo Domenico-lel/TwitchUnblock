@@ -129,14 +129,43 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         /// Jeton de l'observateur à bloc : `removeObserver(self)` ne le retire
         /// pas, il restait un observateur par lecteur ouvert.
         private var stopObserver: NSObjectProtocol?
+        private var spatialObserver: NSObjectProtocol?
 
         override init() {
             super.init()
+            spatialObserver = NotificationCenter.default.addObserver(
+                forName: .tuSpatialAudioChanged, object: nil, queue: .main
+            ) { [weak self] _ in self?.reloadForSpatialAudio() }
             // Coupe instantanément le son si on reçoit le signal "ForceStopVideo" depuis la croix
             stopObserver = NotificationCenter.default.addObserver(forName: NSNotification.Name("ForceStopVideo"), object: nil, queue: .main) { [weak self] _ in
                 self?.playerVC?.player?.pause()
                 self?.playerVC?.player = nil
             }
+        }
+
+        /// Réglage « Audio spatial » changé : l'élément est recréé au même
+        /// endroit (rien ne garantit qu'iOS relise ce choix en cours de lecture).
+        private func reloadForSpatialAudio() {
+            guard let player = playerRef,
+                  let current = player.currentItem,
+                  let asset = current.asset as? AVURLAsset else { return }
+            let live = current.duration.isIndefinite
+            let t = player.currentTime()
+            let playing = player.rate > 0
+            let item = VodUnmuteLoader.playerItem(url: asset.url)
+            if !live {
+                // Chercher avant que la playlist soit chargée ne tient pas.
+                var obs: NSKeyValueObservation?
+                obs = item.observe(\.status, options: [.new]) { item, _ in
+                    guard item.status == .readyToPlay else { return }
+                    DispatchQueue.main.async {
+                        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+                        obs?.invalidate(); obs = nil
+                    }
+                }
+            }
+            player.replaceCurrentItem(with: item)
+            if playing { player.play() }
         }
 
         func setupObserver(player: AVPlayer,

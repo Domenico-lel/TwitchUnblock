@@ -16,6 +16,8 @@ struct LiveData {
     /// nil si le streamer n'archive pas ses lives.
     var dvrVideoId: String? = nil
     var error: String?
+    /// Source qui a servi le direct (« as », « al », « eu », « twitch », « worker »).
+    var source: String? = nil
 }
 
 struct VodData: Identifiable {
@@ -122,6 +124,8 @@ struct TwitchStream: Identifiable {
     let gameName: String
     let viewerCount: Int
     let thumbnailURL: String
+    /// Tags de la chaîne, langue comprise (« English », « DropsEnabled »…).
+    var tags: [String] = []
 }
 
 /// Catégorie / jeu Twitch (onglet Catégories).

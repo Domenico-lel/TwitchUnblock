@@ -22,10 +22,15 @@ struct TwitchWebLoginSheet: View {
     /// true  → on efface d'abord les cookies twitch (re-login forcé, ex: token expiré)
     /// false → on réutilise la session existante (capture instantanée si déjà connecté)
     let clearSession: Bool
+    /// Pseudo du compte de l'app : une connexion à un autre compte est refusée
+    /// sur place, et la page de connexion revient pour le bon.
+    var expectedLogin: String? = nil
     let onComplete: (_ token: String, _ login: String?) -> Void
     let onCancel: () -> Void
 
     @State private var isLoading = true
+    /// Pseudo du compte refusé (bandeau en haut de la feuille).
+    @State private var wrongAccount: String? = nil
 
     var body: some View {
         NavigationView {
@@ -34,10 +39,27 @@ struct TwitchWebLoginSheet: View {
 
                 TwitchWebLogin(
                     clearSession: clearSession,
+                    expectedLogin: expectedLogin,
                     onComplete: onComplete,
-                    onLoadingChange: { isLoading = $0 }
+                    onLoadingChange: { isLoading = $0 },
+                    onWrongAccount: { wrongAccount = $0 }
                 )
                 .ignoresSafeArea(edges: .bottom)
+
+                if let wrong = wrongAccount {
+                    VStack {
+                        Text(wrongAccountText(wrong))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.leading)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.tWarning.opacity(0.95))
+                            .cornerRadius(10)
+                            .padding(12)
+                        Spacer()
+                    }
+                }
 
                 if isLoading {
                     VStack(spacing: 12) {
@@ -69,11 +91,22 @@ struct TwitchWebLoginSheet: View {
     }
 }
 
+extension TwitchWebLoginSheet {
+    fileprivate func wrongAccountText(_ wrong: String) -> String {
+        let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+        return translate("web_wrong_account", lang)
+            .replacingOccurrences(of: "{w}", with: wrong)
+            .replacingOccurrences(of: "{a}", with: expectedLogin ?? "?")
+    }
+}
+
 // MARK: – WKWebView wrapper
 private struct TwitchWebLogin: UIViewRepresentable {
     let clearSession: Bool
+    let expectedLogin: String?
     let onComplete: (_ token: String, _ login: String?) -> Void
     let onLoadingChange: (Bool) -> Void
+    let onWrongAccount: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -123,6 +156,8 @@ private struct TwitchWebLogin: UIViewRepresentable {
         private weak var webView: WKWebView?
         private var timer: Timer?
         private var done = false
+        /// Mauvais compte en cours d'effacement : pas de capture entre-temps.
+        private var resetting = false
 
         init(_ parent: TwitchWebLogin) { self.parent = parent }
 
@@ -154,14 +189,35 @@ private struct TwitchWebLogin: UIViewRepresentable {
 
         // MARK: Capture
         private func captureToken() {
-            guard !done, let webView = webView else { return }
+            guard !done, !resetting, let webView = webView else { return }
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-                guard let self = self, !self.done else { return }
+                guard let self = self, !self.done, !self.resetting else { return }
                 guard let auth = cookies.first(where: { $0.name == "auth-token" })?.value,
                       auth.count >= 20 else { return }   // évite un cookie partiel/vide
+                let login = cookies.first(where: { $0.name == "login" })?.value
+                // Un autre compte que celui de l'app : refusé, cookies effacés,
+                // et la page de connexion revient pour le bon.
+                if let expected = self.parent.expectedLogin?.lowercased(), !expected.isEmpty,
+                   let login, login.lowercased() != expected {
+                    self.resetting = true
+                    logger.warn("AUTH/WEB", "Mauvais compte refusé", "@\(login) ≠ @\(expected)")
+                    let cookieStore = webView.configuration.websiteDataStore.httpCookieStore
+                    let group = DispatchGroup()
+                    for c in cookies where c.domain.contains("twitch") {
+                        group.enter()
+                        cookieStore.delete(c) { group.leave() }
+                    }
+                    group.notify(queue: .main) {
+                        self.parent.onWrongAccount(login)
+                        if let url = URL(string: "https://www.twitch.tv/login") {
+                            webView.load(URLRequest(url: url))
+                        }
+                        self.resetting = false
+                    }
+                    return
+                }
                 self.done = true
                 self.stop()
-                let login = cookies.first(where: { $0.name == "login" })?.value
                 logger.success("AUTH/WEB", "Token de session capturé",
                                "@\(login ?? "?")")
                 DispatchQueue.main.async { self.parent.onComplete(auth, login) }

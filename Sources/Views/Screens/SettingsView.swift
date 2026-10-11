@@ -6,6 +6,9 @@ struct SettingsView: View {
     @State private var showFeedback    = false
     /// Contexte joint au retour (ex. « traduction ru »), nil = retour libre.
     @State private var feedbackContext: String? = nil
+    /// Gestion des retours, pour le compte propriétaire (vérifié par le Worker).
+    @ObservedObject private var admin = AdminFeedbackService.shared
+    @State private var showAdminFeedback = false
     @ObservedObject private var updater = UpdateChecker.shared
     @State private var checkingUpdate  = false
     @State private var upToDate        = false
@@ -96,16 +99,28 @@ struct SettingsView: View {
         .sheet(isPresented: $showWebLogin) {
             TwitchWebLoginSheet(
                 clearSession: webLoginClear,
+                expectedLogin: store.twitchLogin,
                 onComplete: { webToken, webLogin in
                     showWebLogin = false
-                    if store.twitchLogin == nil, let l = webLogin { store.twitchLogin = l }
-                    store.twitchWebToken = webToken
-                    logger.success("AUTH/WEB", "Session web connectée depuis les réglages", nil)
+                    Task {
+                        if await store.adoptWebToken(webToken, login: webLogin) {
+                            logger.success("AUTH/WEB", "Session web connectée depuis les réglages", nil)
+                        }
+                    }
                 },
                 onCancel: { showWebLogin = false }
             )
         }
         // ── Retour : bug, idée ─────────────────────────────────────────
+        // Compte admin ? Demandé au Worker à l'ouverture et à chaque
+        // changement de compte : l'entrée « Gérer les retours » en dépend.
+        .task { await admin.refreshAdmin(token: store.twitchToken) }
+        .onChange(of: store.twitchToken) { t in Task { await admin.refreshAdmin(token: t) } }
+        .sheet(isPresented: $showAdminFeedback) {
+            NavigationStack { AdminFeedbackList() }
+                .environmentObject(store)
+                .preferredColorScheme(.dark)
+        }
         .sheet(isPresented: $showFeedback, onDismiss: { feedbackContext = nil }) {
             FeedbackSheet(initialKind: feedbackContext == nil ? .bug : .other,
                           context: feedbackContext)
@@ -144,7 +159,7 @@ struct SettingsView: View {
     // MARK: – Pages de réglages
     /// Les destinations du menu.
     enum Page: Hashable {
-        case account, general, player, chat, labs, other, changelog
+        case account, general, player, chat, drops, labs, other, changelog
 
         var titleKey: String {
             switch self {
@@ -152,6 +167,7 @@ struct SettingsView: View {
             case .general:   return "sec_general"
             case .player:    return "sec_player"
             case .chat:      return "sec_chat"
+            case .drops:     return "drops"
             case .labs:      return "debug_section"
             case .other:     return "sec_other"
             case .changelog: return "changelog"
@@ -163,6 +179,7 @@ struct SettingsView: View {
             case .general:   return "sec_general_sub"
             case .player:    return "sec_player_sub"
             case .chat:      return "sec_chat_sub"
+            case .drops:     return "drops_sub"
             case .labs:      return "sec_labs_sub"
             case .other:     return "sec_other_sub"
             case .changelog: return "changelog_sub"
@@ -174,6 +191,7 @@ struct SettingsView: View {
             case .general:   return "gearshape.fill"
             case .player:    return "play.rectangle.fill"
             case .chat:      return "bubble.left.and.bubble.right.fill"
+            case .drops:     return "shippingbox.fill"
             case .labs:      return "flask.fill"
             case .other:     return "info.circle.fill"
             case .changelog: return "sparkles"
@@ -187,6 +205,7 @@ struct SettingsView: View {
             case .general:   return .tPrimary
             case .player:    return .tOutplayer
             case .chat:      return .tSuccess
+            case .drops:     return .tLive
             case .labs:      return .tWarning
             case .other:     return .tMuted
             case .changelog: return .tVLC
@@ -251,6 +270,8 @@ struct SettingsView: View {
                     rowSeparator
                     menuRow(.chat)
                     rowSeparator
+                    menuRow(.drops)
+                    rowSeparator
                     menuRow(.labs)
                     rowSeparator
                     menuRow(.other)
@@ -260,6 +281,10 @@ struct SettingsView: View {
                 .tCard()
 
                 feedbackRow
+
+                if admin.isAdmin {
+                    adminFeedbackRow
+                }
 
                 Text(versionLabel)
                     .font(.tMeta).foregroundColor(.tMuted)
@@ -306,6 +331,47 @@ struct SettingsView: View {
         .cornerRadius(TRadius.card)
         .overlay(RoundedRectangle(cornerRadius: TRadius.card)
             .stroke(Color.tPrimary.opacity(0.35), lineWidth: 1))
+    }
+
+    /// Boîte de réception des retours (admin) : comme le panneau de /stats.
+    private var adminFeedbackRow: some View {
+        Button { showAdminFeedback = true } label: {
+            HStack(spacing: TSpace.md) {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.tWarning.opacity(0.18))
+                    .frame(width: 34, height: 34)
+                    .overlay {
+                        Image(systemName: "tray.full.fill")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundColor(.tWarning)
+                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.t("adm_feedback"))
+                        .font(.tCardTitle).foregroundColor(.tText)
+                    Text(store.t("adm_feedback_sub"))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                if admin.awaitingCount > 0 {
+                    Text("\(admin.awaitingCount)")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 18, minHeight: 18)
+                        .background(Color.tWarning)
+                        .clipShape(Capsule())
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.tMuted.opacity(0.7))
+            }
+            .padding(.horizontal, TSpace.lg)
+            .padding(.vertical, TSpace.md)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .tCard()
     }
 
     /// Signaler un bug ou proposer une idée : en vue dès l'ouverture des
@@ -409,6 +475,8 @@ struct SettingsView: View {
                     chatBehaviorCard
                     persoCard
                     tailleChatCard
+                case .drops:
+                    DropsPanel(onLogin: { startWebLogin() })
                 case .labs:
                     debugCard
                 case .other:
@@ -813,14 +881,78 @@ struct SettingsView: View {
                 toggleRow(store.t("low_latency"), store.t("low_latency_sub"),
                           $store.lowLatency, log: "Mode faible latence")
                 Divider().background(Color.tBorder)
+                liveSourceRow
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("fill_screen"), store.t("fill_screen_sub"),
                           $store.fillScreen, log: "Remplir l'écran")
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("restore_muted"), store.t("restore_muted_sub"),
                           $store.restoreMutedAudio, log: "Rétablir le son des passages coupés")
                 Divider().background(Color.tBorder)
+                spatialAudioRow
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
                           $store.showLatency, log: "Afficher la latence")
+            }
+        }
+    }
+
+    /// Audio spatial (AirPods) : seul choix qu'iOS laisse aux apps (voir SpatialAudio).
+    @ViewBuilder private var spatialAudioRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(store.t("spatial_audio"))
+                .font(.tCardTitle)
+                .foregroundColor(.tText)
+            Text(store.t("spatial_audio_sub"))
+                .font(.tMeta)
+                .foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Picker("", selection: $store.spatialAudio) {
+                Text(store.t("spatial_auto")).tag("auto")
+                Text(store.t("spatial_off")).tag("off")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .onChange(of: store.spatialAudio) { value in
+                logger.settingChanged("Audio spatial", value: value)
+            }
+        }
+    }
+
+    /// Source du direct : la préférée est essayée en premier (voir getLive).
+    @ViewBuilder private var liveSourceRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("live_source"))
+                    .font(.tCardTitle)
+                    .foregroundColor(.tText)
+                Text(store.t("live_source_sub"))
+                    .font(.tMeta)
+                    .foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(kLiveSourceChoices, id: \.self) { id in
+                    Button {
+                        logger.settingChanged("Source du direct", value: id)
+                        store.liveSource = id
+                    } label: {
+                        if store.liveSource == id { Label(store.t("src_\(id)"), systemImage: "checkmark") }
+                        else { Text(store.t("src_\(id)")) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(store.t("src_\(store.liveSource)"))
+                        .font(.tCardTitle)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundColor(.tPrimary)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.tPrimary.opacity(0.12))
+                .cornerRadius(10)
             }
         }
     }
@@ -909,6 +1041,27 @@ struct SettingsView: View {
     /// Bandeau de session web expirée. Affiché seulement après un refus franc
     /// de Twitch : une session jamais utilisée n'a rien à signaler.
     @ViewBuilder private var webSessionCard: some View {
+        if let other = store.webSessionMismatch {
+            settingCard {
+                VStack(alignment: .leading, spacing: TSpace.md) {
+                    HStack(spacing: TSpace.sm) {
+                        Image(systemName: "person.crop.circle.badge.exclamationmark")
+                            .foregroundColor(.tWarning)
+                        Text(store.t("web_mismatch"))
+                            .font(.tCardTitle).foregroundColor(.tText)
+                    }
+                    Text(store.t("web_mismatch_sub")
+                            .replacingOccurrences(of: "{w}", with: other)
+                            .replacingOccurrences(of: "{a}", with: store.twitchLogin ?? "?"))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TPrimaryButton(title: store.t("web_reconnect")) {
+                        store.webSessionMismatch = nil
+                        startWebLogin()
+                    }
+                }
+            }
+        }
         if store.webSessionExpired {
             settingCard {
                 VStack(alignment: .leading, spacing: TSpace.md) {

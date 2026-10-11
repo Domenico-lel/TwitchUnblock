@@ -123,6 +123,11 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     private var externalObs: NSKeyValueObservation?
     /// Durée de VOD déjà envoyée à la Live Activity.
     private var activityDuration: Double = 0
+    private var spatialObs: NSObjectProtocol?
+    /// Lecteur qui a publié « À l'écoute » en dernier : la fermeture d'un
+    /// ancien lecteur, arrivée après l'ouverture du suivant, effaçait ses
+    /// infos (écran verrouillé et Centre de contrôle vides quelques secondes).
+    private static weak var nowPlayingOwner: ImmersivePlayerModel?
 
     init(url: URL, isLive: Bool, savedTime: Double,
          onProgress: @escaping (Double) -> Void,
@@ -158,6 +163,18 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
             DispatchQueue.main.async { VodUnmuteLoader.fallBackForAirPlay(p) }
         }
         setupRemoteCommands()
+        spatialObs = NotificationCenter.default.addObserver(
+            forName: .tuSpatialAudioChanged, object: nil, queue: .main
+        ) { [weak self] _ in self?.reloadForSpatialAudio() }
+    }
+
+    /// Réglage « Audio spatial » changé : l'élément est recréé au même endroit
+    /// (rien ne garantit qu'iOS relise ce choix en cours de lecture).
+    private func reloadForSpatialAudio() {
+        guard let asset = player.currentItem?.asset as? AVURLAsset else { return }
+        let wasPlaying = isPlaying
+        load(url: asset.url, seek: isLive ? 0 : position)
+        if !wasPlaying { setPlaying(false) }
     }
 
     func load(url: URL, seek: Double = 0, isLive: Bool? = nil) {
@@ -301,11 +318,13 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         player.pause()
         player.replaceCurrentItem(with: nil)
         pip = nil
+        if let o = spatialObs { NotificationCenter.default.removeObserver(o); spatialObs = nil }
         clearNowPlaying()
     }
 
     deinit {
         if let o = timeObs { player.removeTimeObserver(o) }
+        if let o = spatialObs { NotificationCenter.default.removeObserver(o) }
         for (command, target) in remoteTargets { command.removeTarget(target) }
     }
 
@@ -369,12 +388,18 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     /// iOS fait avancer seul le temps affiché à partir de la vitesse : on ne
     /// réécrit qu'aux changements d'état, et toutes les 5 s contre la dérive.
+    ///
+    /// Publié dès qu'un élément se lit, titre connu ou non : sans « À
+    /// l'écoute », iOS ne tient pas l'app pour celle qui joue, et le Centre de
+    /// contrôle (audio spatial compris) ne la règle pas.
     private func refreshNowPlaying(force: Bool = false) {
-        guard !nowPlaying.title.isEmpty || !nowPlaying.artist.isEmpty, player.currentItem != nil else { return }
+        guard player.currentItem != nil else { return }
         guard force || Date().timeIntervalSince(lastNowPlayingUpdate) > 5 else { return }
         lastNowPlayingUpdate = Date()
+        Self.nowPlayingOwner = self
+        let untitled = nowPlaying.title.isEmpty && nowPlaying.artist.isEmpty
         var info: [String: Any] = [
-            MPMediaItemPropertyTitle: nowPlaying.title,
+            MPMediaItemPropertyTitle: untitled ? "TwitchUnblock" : nowPlaying.title,
             MPMediaItemPropertyArtist: nowPlaying.artist,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyIsLiveStream: isLive,
@@ -395,6 +420,9 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         for (command, target) in remoteTargets { command.removeTarget(target) }
         remoteTargets.removeAll()
         artworkTask?.cancel()
+        // Un autre lecteur a déjà pris la main : on ne touche pas à ses infos.
+        guard Self.nowPlayingOwner == nil || Self.nowPlayingOwner === self else { return }
+        Self.nowPlayingOwner = nil
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         PlayerActivity.end()
     }

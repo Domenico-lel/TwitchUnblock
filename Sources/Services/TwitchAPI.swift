@@ -11,17 +11,36 @@ private let qualityOrder = ["chunked","source","1080p60","1080p30","720p60","720
                              "480p30","360p30","160p30","audio_only"]
 
 // MARK: – M3U8 Parser
+/// Valeur d'un attribut d'une ligne #EXT-X-STREAM-INF (`,NOM="valeur"`).
+private func m3u8Attr(_ line: String, _ name: String) -> String? {
+    for sep in [",", ":"] {
+        guard let r = line.range(of: "\(sep)\(name)=\"") else { continue }
+        let rest = line[r.upperBound...]
+        if let end = rest.firstIndex(of: "\"") { return String(rest[..<end]) }
+    }
+    return nil
+}
+
 func parseM3U8(_ content: String, baseURL: URL? = nil) -> QualityLinks {
     var links: QualityLinks = [:]
     let lines = content.components(separatedBy: "\n")
+    // Groupes vidéo nommés « … (source) » (EXT-X-MEDIA) : certains proxys
+    // appellent la version d'origine « 1080p60 » plutôt que « chunked ».
+    let sourceGroups = Set(lines.compactMap { l -> String? in
+        guard l.hasPrefix("#EXT-X-MEDIA"), l.lowercased().contains("(source)") else { return nil }
+        return m3u8Attr(l, "GROUP-ID")
+    })
     for i in 0..<lines.count {
         let line = lines[i].trimmingCharacters(in: .whitespaces)
         guard line.hasPrefix("#EXT-X-STREAM-INF") else { continue }
-        let nameMatch = line.range(of: #"VIDEO="([^"]+)""#, options: .regularExpression)
+        // Deux formats : VIDEO="chunked" (l'ancien) et STABLE-VARIANT-ID="1080p60"
+        // + IVS-VARIANT-SOURCE="source" (serveurs IVS, que renvoie le miroir
+        // européen de Luminous). Sans ce dernier, la résolution servait de nom
+        // et l'audio seul devenait « unknown ».
         var quality = "unknown"
-        if let r = nameMatch {
-            let raw = String(line[r]).replacingOccurrences(of: "VIDEO=\"", with: "").replacingOccurrences(of: "\"", with: "")
-            quality = raw == "chunked" ? "Source" : raw
+        if let name = m3u8Attr(line, "VIDEO") ?? m3u8Attr(line, "STABLE-VARIANT-ID") ?? m3u8Attr(line, "IVS-NAME") {
+            quality = name == "chunked" || sourceGroups.contains(name)
+                || m3u8Attr(line, "IVS-VARIANT-SOURCE") == "source" ? "Source" : name
         } else if let r = line.range(of: #"RESOLUTION=(\d+x\d+)"#, options: .regularExpression) {
             quality = String(line[r]).replacingOccurrences(of: "RESOLUTION=", with: "")
         }
@@ -333,85 +352,21 @@ func getLive(channelName: String) async -> LiveData {
 
     var links: QualityLinks = [:]
 
+    // Source choisie (Réglages → Lecteur, ou menu du lecteur) : essayée en
+    // premier ; si elle ne répond pas, les autres suivent dans l'ordre
+    // automatique, pour que le direct se lance quand même.
     let sourcePref = UserDefaults.standard.string(forKey: "liveSource") ?? "auto"
-    logger.info("LIVE", "Source sélectionnée : \(sourcePref.uppercased())")
-
-    // 1 - Luminous (plusieurs miroirs : on bascule sur le suivant si l'un tombe)
-    if sourcePref == "auto" || sourcePref == "luminous" {
-        for host in kLuminousHosts {
-            if !links.isEmpty { break }
-            logger.info("LIVE", "Tentative Luminous (Sans Pub)…", host)
-            guard var lumComps = URLComponents(string: "https://\(host)/live/\(login)") else { continue }
-            lumComps.queryItems = [
-                .init(name: "allow_source",     value: "true"),
-                .init(name: "allow_audio_only", value: "true"),
-                // fast_bread = variante faible latence côté Twitch.
-                .init(name: "fast_bread",       value: "true")
-            ]
-            guard let lumUrl = lumComps.url else { continue }
-            var req = URLRequest(url: lumUrl)
-            requestHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
-            do {
-                let (data, resp) = try await URLSession.shared.data(for: req)
-                let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-                if code == 200, let body = String(data: data, encoding: .utf8) {
-                    links = parseM3U8(body, baseURL: lumUrl)
-                    if !links.isEmpty {
-                        logger.success("LIVE", "✅ Luminous OK (\(host))", "\(links.count) qualités")
-                    } else {
-                        logger.warn("LIVE", "⚠️ Luminous \(host) : playlist vide", "miroir suivant…")
-                    }
-                } else {
-                    logger.warn("LIVE", "⚠️ Luminous \(host) échec (\(code))", "miroir suivant…")
-                }
-            } catch {
-                logger.error("LIVE", "❌ Erreur Luminous \(host)", error.localizedDescription)
-            }
+    logger.info("LIVE", "Source préférée : \(sourcePref.uppercased())")
+    var usedSource: String? = nil
+    for src in liveSourceOrder(preferred: sourcePref) where links.isEmpty {
+        switch src {
+        case "as":     links = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login)
+        case "al":     links = await ttvlolLiveLinks(login: login)
+        case "eu":     links = await luminousLiveLinks(hosts: kLuminousHosts.filter { $0 != "as.luminous.dev" }, login: login)
+        case "twitch": if let token { links = await usherLiveLinks(login: login, token: token) }
+        default:       links = await workerLiveLinks(login: login)
         }
-    }
-
-    // 2 - Officiel Twitch
-    if links.isEmpty && (sourcePref == "auto" || sourcePref == "twitch") {
-        if let token = token {
-            logger.info("LIVE", "Tentative Twitch officiel...")
-            if login.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }), !login.isEmpty,
-               var comps = URLComponents(string: "https://usher.ttvnw.net/api/channel/hls/\(login).m3u8") {
-            // Mode faible latence : Twitch sert alors la variante « low latency »
-            // (segments plus courts, playlist rafraîchie plus souvent).
-            // Même valeur par défaut que le réglage (AppStore) : actif.
-            let wantsLowLatency = UserDefaults.standard.object(forKey: "cfg_low_latency") as? Bool ?? true
-            comps.queryItems = [
-                .init(name: "allow_source",              value: "true"),
-                .init(name: "allow_audio_only",           value: "true"),
-                .init(name: "allow_spectre",              value: "true"),
-                .init(name: "fast_bread",                 value: wantsLowLatency ? "true" : "false"),
-                .init(name: "low_latency",                value: wantsLowLatency ? "true" : "false"),
-                .init(name: "player_backend",             value: "mediaplayer"),
-                .init(name: "playlist_include_framerate", value: "true"),
-                .init(name: "segment_preference",         value: "4"),
-                .init(name: "sig",                        value: token.signature),
-                .init(name: "token",                      value: token.value),
-            ]
-            if wantsLowLatency { logger.info("LIVE", "Mode faible latence demandé à Twitch") }
-            if let url = comps.url,
-               let (data, resp) = try? await URLSession.shared.data(from: url),
-               (resp as? HTTPURLResponse)?.statusCode == 200,
-               let body = String(data: data, encoding: .utf8) {
-                links = parseM3U8(body, baseURL: url)
-                logger.success("LIVE", "✅ Twitch officiel : \(links.count) qualités")
-            }
-            }
-        }
-    }
-
-    // 3 - Cloudflare Worker
-    if links.isEmpty && (sourcePref == "auto" || sourcePref == "cloudflare") {
-        logger.info("LIVE", "Tentative Cloudflare Worker...")
-        if let json2 = await workerJSON("/api/get-live?name=\(login)&proxy=false"),
-           let fbLinks = json2["links"] as? QualityLinks {
-            links = fbLinks
-            logger.success("LIVE", "✅ Cloudflare Worker : \(links.count) qualités")
-        }
+        if !links.isEmpty { usedSource = src }
     }
 
     if let uid = userId {
@@ -420,7 +375,120 @@ func getLive(channelName: String) async -> LiveData {
 
     return LiveData(title: title, game: game, thumbnail: thumbnail, avatar: avatar,
                     userId: userId, links: links, viewerCount: viewerCount,
-                    startedAt: startedAt, dvrVideoId: dvrVideoId)
+                    startedAt: startedAt, dvrVideoId: dvrVideoId, source: usedSource)
+}
+
+// MARK: – Sources du direct
+/// Ordre des sources du direct : la préférée d'abord (réglage « Source du
+/// direct »), puis l'ordre automatique — Luminous Asie, proxy albanais,
+/// Luminous Europe, Twitch officiel (avec ses pubs), le Worker en dernier.
+func liveSourceOrder(preferred: String) -> [String] {
+    let auto = ["as", "al", "eu", "twitch", "worker"]
+    guard auto.contains(preferred) else { return auto }
+    return [preferred] + auto.filter { $0 != preferred }
+}
+
+/// Miroirs Luminous (sans pub), essayés dans l'ordre ; vide si aucun ne répond.
+private func luminousLiveLinks(hosts: [String], login: String) async -> QualityLinks {
+    for host in hosts {
+        logger.info("LIVE", "Tentative Luminous (Sans Pub)…", host)
+        guard var comps = URLComponents(string: "https://\(host)/live/\(login)") else { continue }
+        comps.queryItems = [
+            .init(name: "allow_source",     value: "true"),
+            .init(name: "allow_audio_only", value: "true"),
+            // fast_bread = variante faible latence côté Twitch.
+            .init(name: "fast_bread",       value: "true")
+        ]
+        guard let url = comps.url else { continue }
+        var req = URLRequest(url: url)
+        requestHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            if code == 200, let body = String(data: data, encoding: .utf8) {
+                let links = parseM3U8(body, baseURL: url)
+                if !links.isEmpty {
+                    logger.success("LIVE", "✅ Luminous OK (\(host))", "\(links.count) qualités")
+                    return links
+                }
+                logger.warn("LIVE", "⚠️ Luminous \(host) : playlist vide", "miroir suivant…")
+            } else {
+                logger.warn("LIVE", "⚠️ Luminous \(host) échec (\(code))", "miroir suivant…")
+            }
+        } catch {
+            logger.error("LIVE", "❌ Erreur Luminous \(host)", error.localizedDescription)
+        }
+    }
+    return [:]
+}
+
+/// Proxy albanais (format TTV.LOL : la requête usher encodée après
+/// /playlist/<chaîne>.m3u8), sans pub lui aussi.
+private func ttvlolLiveLinks(login: String) async -> QualityLinks {
+    var allowed = CharacterSet.alphanumerics
+    allowed.insert(charactersIn: "-._~")
+    let query = "allow_source=true&allow_audio_only=true&fast_bread=true"
+        .addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    for host in kTTVLOLHosts {
+        guard let url = URL(string: "https://\(host)/playlist/\(login).m3u8%3F\(query)") else { continue }
+        logger.info("LIVE", "Tentative proxy TTV.LOL (Sans Pub)…", host)
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        req.setValue("https://ttv.lol/donate", forHTTPHeaderField: "X-Donate-To")
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200 else {
+            logger.warn("LIVE", "⚠️ Proxy \(host) indisponible", "source suivante…")
+            continue
+        }
+        let body = String(decoding: data, as: UTF8.self)
+        guard body.contains("#EXT-X-STREAM-INF") else { continue }
+        let links = parseM3U8(body, baseURL: url)
+        if !links.isEmpty {
+            logger.success("LIVE", "✅ Proxy TTV.LOL OK (\(host))", "\(links.count) qualités")
+            return links
+        }
+    }
+    return [:]
+}
+
+/// Flux officiel de Twitch (usher), avec ses pubs.
+private func usherLiveLinks(login: String, token: (value: String, signature: String)) async -> QualityLinks {
+    guard login.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }), !login.isEmpty,
+          var comps = URLComponents(string: "https://usher.ttvnw.net/api/channel/hls/\(login).m3u8")
+    else { return [:] }
+    logger.info("LIVE", "Tentative Twitch officiel...")
+    // Mode faible latence : Twitch sert alors la variante « low latency »
+    // (segments plus courts, playlist rafraîchie plus souvent).
+    // Même valeur par défaut que le réglage (AppStore) : actif.
+    let wantsLowLatency = UserDefaults.standard.object(forKey: "cfg_low_latency") as? Bool ?? true
+    comps.queryItems = [
+        .init(name: "allow_source",              value: "true"),
+        .init(name: "allow_audio_only",           value: "true"),
+        .init(name: "allow_spectre",              value: "true"),
+        .init(name: "fast_bread",                 value: wantsLowLatency ? "true" : "false"),
+        .init(name: "low_latency",                value: wantsLowLatency ? "true" : "false"),
+        .init(name: "player_backend",             value: "mediaplayer"),
+        .init(name: "playlist_include_framerate", value: "true"),
+        .init(name: "segment_preference",         value: "4"),
+        .init(name: "sig",                        value: token.signature),
+        .init(name: "token",                      value: token.value),
+    ]
+    if wantsLowLatency { logger.info("LIVE", "Mode faible latence demandé à Twitch") }
+    guard let url = comps.url,
+          let (data, resp) = try? await URLSession.shared.data(from: url),
+          (resp as? HTTPURLResponse)?.statusCode == 200,
+          let body = String(data: data, encoding: .utf8) else { return [:] }
+    let links = parseM3U8(body, baseURL: url)
+    logger.success("LIVE", "✅ Twitch officiel : \(links.count) qualités")
+    return links
+}
+
+/// Worker Cloudflare : sa propre chaîne de sources, en dernier recours.
+private func workerLiveLinks(login: String) async -> QualityLinks {
+    logger.info("LIVE", "Tentative Cloudflare Worker...")
+    guard let json = await workerJSON("/api/get-live?name=\(login)&proxy=false"),
+          let links = json["links"] as? QualityLinks else { return [:] }
+    logger.success("LIVE", "✅ Cloudflare Worker : \(links.count) qualités")
+    return links
 }
 
 // MARK: – getStreamStats (rafraîchissement LÉGER viewers/uptime, sans re-fetch des liens)
@@ -729,15 +797,34 @@ func categoryViewers(ids: [String]) async -> [String: Int] {
     return out
 }
 
+/// Jaquette en 570×760 quelle que soit l'adresse reçue : gabarit
+/// {width}×{height} (top Helix) ou taille fixe (recherche Helix en 52×72,
+/// catégories suivies enregistrées avec une ancienne taille).
+func sharpBoxArt(_ url: String) -> String {
+    url.replacingOccurrences(of: "{width}", with: "570")
+        .replacingOccurrences(of: "{height}", with: "760")
+        .replacingOccurrences(of: #"-\d+x\d+(\.(?:jpe?g|png|webp))$"#,
+                              with: "-570x760$1", options: .regularExpression)
+}
+
+/// Le nom exact d'abord (« valorant » → VALORANT), puis l'ordre de Twitch.
+func rankCategories(_ list: [TwitchCategory], for query: String) -> [TwitchCategory] {
+    let fold = { (s: String) -> String in
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .trimmingCharacters(in: .whitespaces)
+    }
+    let q = fold(query)
+    return list.filter { fold($0.name) == q } + list.filter { fold($0.name) != q }
+}
+
 private func categoryFromDict(_ d: [String: Any]) -> TwitchCategory {
     // 570×760, soit le double de la taille de référence de Twitch. La grille
     // fait deux colonnes : une jaquette y occupe environ 170 pt, donc plus de
     // 500 px sur un écran ×3. À 144×192 l'image était agrandie quatre fois et
     // sortait floue. Le CDN sert la taille demandée telle quelle, sans
-    // agrandissement de son côté.
-    let raw = (d["box_art_url"] as? String ?? "")
-        .replacingOccurrences(of: "{width}",  with: "570")
-        .replacingOccurrences(of: "{height}", with: "760")
+    // agrandissement de son côté. La recherche Helix, elle, ne donne pas de
+    // gabarit mais une taille fixe de 52×72 : remplacée aussi.
+    let raw = sharpBoxArt(d["box_art_url"] as? String ?? "")
     return TwitchCategory(
         id:   d["id"]   as? String ?? UUID().uuidString,
         name: d["name"] as? String ?? "",
@@ -753,7 +840,8 @@ private func streamFromDict(_ d: [String: Any]) -> TwitchStream {
         title:     d["title"]      as? String ?? "",
         gameName:  d["game_name"]  as? String ?? "",
         viewerCount: d["viewer_count"] as? Int ?? 0,
-        thumbnailURL: d["thumbnail_url"] as? String ?? ""
+        thumbnailURL: d["thumbnail_url"] as? String ?? "",
+        tags: d["tags"] as? [String] ?? []
     )
 }
 
@@ -862,11 +950,18 @@ func sortQualities(_ keys: [String]) -> [String] {
 /// de passe, révocation. Sans vérification, on s'en aperçoit seulement quand
 /// les points de chaîne cessent silencieusement de répondre.
 ///
-/// Renvoie `false` uniquement quand Twitch dit explicitement que le jeton ne
-/// vaut rien : une panne réseau laisse la session en place, la couper sur un
-/// wifi capricieux serait pire que le mal.
-func isWebSessionValid(token: String) async -> Bool {
-    guard !token.isEmpty, let url = URL(string: "https://gql.twitch.tv/gql") else { return false }
+/// `.invalid` uniquement quand Twitch dit explicitement que le jeton ne vaut
+/// rien : une panne réseau (`.unknown`) laisse la session en place, la couper
+/// sur un wifi capricieux serait pire que le mal. `.valid` donne le compte de
+/// la session, comparé à celui de l'app (AppStore.validateWebSession).
+enum WebSessionCheck {
+    case valid(id: String, login: String)
+    case invalid
+    case unknown
+}
+
+func webSessionIdentity(token: String) async -> WebSessionCheck {
+    guard !token.isEmpty, let url = URL(string: "https://gql.twitch.tv/gql") else { return .invalid }
 
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
@@ -878,25 +973,26 @@ func isWebSessionValid(token: String) async -> Bool {
 
     guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
         logger.debug("AUTH/WEB", "Vérification impossible", "réseau — session conservée")
-        return true
+        return .unknown
     }
     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
     if code == 401 || code == 403 {
         logger.warn("AUTH/WEB", "Session web expirée", "HTTP \(code)")
-        return false
+        return .invalid
     }
     guard code == 200,
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let payload = json["data"] as? [String: Any] else {
-        return true   // réponse inattendue : on ne tranche pas
+        return .unknown   // réponse inattendue : on ne tranche pas
     }
     // `currentUser` à null = jeton rejeté, même avec un HTTP 200.
-    if payload["currentUser"] is NSNull || payload["currentUser"] == nil {
+    guard let user = payload["currentUser"] as? [String: Any] else {
         logger.warn("AUTH/WEB", "Session web expirée", "currentUser vide")
-        return false
+        return .invalid
     }
-    logger.debug("AUTH/WEB", "Session web valide", nil)
-    return true
+    guard let id = user["id"] as? String else { return .unknown }
+    logger.debug("AUTH/WEB", "Session web valide", "@\(user["login"] as? String ?? "?")")
+    return .valid(id: id, login: user["login"] as? String ?? "")
 }
 
 // MARK: – Photo de profil d'une chaîne
@@ -949,7 +1045,8 @@ private func streamFromGQL(user u: [String: Any], stream s: [String: Any]) -> Tw
         title: s["title"] as? String ?? "",
         gameName: (s["game"] as? [String: Any])?["displayName"] as? String ?? "",
         viewerCount: s["viewersCount"] as? Int ?? 0,
-        thumbnailURL: s["previewImageURL"] as? String ?? "")
+        thumbnailURL: s["previewImageURL"] as? String ?? "",
+        tags: (s["freeformTags"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String })
 }
 
 /// Lesquelles de ces chaînes sont en live (suivis sans compte). 100 max par requête.
@@ -959,7 +1056,7 @@ func getLiveStreamsGQL(logins: [String]) async -> [TwitchStream]? {
     guard !logins.isEmpty else { return [] }
     let q = """
     query($l: [String!]) { users(logins: $l) { id login displayName
-      stream { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } } } }
+      stream { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name } } } }
     """
     var out: [TwitchStream] = []
     for start in stride(from: 0, to: logins.count, by: 100) {
@@ -993,7 +1090,7 @@ func getChannelsGQL(logins: [String]) async -> [ChannelBrief]? {
     query($l: [String!]) { users(logins: $l) { id login displayName profileImageURL(width: 70)
       lastBroadcast { startedAt }
       videos(first: 1, type: ARCHIVE, sort: TIME) { edges { node { publishedAt lengthSeconds } } }
-      stream { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } } } }
+      stream { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name } } } }
     """
     var out: [ChannelBrief] = []
     for start in stride(from: 0, to: logins.count, by: 100) {
@@ -1102,7 +1199,7 @@ func searchCategoriesGQL(query: String) async -> [TwitchCategory]? {
 func getStreamsByCategoryGQL(gameId: String) async -> [TwitchStream]? {
     let q = """
     query($id: ID!) { game(id: $id) { streams(first: 100) { edges { node {
-      title viewersCount previewImageURL(width: 440, height: 248) game { displayName }
+      title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
       broadcaster { id login displayName } } } } } }
     """
     guard let d = await gqlRequest(q, ["id": gameId]),
@@ -1118,7 +1215,7 @@ func getStreamsByCategoryGQL(gameId: String) async -> [TwitchStream]? {
 func getTopStreamsGQL(lang: String?) async -> [TwitchStream] {
     let q = """
     query($n: Int!, $langs: [Language!]) { streams(first: $n, options: { broadcasterLanguages: $langs }) {
-      edges { node { title viewersCount previewImageURL(width: 440, height: 248) game { displayName }
+      edges { node { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
         broadcaster { id login displayName } } } } }
     """
     var vars: [String: Any] = ["n": 30]   // Twitch refuse au-delà de 30

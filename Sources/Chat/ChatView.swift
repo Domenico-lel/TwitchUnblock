@@ -407,10 +407,11 @@ struct ChatView: View {
         .sheet(isPresented: $showWebLogin) {
             TwitchWebLoginSheet(
                 clearSession: webLoginClear,
+                expectedLogin: store.twitchLogin,
                 onComplete: { webToken, webLogin in
                     showWebLogin = false
-                    if store.twitchLogin == nil, let l = webLogin { store.twitchLogin = l }
-                    store.twitchWebToken = webToken   // → déclenche onChange ci-dessous
+                    // → déclenche onChange ci-dessous (refusée si autre compte)
+                    Task { await store.adoptWebToken(webToken, login: webLogin) }
                 },
                 onCancel: { showWebLogin = false }
             )

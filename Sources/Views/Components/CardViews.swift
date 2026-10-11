@@ -25,6 +25,62 @@ private struct Thumbnail: View {
     }
 }
 
+// MARK: – Tags d'un live
+/// Tags de la chaîne (langue comprise), comme sous les cartes de Twitch : une
+/// seule ligne ; ceux qui ne tiennent pas sont omis, pas tronqués.
+struct TagChips: View {
+    let tags: [String]
+
+    var body: some View {
+        OneLineLayout(spacing: 4) {
+            ForEach(Array(tags.prefix(8).enumerated()), id: \.offset) { _, tag in
+                Text(tag)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.tMuted)
+                    .lineLimit(1)
+                    .padding(.horizontal, 7)
+                    .frame(height: 18)
+                    .background(Color.tSurface)
+                    .clipShape(Capsule())
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: 18)
+        .clipped()
+    }
+}
+
+/// Vues côte à côte sur une seule ligne. À partir de la première qui déborde,
+/// les suivantes sont posées hors du cadre (masquées par `.clipped()`), comme
+/// des tags passés à la ligne sur le site. La première, si elle est trop
+/// longue à elle seule, est tronquée plutôt que masquée.
+struct OneLineLayout: Layout {
+    var spacing: CGFloat = 4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let height = subviews.map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
+        let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }.reduce(0, +)
+            + spacing * CGFloat(max(0, subviews.count - 1))
+        return CGSize(width: proposal.width ?? ideal, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var overflow = false
+        for (i, v) in subviews.enumerated() {
+            var size = v.sizeThatFits(.unspecified)
+            if i == 0 { size.width = min(size.width, bounds.width) }
+            if overflow || x + size.width > bounds.maxX + 0.5 {
+                overflow = true
+                v.place(at: CGPoint(x: bounds.maxX + 1000, y: bounds.minY), proposal: ProposedViewSize(size))
+                continue
+            }
+            v.place(at: CGPoint(x: x, y: bounds.minY), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+        }
+    }
+}
+
 // MARK: – Carte de direct
 struct StreamCardView: View {
     let stream: TwitchStream
@@ -83,8 +139,14 @@ struct StreamCardView: View {
                             .foregroundColor(.tMuted)
                             .lineLimit(1)
                     }
+
+                    if !stream.tags.isEmpty {
+                        TagChips(tags: stream.tags).padding(.top, 2)
+                    }
                 }
-                .frame(height: cardTextHeight + 14, alignment: .top)
+                // Place des tags réservée sur toutes les cartes : la grille
+                // reste alignée, qu'un live en ait ou non.
+                .frame(height: cardTextHeight + 14 + 22, alignment: .top)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(TSpace.md)
             }
@@ -319,7 +381,7 @@ struct CategoryCardView: View {
     var body: some View {
         Button(action: onPress) {
             VStack(alignment: .leading, spacing: 0) {
-                AsyncImage(url: URL(string: category.boxArtURL)) { img in
+                AsyncImage(url: URL(string: sharpBoxArt(category.boxArtURL))) { img in
                     img.resizable().aspectRatio(3/4, contentMode: .fill)
                 } placeholder: {
                     Rectangle().fill(Color.tSurface).aspectRatio(3/4, contentMode: .fill)
@@ -482,6 +544,9 @@ struct StreamRowView: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.tPurple)
                             .lineLimit(1)
+                    }
+                    if !stream.tags.isEmpty {
+                        TagChips(tags: stream.tags).padding(.top, 2)
                     }
                 }
                 Spacer(minLength: 0)

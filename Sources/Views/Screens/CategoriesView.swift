@@ -253,14 +253,15 @@ struct CategoriesView: View {
         searchTask = Task {
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }
-            // Avec compte, Helix ; sans, la recherche GQL publique.
-            let result: [TwitchCategory]?
-            if let token = store.twitchToken {
+            // GQL d'abord, avec ou sans compte : le classement de Twitch
+            // (« valorant » donne VALORANT en tête) et des jaquettes nettes.
+            // Helix classait mal et renvoyait des vignettes de 52×72 : il ne
+            // sert plus que de secours, si GQL ne répond pas.
+            var result = await searchCategoriesGQL(query: q)
+            if result == nil, let token = store.twitchToken {
                 result = try? await searchCategories(token: token, query: q)
-            } else {
-                result = await searchCategoriesGQL(query: q)
             }
-            guard let found = result, !Task.isCancelled else { return }
+            guard let found = result.map({ rankCategories($0, for: q) }), !Task.isCancelled else { return }
             await MainActor.run {
                 categories = found
                 cursor     = nil

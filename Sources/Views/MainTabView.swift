@@ -32,6 +32,8 @@ struct MainTabView: View {
     @State private var liveViewerCount: Int = 0
     @State private var liveAvatar: String? = nil
     @State private var liveGame: String = ""
+    /// Source qui sert le direct en cours (menu du lecteur).
+    @State private var liveSourceUsed: String? = nil
     @State private var liveStartedAt: Date? = nil
     @State private var liveUptimeText: String = ""
     @State private var refreshTimer: Timer? = nil
@@ -299,7 +301,15 @@ struct MainTabView: View {
                 onFeedback: { showPlayerMenu = false
                               feedbackContext = playerFeedbackContext
                               DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                                  showFeedback = true } }
+                                  showFeedback = true } },
+                liveSource: menuLiveSource,
+                onSelectSource: { id in
+                    showPlayerMenu = false
+                    guard id != store.liveSource else { return }
+                    logger.settingChanged("Source du direct", value: id)
+                    store.liveSource = id
+                    reloadCurrent()
+                }
             )
             .presentationDetents([.medium])
         }
@@ -889,6 +899,13 @@ struct MainTabView: View {
             }
     }
 
+    /// Source du direct pour le menu du lecteur : seulement pendant un direct
+    /// (pas pendant son rembobinage, qui lit la VOD en cours).
+    private var menuLiveSource: String? {
+        guard case .live? = playerMode, dvrSourceChannel == nil else { return nil }
+        return liveSourceUsed
+    }
+
     /// Recharge le flux courant (bouton ⟳ du lecteur).
     private func reloadCurrent() {
         guard let mode = playerMode else { return }
@@ -1018,6 +1035,8 @@ struct MainTabView: View {
         UIApplication.shared.isIdleTimerDisabled = true
         playerMode    = mode
         playerVisible = true
+        // Drops : seulement pendant un direct (relancés par startLiveTimers).
+        if case .live = mode {} else { DropsHeartbeat.shared.stop() }
         errorMsg      = nil
         chatOnly      = false
         vodPlaybackTime = 0
@@ -1157,6 +1176,7 @@ struct MainTabView: View {
                         liveAvatar        = data.avatar
                         liveGame          = data.game
                         liveDvrVideoId    = data.dvrVideoId
+                        liveSourceUsed    = data.source
                         loading           = false
                         switchingSource   = false
                         startLiveTimers(channel: channel)
@@ -1234,11 +1254,17 @@ struct MainTabView: View {
                 }
             }
         }
+        // Drops : Twitch ne les compte que si la session du compte charge le
+        // flux, ce que la lecture par proxy ne fait pas (voir DropsHeartbeat).
+        if store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty {
+            DropsHeartbeat.shared.start(login: channel, token: web)
+        }
     }
 
     private func stopLiveTimers() {
         refreshTimer?.invalidate(); refreshTimer = nil
         uptimeTimer?.invalidate();  uptimeTimer  = nil
+        DropsHeartbeat.shared.stop()
     }
 
     private func updateUptime() {

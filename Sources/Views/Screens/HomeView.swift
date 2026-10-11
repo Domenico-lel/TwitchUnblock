@@ -75,12 +75,14 @@ struct HomeView: View {
         .sheet(isPresented: $showWebLogin) {
             TwitchWebLoginSheet(
                 clearSession: store.webSessionExpired,
+                expectedLogin: store.twitchLogin,
                 onComplete: { webToken, webLogin in
                     showWebLogin = false
-                    if store.twitchLogin == nil, let l = webLogin { store.twitchLogin = l }
-                    store.twitchWebToken = webToken
-                    store.webSessionExpired = false
-                    logger.success("AUTH/WEB", "Session web connectée depuis l'accueil", nil)
+                    Task {
+                        if await store.adoptWebToken(webToken, login: webLogin) {
+                            logger.success("AUTH/WEB", "Session web connectée depuis l'accueil", nil)
+                        }
+                    }
                 },
                 onCancel: { showWebLogin = false }
             )

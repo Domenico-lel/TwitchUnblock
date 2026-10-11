@@ -21,6 +21,78 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.29",
+          "buildVersion": "253",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops page: a step-by-step guide to earn drops, and a live status showing whether the stream you're watching makes your drops progress.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-253/TwitchUnblock.ipa",
+          "size": 2443205,
+          "commit": "a91256f8e9a279eea5f715cf58cfd6672ce2d1a2"
+        },
+        {
+          "version": "1.2.28",
+          "buildVersion": "252",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops: the Drops page now also lists every open campaign (all games) with its rewards.\n- The Twitch web session must be the app's account: another account is refused at sign-in (and disconnected if found later), so points, drops and predictions never go to the wrong account.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-252/TwitchUnblock.ipa",
+          "size": 2430534,
+          "commit": "2d7de332f34ce1d3426bc359f4a63027cec35c43"
+        },
+        {
+          "version": "1.2.27",
+          "buildVersion": "251",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops: new Settings → Drops page with your campaigns' progress, a Claim button and automatic claiming.\n- Drops now progress while you watch a live with drops (Twitch only counts them when your account loads the stream; the app does it with small requests, no extra video download).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-251/TwitchUnblock.ipa",
+          "size": 2393455,
+          "commit": "587645a1afc9ea013221b9b87ffdd64e9a0b357c"
+        },
+        {
+          "version": "1.2.26",
+          "buildVersion": "250",
+          "date": "2026-10-11",
+          "localizedDescription": "- Spatial audio (AirPods): new setting in Settings → Player to turn it off in the app, head tracking included. “Fixed” is still picked in Control Center.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-250/TwitchUnblock.ipa",
+          "size": 2319397,
+          "commit": "4c6ea9b0e3c8d3a0922acae89967591d030f4f5d"
+        },
+        {
+          "version": "1.2.25",
+          "buildVersion": "249",
+          "date": "2026-10-11",
+          "localizedDescription": "- Choose the live source (Luminous Asia, Luminous Europe, Albania proxy or official Twitch) in Settings → Player or from the player's ⋯ menu, which also shows the source in use.\n- Stream tags (language, DropsEnabled…) under live streams, like on Twitch.\n- Category search puts the exact match first (VALORANT for “valorant”) and shows sharp box art.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-249/TwitchUnblock.ipa",
+          "size": 2312787,
+          "commit": "908bf2d18ab440597317af35a53b6a4129666600"
+        },
+        {
+          "version": "1.2.24",
+          "buildVersion": "248",
+          "date": "2026-10-10",
+          "localizedDescription": "- Another ad-free source for live streams (an Albanian proxy) when Luminous is unavailable.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-248/TwitchUnblock.ipa",
+          "size": 2297831,
+          "commit": "31db60d909eb8f70af340519283f6419c4af89e8"
+        },
+        {
+          "version": "1.2.23",
+          "buildVersion": "247",
+          "date": "2026-10-10",
+          "localizedDescription": "- Améliorations et corrections",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-247/TwitchUnblock.ipa",
+          "size": 2291621,
+          "commit": "b550df227599f265e506983e9fe18dc9cbee5fcc"
+        },
+        {
+          "version": "1.2.22",
+          "buildVersion": "245",
+          "date": "2026-10-10",
+          "localizedDescription": "- Live quality names stay correct when the app falls back to another ad-free mirror.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-245/TwitchUnblock.ipa",
+          "size": 2206098,
+          "commit": "4394291ce9078a17006e345e2241eeb1b30445a0"
+        },
+        {
           "version": "1.2.21",
           "buildVersion": "243",
           "date": "2026-10-10",
@@ -217,34 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-213/TwitchUnblock.ipa",
           "size": 1617010,
           "commit": "3fc67be384d7c198a75beeb15d547b9cef1228ac"
-        },
-        {
-          "version": "1.1.8",
-          "buildVersion": "212",
-          "date": "2026-10-04",
-          "localizedDescription": "- New “Features in testing” tab in Settings\n- Expanding a pinned message no longer stops chat auto-scroll\n- Home can show channels as a list (like Twitch) or a grid\n- Follow channels without a Twitch account (saved on this device)\n- Home works without logging in: top streams and your device follows\n- Bot commands: browse Nightbot, StreamElements, Fossabot and Moobot commands from the chat menu",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-212/TwitchUnblock.ipa",
-          "size": 1596749,
-          "commit": "6af8c32ee84e0a9791e801f048658942b1348296"
-        },
-        {
-          "version": "1.1.7",
-          "buildVersion": "211",
-          "date": "2026-10-04",
-          "localizedDescription": "- Update popup now lists everything new since your version\n- React to announcements with an emoji\n- Settings: new “Features in testing” section (live notifications, test button)\n- Latency badge moved to Player settings, auto chat sync to Chat settings\n- About: this project is vibe-coded (built with AI assistants)\n- Notifications réparées (Info.plist plus réécrit par xcodegen), test et diagnostic, bandeau session web, annonces, popup Discord\n- Top des lives dans la langue de l'appareil, réglable dans les réglages\n- Usage : ping immédiat après la connexion (l'anonyme est repris par le compte)\n- Fenêtres dans le style de l'app ; nouvelle version seulement si l'app change\n- Comptage par compte Twitch quand on est connecté\n- Comptage : identifiant gardé dans le trousseau (survit aux réinstallations)\n- Versions lisibles (1.1.x), Discord en tête du README et proposé une fois dans l'app",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-211/TwitchUnblock.ipa",
-          "size": 1534958,
-          "commit": "357c05ced183885d0df1c0719450a830be58932e"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.21",
-      "versionDate": "2026-10-10",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-243/TwitchUnblock.ipa",
-      "size": 2205875
+      "version": "1.2.29",
+      "versionDate": "2026-10-11",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-253/TwitchUnblock.ipa",
+      "size": 2443205
     }
   ],
   "news": []

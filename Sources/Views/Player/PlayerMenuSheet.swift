@@ -19,6 +19,10 @@ struct PlayerMenuSheet: View {
     var onSettings:    () -> Void = {}
     /// Signaler un problème : le formulaire, avec ce qui se lit.
     var onFeedback:    () -> Void = {}
+    /// Direct : source qui sert le flux (« as », « al »…) ; nil hors direct.
+    var liveSource: String? = nil
+    /// Changer de source : le direct est relancé par elle.
+    var onSelectSource: ((String) -> Void)? = nil
 
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -55,6 +59,36 @@ struct PlayerMenuSheet: View {
                                 ForEach(qualities, id: \.self) { q in
                                     TChip(title: label(q), isOn: q == selected) {
                                         onSelectQuality(q)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, TSpace.lg)
+                        }
+                        .padding(.vertical, TSpace.sm)
+
+                        divider
+                    }
+
+                    // Source du direct : le proxy qui sert le flux, et de quoi
+                    // en changer (le direct repart aussitôt).
+                    if let onSelectSource, let used = liveSource {
+                        HStack(spacing: TSpace.md) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 15)).foregroundColor(.tPrimary)
+                                .frame(width: 24)
+                            Text(store.t("live_source")).font(.tCardTitle).foregroundColor(.tText)
+                            Spacer()
+                            Text(store.t("src_\(used)")).font(.tMeta).foregroundColor(.tMuted)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, TSpace.lg)
+                        .padding(.top, TSpace.md)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: TSpace.sm) {
+                                ForEach(kLiveSourceChoices, id: \.self) { id in
+                                    TChip(title: store.t("src_\(id)"), isOn: id == store.liveSource) {
+                                        onSelectSource(id)
                                     }
                                 }
                             }

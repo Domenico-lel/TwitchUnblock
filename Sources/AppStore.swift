@@ -23,6 +23,10 @@ final class AppStore: ObservableObject {
         didSet {
             if let id = twitchUserId { UserDefaults.standard.set(id, forKey: "twitch_user_id") }
             else { UserDefaults.standard.removeObject(forKey: "twitch_user_id") }
+            // Compte de l'app connu ou changé : la session web doit être la sienne.
+            if let id = twitchUserId, id != oldValue, twitchWebToken != nil {
+                Task { @MainActor [weak self] in await self?.validateWebSession() }
+            }
         }
     }
 
@@ -40,18 +44,62 @@ final class AppStore: ObservableObject {
     /// quelqu'un qui ne s'en est jamais servi.
     @Published var webSessionExpired = false
 
-    /// Vérifie la session web et l'efface si Twitch la refuse. Une panne
-    /// réseau ne l'efface pas : couper la session sur un wifi capricieux
-    /// serait pire que de la laisser mourir en silence.
+    /// Pseudo du compte d'une session web refusée parce qu'elle n'était pas au
+    /// compte de l'app (nil sinon). Les points, drops et prédictions seraient
+    /// partis sur un autre compte que les suivis et le chat.
+    @Published var webSessionMismatch: String? = nil
+
+    /// Vérifie la session web : effacée si Twitch la refuse, ou si elle est à
+    /// un autre compte que celui de l'app. Une panne réseau ne l'efface pas :
+    /// couper la session sur un wifi capricieux serait pire que de la laisser
+    /// mourir en silence.
     @MainActor
     func validateWebSession() async {
         guard let token = twitchWebToken, !token.isEmpty else { return }
-        if await isWebSessionValid(token: token) {
-            webSessionExpired = false
-        } else {
+        switch await webSessionIdentity(token: token) {
+        case .unknown:
+            break
+        case .invalid:
             twitchWebToken = nil
             webSessionExpired = true
+        case .valid(let id, let login):
+            webSessionExpired = false
+            if let mine = twitchUserId, !mine.isEmpty, id != mine {
+                await refuseWebSession(of: login)
+            }
         }
+    }
+
+    /// Session web obtenue par la connexion twitch.tv (accueil, réglages,
+    /// points). Refusée si elle n'est pas au compte de l'app.
+    /// - Returns: false si refusée.
+    @MainActor
+    @discardableResult
+    func adoptWebToken(_ token: String, login webLogin: String?) async -> Bool {
+        if let mine = twitchLogin?.lowercased(), !mine.isEmpty,
+           let web = webLogin?.lowercased(), !web.isEmpty, web != mine {
+            await refuseWebSession(of: webLogin ?? web)
+            return false
+        }
+        if twitchLogin == nil, let l = webLogin { twitchLogin = l }
+        webSessionMismatch = nil
+        webSessionExpired = false
+        twitchWebToken = token
+        // Pseudo absent du cookie : vérifié par identifiant.
+        if webLogin == nil { await validateWebSession() }
+        return twitchWebToken != nil
+    }
+
+    /// Session web d'un autre compte : effacée (jeton et cookies twitch.tv),
+    /// pour que la prochaine connexion demande le bon compte.
+    @MainActor
+    private func refuseWebSession(of login: String) async {
+        logger.warn("AUTH/WEB", "Session web d'un autre compte refusée",
+                    "@\(login) ≠ @\(twitchLogin ?? "?") (compte de l'app)")
+        webSessionMismatch = login
+        twitchWebToken = nil
+        DropsHeartbeat.shared.stop()
+        await TwitchWebSession.clear()
     }
 
     /// Photo de profil du compte connecté, affichée dans l'en-tête.
@@ -114,6 +162,34 @@ final class AppStore: ObservableObject {
     /// Activé par défaut : c'est le lecteur de l'app, le natif est le repli.
     @Published var immersivePlayer: Bool = true {
         didSet { UserDefaults.standard.set(immersivePlayer, forKey: "cfg_immersive") }
+    }
+
+    /// Source du direct préférée : « auto », « as », « al », « eu » ou
+    /// « twitch ». Essayée en premier par getLive, qui lit la même clé.
+    @Published var liveSource: String = "auto" {
+        didSet { UserDefaults.standard.set(liveSource, forKey: "liveSource") }
+    }
+
+    /// Audio spatial (AirPods) : « auto » = choix d'iOS (Centre de contrôle),
+    /// « off » = jamais spatialisé dans l'app (voir SpatialAudio).
+    /// Drops : pendant un live qui en a, la session du compte charge le flux
+    /// (voir DropsHeartbeat) ; sans ça, Twitch ne compte rien.
+    @Published var dropsProgress: Bool = true {
+        didSet { UserDefaults.standard.set(dropsProgress, forKey: "cfg_drops_progress") }
+    }
+
+    /// Drops terminés réclamés automatiquement (lu aussi par DropsHeartbeat).
+    @Published var autoClaimDrops: Bool = true {
+        didSet { UserDefaults.standard.set(autoClaimDrops, forKey: "cfg_drops_autoclaim") }
+    }
+
+    @Published var spatialAudio: String = "auto" {
+        didSet {
+            UserDefaults.standard.set(spatialAudio, forKey: SpatialAudio.key)
+            if spatialAudio != oldValue {
+                NotificationCenter.default.post(name: .tuSpatialAudioChanged, object: nil)
+            }
+        }
     }
 
     /// Recadrer la vidéo pour remplir l'écran, au lieu de laisser des bandes
@@ -376,6 +452,14 @@ final class AppStore: ObservableObject {
         // d'une vingtaine) ; qui l'a coupé à la main le garde coupé.
         lowLatency         = ud.object(forKey: "cfg_low_latency") as? Bool ?? true
         immersivePlayer    = ud.object(forKey: "cfg_immersive")   as? Bool ?? true
+        // Anciennes valeurs (« luminous », « cloudflare ») : retour en
+        // automatique, réécrit aussi pour getLive, qui lit la même clé.
+        let savedSource    = ud.string(forKey: "liveSource") ?? "auto"
+        liveSource         = kLiveSourceChoices.contains(savedSource) ? savedSource : "auto"
+        if savedSource != liveSource { ud.set(liveSource, forKey: "liveSource") }
+        spatialAudio       = ud.string(forKey: SpatialAudio.key) == "off" ? "off" : "auto"
+        dropsProgress      = ud.object(forKey: "cfg_drops_progress")  as? Bool ?? true
+        autoClaimDrops     = ud.object(forKey: "cfg_drops_autoclaim") as? Bool ?? true
         fillScreen         = ud.object(forKey: "cfg_fill_screen") as? Bool ?? false
         landscapeChat      = LandscapeChat(rawValue: ud.string(forKey: "cfg_landscape_chat") ?? "")
                              ?? .column
@@ -451,6 +535,7 @@ final class AppStore: ObservableObject {
     func logout() {
         twitchToken    = nil
         twitchWebToken = nil
+        webSessionMismatch = nil
         Task { await TwitchWebSession.clear() }
         twitchUserId   = nil
         twitchLogin    = nil   // ← nettoyage complet
