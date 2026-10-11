@@ -918,6 +918,7 @@ func lastLiveEnd(publishedAt: String?, lengthSeconds: Int, lastStart: String?) -
     }
 }
 
+#if os(iOS)
 /// « 13 d · 21 sept. » : durée dans la langue de l'app, puis la date (avec
 /// l'année si ce n'est pas celle en cours).
 func offlineLabel(since end: Date, store: AppStore) -> String {
@@ -933,6 +934,7 @@ func offlineLabel(since end: Date, store: AppStore) -> String {
     df.setLocalizedDateFormatFromTemplate(sameYear ? "d MMM" : "d MMM y")
     return "\(span) · \(df.string(from: end))"
 }
+#endif
 
 func sortQualities(_ keys: [String]) -> [String] {
     let order = ["Source","chunked","source","1080p60","1080p30","1080p","720p60","720p30","720p",

@@ -1,0 +1,89 @@
+name: Build tvOS (test)
+
+# App Apple TV, encore en test : construite à part de l'app iPhone (un échec
+# ici ne bloque ni ses builds ni ses notes de version), sans signature, et
+# publiée en pré-version « tv-test-N ». Les fichiers partagés avec l'iPhone
+# ne la déclenchent pas tous : la lancer à la main (workflow_dispatch) après
+# un gros changement dans Sources/Services.
+on:
+  push:
+    branches:
+      - test-17d298
+    paths:
+      - 'TV/**'
+      - 'project.yml'
+      - '.github/workflows/build-tvos.yml'
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build-tvos:
+    name: Build tvOS app
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Xcode Project
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec project.yml
+
+      - name: Build tvOS app (unsigned)
+        run: |
+          mkdir -p build
+          set +e
+          xcodebuild -project TwitchUnblock.xcodeproj \
+            -scheme TwitchUnblockTV \
+            -configuration Release \
+            -derivedDataPath build/DD \
+            -destination 'generic/platform=tvOS' \
+            -skipPackagePluginValidation \
+            clean build \
+            MARKETING_VERSION="0.1.${{ github.run_number }}" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" CODE_SIGNING_ALLOWED=NO \
+            > build/xcodebuild.log 2>&1
+          STATUS=$?
+          set -e
+          # Les erreurs de compilation, lisibles directement dans le journal.
+          grep -E "error:" build/xcodebuild.log | sort -u | head -80 || true
+          tail -n 5 build/xcodebuild.log
+          exit $STATUS
+
+      - name: Package IPA
+        run: |
+          APP=build/DD/Build/Products/Release-appletvos/TwitchUnblockTV.app
+          test -d "$APP"
+          rm -rf Payload && mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qr TwitchUnblockTV.ipa Payload
+          ls -la TwitchUnblockTV.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TwitchUnblockTV-IPA
+          path: TwitchUnblockTV.ipa
+
+      - name: Create pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat > notes.md <<'EOF'
+          Version **Apple TV** de test (non signée), construite depuis la branche `test-17d298`.
+
+          Installation : il faut un Mac avec Xcode et l'Apple TV appairée (Xcode → Window → Devices and Simulators).
+          Le plus simple est de construire depuis les sources : `brew install xcodegen`, puis `xcodegen generate`
+          dans le dépôt, ouvrir `TwitchUnblock.xcodeproj`, choisir la cible **TwitchUnblockTV** et son équipe
+          (compte Apple) dans Signing & Capabilities, puis Run sur l'Apple TV. Avec un compte Apple gratuit,
+          l'app expire au bout de 7 jours.
+          EOF
+          gh release create "tv-test-${{ github.run_number }}" TwitchUnblockTV.ipa --prerelease \
+            --target "${{ github.sha }}" \
+            --title "TwitchUnblock TV 0.1.${{ github.run_number }} (test)" \
+            --notes-file notes.md

@@ -76,7 +76,9 @@ enum Theme {
 
     /// Le verre liquide n'existe qu'à partir d'iOS 26.
     static var glassSupported: Bool {
+        #if os(iOS)
         if #available(iOS 26, *) { return true }
+        #endif
         return false
     }
     /// Verre liquide à dessiner : option cochée, sur un système qui le connaît.
@@ -87,14 +89,17 @@ enum Theme {
 /// Verre purement visuel, pas « interactif » : la réaction du verre interactif
 /// au toucher ignore le test de touche des vues — elle s'allumait même quand
 /// l'appui n'atteignait pas le bouton, qui ne faisait alors rien.
+#if os(iOS)
 @available(iOS 26, *)
 private func tuGlass(tint: Color?, clear: Bool) -> Glass {
     var g: Glass = clear ? .clear : .regular
     if let tint { g = g.tint(tint) }
     return g
 }
+#endif
 
 extension View {
+    #if os(iOS)
     /// Fond « verre liquide » (iOS 26) quand l'option est active ; sinon le
     /// fond plein d'avant, découpé à la même forme.
     /// - Parameter clear: verre plus transparent, pour les boutons posés sur
@@ -118,4 +123,11 @@ extension View {
             self.background(fallback).clipShape(shape)
         }
     }
+    #else
+    /// Apple TV : pas de verre liquide ici, le fond plein.
+    func tGlass<S: Shape>(in shape: S, fallback: Color, tint: Color? = nil,
+                          clear: Bool = false) -> some View {
+        self.background(fallback).clipShape(shape)
+    }
+    #endif
 }

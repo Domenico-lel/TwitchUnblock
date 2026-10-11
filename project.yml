@@ -51,6 +51,44 @@ targets:
         # l'app ne se lancerait plus du tout sur iOS 16.0.
         OTHER_LDFLAGS: "$(inherited) -weak_framework ActivityKit"
 
+  # App Apple TV (premier jet, branche de test) : même récupération des
+  # lives et des VODs que l'iPhone (fichiers partagés ci-dessous, sans
+  # WebKit ni UIKit propre à l'iPhone), interface à la télécommande dans TV/.
+  # Construite à part (build-tvos.yml) : un échec ici ne bloque pas l'iPhone.
+  TwitchUnblockTV:
+    type: application
+    platform: tvOS
+    deploymentTarget: "16.0"
+
+    sources:
+      - path: TV
+        excludes:
+          - Info.plist
+      - path: Sources/Constants.swift
+      - path: Sources/Theme.swift
+      - path: Sources/Models.swift
+      - path: Sources/Localization/RussianStrings.swift
+      - path: Sources/Services/Logger.swift
+      - path: Sources/Services/Keychain.swift
+      - path: Sources/Services/TopLanguage.swift
+      - path: Sources/Services/TwitchAPI.swift
+      - path: Sources/Services/LivePlaylistLoader.swift
+      - path: Sources/Services/VodUnmute.swift
+      - path: Sources/Services/SpatialAudio.swift
+
+    # Signature automatique : en local, il suffit de choisir son équipe dans
+    # Xcode. La CI construit sans signer (réglages passés à xcodebuild).
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mxfia19.TwitchUnblockTV
+        PRODUCT_NAME: TwitchUnblockTV
+        INFOPLIST_FILE: TV/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: 5.9
+        CODE_SIGN_STYLE: Automatic
+
   # Live Activity du lecteur (écran verrouillé, Dynamic Island). iOS 16.2
   # minimum : l'app, elle, reste en 16.0 et s'en passe en dessous.
   TwitchUnblockWidgets:
