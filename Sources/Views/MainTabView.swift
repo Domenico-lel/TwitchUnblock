@@ -1035,6 +1035,8 @@ struct MainTabView: View {
         UIApplication.shared.isIdleTimerDisabled = true
         playerMode    = mode
         playerVisible = true
+        // Drops : seulement pendant un direct (relancés par startLiveTimers).
+        if case .live = mode {} else { DropsHeartbeat.shared.stop() }
         errorMsg      = nil
         chatOnly      = false
         vodPlaybackTime = 0
@@ -1252,11 +1254,17 @@ struct MainTabView: View {
                 }
             }
         }
+        // Drops : Twitch ne les compte que si la session du compte charge le
+        // flux, ce que la lecture par proxy ne fait pas (voir DropsHeartbeat).
+        if store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty {
+            DropsHeartbeat.shared.start(login: channel, token: web)
+        }
     }
 
     private func stopLiveTimers() {
         refreshTimer?.invalidate(); refreshTimer = nil
         uptimeTimer?.invalidate();  uptimeTimer  = nil
+        DropsHeartbeat.shared.stop()
     }
 
     private func updateUptime() {

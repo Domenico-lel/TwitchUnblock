@@ -124,6 +124,17 @@ final class AppStore: ObservableObject {
 
     /// Audio spatial (AirPods) : « auto » = choix d'iOS (Centre de contrôle),
     /// « off » = jamais spatialisé dans l'app (voir SpatialAudio).
+    /// Drops : pendant un live qui en a, la session du compte charge le flux
+    /// (voir DropsHeartbeat) ; sans ça, Twitch ne compte rien.
+    @Published var dropsProgress: Bool = true {
+        didSet { UserDefaults.standard.set(dropsProgress, forKey: "cfg_drops_progress") }
+    }
+
+    /// Drops terminés réclamés automatiquement (lu aussi par DropsHeartbeat).
+    @Published var autoClaimDrops: Bool = true {
+        didSet { UserDefaults.standard.set(autoClaimDrops, forKey: "cfg_drops_autoclaim") }
+    }
+
     @Published var spatialAudio: String = "auto" {
         didSet {
             UserDefaults.standard.set(spatialAudio, forKey: SpatialAudio.key)
@@ -399,6 +410,8 @@ final class AppStore: ObservableObject {
         liveSource         = kLiveSourceChoices.contains(savedSource) ? savedSource : "auto"
         if savedSource != liveSource { ud.set(liveSource, forKey: "liveSource") }
         spatialAudio       = ud.string(forKey: SpatialAudio.key) == "off" ? "off" : "auto"
+        dropsProgress      = ud.object(forKey: "cfg_drops_progress")  as? Bool ?? true
+        autoClaimDrops     = ud.object(forKey: "cfg_drops_autoclaim") as? Bool ?? true
         fillScreen         = ud.object(forKey: "cfg_fill_screen") as? Bool ?? false
         landscapeChat      = LandscapeChat(rawValue: ud.string(forKey: "cfg_landscape_chat") ?? "")
                              ?? .column

@@ -156,7 +156,7 @@ struct SettingsView: View {
     // MARK: – Pages de réglages
     /// Les destinations du menu.
     enum Page: Hashable {
-        case account, general, player, chat, labs, other, changelog
+        case account, general, player, chat, drops, labs, other, changelog
 
         var titleKey: String {
             switch self {
@@ -164,6 +164,7 @@ struct SettingsView: View {
             case .general:   return "sec_general"
             case .player:    return "sec_player"
             case .chat:      return "sec_chat"
+            case .drops:     return "drops"
             case .labs:      return "debug_section"
             case .other:     return "sec_other"
             case .changelog: return "changelog"
@@ -175,6 +176,7 @@ struct SettingsView: View {
             case .general:   return "sec_general_sub"
             case .player:    return "sec_player_sub"
             case .chat:      return "sec_chat_sub"
+            case .drops:     return "drops_sub"
             case .labs:      return "sec_labs_sub"
             case .other:     return "sec_other_sub"
             case .changelog: return "changelog_sub"
@@ -186,6 +188,7 @@ struct SettingsView: View {
             case .general:   return "gearshape.fill"
             case .player:    return "play.rectangle.fill"
             case .chat:      return "bubble.left.and.bubble.right.fill"
+            case .drops:     return "shippingbox.fill"
             case .labs:      return "flask.fill"
             case .other:     return "info.circle.fill"
             case .changelog: return "sparkles"
@@ -199,6 +202,7 @@ struct SettingsView: View {
             case .general:   return .tPrimary
             case .player:    return .tOutplayer
             case .chat:      return .tSuccess
+            case .drops:     return .tLive
             case .labs:      return .tWarning
             case .other:     return .tMuted
             case .changelog: return .tVLC
@@ -262,6 +266,8 @@ struct SettingsView: View {
                     menuRow(.player)
                     rowSeparator
                     menuRow(.chat)
+                    rowSeparator
+                    menuRow(.drops)
                     rowSeparator
                     menuRow(.labs)
                     rowSeparator
@@ -466,6 +472,8 @@ struct SettingsView: View {
                     chatBehaviorCard
                     persoCard
                     tailleChatCard
+                case .drops:
+                    DropsPanel(onLogin: { startWebLogin() })
                 case .labs:
                     debugCard
                 case .other:
