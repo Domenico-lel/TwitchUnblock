@@ -700,6 +700,12 @@ struct MainTabView: View {
                 .id("clip-\(cv)-\(Int(clipOffset))")
                 .frame(maxHeight: .infinity)
 
+        } else if let file = offlineChatFile {
+            // VOD téléchargée : le chat gardé avec elle, rejoué sans connexion.
+            VodChatView(videoId: file.path, playbackTime: vodPlaybackTime, style: style, offlineFile: file)
+                .id(file.path)
+                .frame(maxHeight: .infinity)
+
         } else {
             Spacer()
         }
@@ -999,6 +1005,14 @@ struct MainTabView: View {
     private var backToLiveAction: (() -> Void)? {
         guard let ch = dvrSourceChannel else { return nil }
         return { playLive(ch, soft: true) }
+    }
+
+    /// VOD téléchargée en lecture : le chat gardé avec elle, s'il y en a un.
+    private var offlineChatFile: URL? {
+        guard case .recovered(let rec)? = playerMode, rec.streamID.hasPrefix("offline-") else { return nil }
+        let file = VodDownloads.folder(String(rec.streamID.dropFirst("offline-".count)))
+            .appendingPathComponent(VodChatArchive.fileName)
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
     }
 
     /// Identifiant de la VOD en cours de lecture (nil en live).

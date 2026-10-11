@@ -14,7 +14,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().delegate = self
         // Live Activity restée d'une session précédente (app tuée en lecture).
         PlayerActivity.endOthers()
+        // VODs en téléchargement : iOS rend à la session les fichiers arrivés.
+        VodDownloader.shared.activate()
         return true
+    }
+
+    /// Fichiers d'une VOD arrivés pendant que l'app était fermée : iOS la
+    /// relance en arrière-plan le temps de les ranger.
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        guard identifier == VodDownloader.identifier else { completionHandler(); return }
+        VodDownloader.shared.backgroundCompletion = completionHandler
+        VodDownloader.shared.activate()
+        Task { @MainActor in _ = VodDownloads.shared }
     }
 
     // Notification touchée → on ouvre le direct de la chaîne.

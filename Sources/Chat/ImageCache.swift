@@ -77,13 +77,13 @@ final class ImageCache {
             return img
         }
 
-        // 2) Réseau
+        // 2) Réseau (ou fichier gardé avec une VOD téléchargée : file://)
         guard let u = URL(string: url),
               let (data, resp) = try? await URLSession.shared.data(from: u),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
+              (resp as? HTTPURLResponse)?.statusCode == 200 || u.isFileURL,
               let img = Self.decode(data, maxFrames: maxFrames) else { return nil }
 
-        try? data.write(to: file, options: .atomic)
+        if !u.isFileURL { try? data.write(to: file, options: .atomic) }
         memory.setObject(img, forKey: url as NSString, cost: img.bytes)
         return img
     }

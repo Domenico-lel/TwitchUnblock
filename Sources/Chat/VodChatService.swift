@@ -32,8 +32,14 @@ final class VodChatService: ObservableObject {
 
     /// Hash de la persisted query utilisée par le site (capturé au cartographe).
     /// Si Twitch le fait tourner, on bascule automatiquement sur du GraphQL brut.
-    private static let commentsHash =
+    static let commentsHash =
         "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
+
+    // MARK: Hors ligne (chat gardé avec une VOD téléchargée)
+    private var offline: OfflineChat? = nil
+    private var offlineFolder: URL? = nil
+    /// Prochain commentaire à faire passer.
+    private var offlineNext = 0
 
     // MARK: Cycle de vie
     func start(videoId: String) async {
@@ -50,11 +56,30 @@ final class VodChatService: ObservableObject {
         messages = []; buffer = []; seen = []
         cursor = nil; hasNext = true; lastOffset = -1
         fetching = false; isLoading = false; ready = false; errorMsg = nil
+        offline = nil; offlineFolder = nil; offlineNext = 0
+    }
+
+    /// Chat gardé avec une VOD téléchargée : lu sur le disque, sans réseau.
+    func startOffline(file: URL) async {
+        stop()
+        guard let data = try? Data(contentsOf: file),
+              var chat = try? JSONDecoder().decode(OfflineChat.self, from: data) else {
+            errorMsg = "chat"
+            ready = true
+            return
+        }
+        chat.comments.sort { $0.o < $1.o }
+        offline = chat
+        offlineFolder = file.deletingLastPathComponent()
+        videoId = file.path
+        channelLogin = chat.channelLogin
+        ready = true
     }
 
     /// À appeler quand la position de lecture change.
     func update(offset: Double) async {
         guard !videoId.isEmpty, offset.isFinite, offset >= 0 else { return }
+        if offline != nil { releaseOffline(at: offset); return }
 
         // Premier appel, retour en arrière, ou gros saut avant : on recharge la fenêtre.
         if lastOffset < 0 || offset < lastOffset - 2 || offset > lastOffset + 30 {
@@ -80,7 +105,7 @@ final class VodChatService: ObservableObject {
     }
 
     /// Requête des commentaires : par position (première page) ou par curseur (suite).
-    private func commentsQuery(offset: Int?, cursor: String?) -> String {
+    private static func commentsQuery(videoId: String, offset: Int?, cursor: String?) -> String {
         let arg = cursor.map { "after: \"\(gqlStr($0))\"" } ?? "contentOffsetSeconds: \(offset ?? 0)"
         return """
         query {
@@ -122,7 +147,7 @@ final class VodChatService: ObservableObject {
         // 2) Repli : si le hash a tourné côté Twitch, on repasse en GraphQL brut.
         if Self.isPersistedMiss(response) {
             logger.warn("VODCHAT", "Hash périmé → repli GraphQL brut", nil)
-            response = await rawGQL(commentsQuery(offset: offset, cursor: cursor))
+            response = await Self.rawGQL(Self.commentsQuery(videoId: videoId, offset: offset, cursor: cursor))
         }
         guard let res = response else {
             errorMsg = "network"
@@ -160,8 +185,25 @@ final class VodChatService: ObservableObject {
                      "+\(added) · tampon:\(buffer.count) · suite:\(hasNext)")
     }
 
+    /// Une page de commentaires (par position, ou par curseur pour la suite) :
+    /// sert au chat gardé avec une VOD téléchargée (VodChatArchive).
+    static func commentsPage(videoId: String, offset: Int?, cursor: String?)
+        async -> (nodes: [[String: Any]], cursor: String?, hasNext: Bool)? {
+        var vars: [String: Any] = ["videoID": videoId]
+        if let c = cursor { vars["cursor"] = c } else { vars["contentOffsetSeconds"] = offset ?? 0 }
+        var response = await TwitchGQL.shared.query("VideoCommentsByOffsetOrCursor", variables: vars,
+                                                    sha256: commentsHash, token: nil)
+        if isPersistedMiss(response) {
+            response = await rawGQL(commentsQuery(videoId: videoId, offset: offset, cursor: cursor))
+        }
+        guard let comments = ((response?["data"] as? [String: Any])?["video"] as? [String: Any])?["comments"] as? [String: Any],
+              let edges = comments["edges"] as? [[String: Any]] else { return nil }
+        let hasNext = (comments["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? false
+        return (edges.compactMap { $0["node"] as? [String: Any] }, edges.last?["cursor"] as? String, hasNext)
+    }
+
     /// La persisted query a-t-elle été rejetée (hash inconnu de Twitch) ?
-    private static func isPersistedMiss(_ res: [String: Any]?) -> Bool {
+    static func isPersistedMiss(_ res: [String: Any]?) -> Bool {
         guard let res = res else { return true }
         guard let errs = res["errors"] as? [[String: Any]] else { return false }
         return errs.contains {
@@ -179,6 +221,58 @@ final class VodChatService: ObservableObject {
         guard !out.isEmpty else { return }
         for m in out { messages.insert(m, at: 0) }
         if messages.count > maxMessages { messages = Array(messages.prefix(maxMessages)) }
+    }
+
+    /// Hors ligne : `t` est la position dans la vidéo téléchargée, qui
+    /// commence à `base` dans la VOD.
+    private func releaseOffline(at t: Double) {
+        guard let chat = offline else { return }
+        let time = chat.base + t
+        if lastOffset < 0 || t < lastOffset - 2 || t > lastOffset + 30 {
+            // Saut : les derniers messages d'avant cet instant, comme en ligne.
+            messages = []
+            let upTo = chat.comments.firstIndex { $0.o > time } ?? chat.comments.count
+            offlineNext = max(0, upTo - 50)
+        }
+        lastOffset = t
+        var out: [ChatMessage] = []
+        while offlineNext < chat.comments.count, chat.comments[offlineNext].o <= time {
+            out.append(offlineMessage(chat.comments[offlineNext], images: chat.images))
+            offlineNext += 1
+        }
+        guard !out.isEmpty else { return }
+        for m in out { messages.insert(m, at: 0) }
+        if messages.count > maxMessages { messages = Array(messages.prefix(maxMessages)) }
+    }
+
+    private func offlineMessage(_ c: OfflineChat.Comment, images: [String: String]) -> ChatMessage {
+        // Images gardées avec le chat : lues dans le dossier.
+        let local = { (url: String) -> String in
+            guard let file = images[url], let folder = self.offlineFolder else { return url }
+            return folder.appendingPathComponent(VodChatArchive.imagesFolder)
+                .appendingPathComponent(file).absoluteString
+        }
+        let badges = c.badges.compactMap { b in b.u.map { TwitchBadge(id: b.v, url: local($0)) } }
+        let tokens: [MessageToken] = c.tokens.map { t in
+            switch t.k {
+            case "e":
+                return .emote(TwitchEmote(id: t.id ?? t.v, name: t.v, url: local(t.u ?? ""),
+                                          source: EmoteSource(rawValue: t.s ?? "") ?? .twitch))
+            case "m": return .mention(t.v)
+            case "l": return .link(t.v)
+            default:  return .text(t.v)
+            }
+        }
+        let color: Color = c.color.flatMap { $0.isEmpty ? nil : Color.readableChat(hex: $0) } ?? .tPurple
+        return ChatMessage(
+            id: c.id, userId: c.uid, userName: c.login, displayName: c.name,
+            color: color, badges: badges, tokens: tokens,
+            timestamp: Date(timeIntervalSince1970: c.o),
+            isAction: false, isHighlight: false, isFirstMessage: false,
+            replyTo: nil, replyBody: nil, systemMsg: nil,
+            parentMsgId: nil, threadRootId: nil,
+            vodOffsetLabel: Self.formatOffset(c.o)
+        )
     }
 
     static func formatOffset(_ s: Double) -> String {
@@ -249,7 +343,7 @@ final class VodChatService: ObservableObject {
     }
 
     // MARK: GraphQL brut (pas de persisted query : aucun hash a maintenir)
-    private func rawGQL(_ query: String) async -> [String: Any]? {
+    static func rawGQL(_ query: String) async -> [String: Any]? {
         guard let url = URL(string: "https://gql.twitch.tv/gql") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -263,7 +357,7 @@ final class VodChatService: ObservableObject {
     // MARK: Propriétaire de la VOD (pour charger les emotes/badges du canal)
     private func resolveOwner() async {
         let q = "query { video(id: \"\(gqlStr(videoId))\") { owner { id login } } }"
-        guard let json  = await rawGQL(q),
+        guard let json  = await Self.rawGQL(q),
               let d     = json["data"]   as? [String: Any],
               let video = d["video"]     as? [String: Any],
               let owner = video["owner"] as? [String: Any] else {

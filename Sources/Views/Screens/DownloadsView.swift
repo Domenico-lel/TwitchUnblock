@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UserNotifications
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -31,6 +32,7 @@ struct VodDownloadSheet: View {
     @State private var start: Double = 0
     @State private var end: Double = 0
     @State private var restore = true
+    @State private var withChat = true
 
     private var qualities: [String] { sortQualities(Array(context.links.keys)) }
 
@@ -87,9 +89,23 @@ struct VodDownloadSheet: View {
                         }
                         .tint(.tPrimary)
 
+                        // Une VOD supprimée retrouvée n'a plus de chat.
+                        if VodDownloads.hasChat(context.vodId) {
+                            Toggle(isOn: $withChat) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(store.t("dl_chat")).font(.tCardTitle).foregroundColor(.tText)
+                                    Text(store.t("dl_chat_sub"))
+                                        .font(.tMeta).foregroundColor(.tMuted)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .tint(.tPrimary)
+                        }
+
                         TPrimaryButton(title: store.t("dl_download"), icon: "arrow.down.circle.fill", fullWidth: true) {
                             VodDownloads.shared.start(context, quality: quality, start: start.rounded(.down),
-                                                      end: end.rounded(.up), restoreAudio: restore)
+                                                      end: end.rounded(.up), restoreAudio: restore,
+                                                      withChat: withChat)
                             // Prévenir à la fin du téléchargement.
                             Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
                             dismiss()
@@ -207,6 +223,7 @@ struct DownloadRow: View {
     @EnvironmentObject private var store: AppStore
     @ObservedObject private var downloads = VodDownloads.shared
     @State private var confirmDelete = false
+    @State private var exporting = false
 
     private var detail: String {
         var parts = ["\(dlClock(item.start)) → \(dlClock(item.end))", dlBytes(item.bytes)]
@@ -218,7 +235,23 @@ struct DownloadRow: View {
             if item.restored > 0 { parts.append(store.t("dl_restored").replacingOccurrences(of: "{d}", with: dlClock(item.restored))) }
             if item.muted > 0 { parts.append(store.t("dl_muted").replacingOccurrences(of: "{d}", with: dlClock(item.muted))) }
         }
+        if item.withChat == true {
+            parts.append(item.chatCount.map { store.t("dl_chat_count").replacingOccurrences(of: "{n}", with: "\($0)") }
+                         ?? store.t("dl_chat_pending"))
+        }
         return parts.joined(separator: " · ")
+    }
+
+    /// Un seul fichier, proposé à la feuille de partage (Fichiers, AirDrop,
+    /// VLC…), effacé une fois partagé.
+    private func export() {
+        exporting = true
+        Task { @MainActor in
+            let url = await downloads.export(item)
+            exporting = false
+            guard let url else { return }
+            ShareSheet.present(url) { try? FileManager.default.removeItem(at: url) }
+        }
     }
 
     var body: some View {
@@ -266,7 +299,11 @@ struct DownloadRow: View {
             case .paused, .failed:
                 TIconButton(icon: "arrow.clockwise") { downloads.resume(item.id) }
             case .done:
-                EmptyView()
+                if exporting {
+                    ProgressView().tint(.tPrimary).frame(width: 34, height: 34)
+                } else {
+                    TIconButton(icon: "square.and.arrow.up") { export() }
+                }
             }
             TIconButton(icon: "trash", tint: .tDanger) { confirmDelete = true }
         }
@@ -275,5 +312,30 @@ struct DownloadRow: View {
             Button(store.t("cancel"), role: .cancel) {}
             Button(store.t("erase"), role: .destructive) { downloads.delete(item.id) }
         }
+    }
+}
+
+// MARK: – Partage
+/// Feuille de partage d'iOS pour un fichier (Enregistrer dans Fichiers,
+/// AirDrop, ouvrir dans VLC…).
+enum ShareSheet {
+    @MainActor
+    static func present(_ url: URL, completion: @escaping () -> Void) {
+        let sheet = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        sheet.completionWithItemsHandler = { _, _, _, _ in completion() }
+        guard let root = UIApplication.shared.connectedScenes
+            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first?.rootViewController else {
+            completion()
+            return
+        }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        // iPad : la feuille s'ouvre au centre, sans flèche.
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = top.view
+            popover.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        top.present(sheet, animated: true)
     }
 }
