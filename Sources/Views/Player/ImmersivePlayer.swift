@@ -496,6 +496,9 @@ struct ImmersivePlayer: View {
     var onMenu:     () -> Void = {}
     var onRefresh:  () -> Void = {}
     var onToggleChat: () -> Void = {}
+    /// Direct en paysage : le double-tap affiche ou masque le chat ; rend le
+    /// nouvel état, pour le bandeau.
+    var onToggleChatVisibility: () -> LandscapeChat = { .hidden }
     var onSleep:    () -> Void = {}
 
     @EnvironmentObject private var store: AppStore
@@ -564,6 +567,7 @@ struct ImmersivePlayer: View {
          onMenu:     @escaping () -> Void = {},
          onRefresh:  @escaping () -> Void = {},
          onToggleChat: @escaping () -> Void = {},
+         onToggleChatVisibility: @escaping () -> LandscapeChat = { .hidden },
          onSleep:    @escaping () -> Void = {},
          onBackToLive: @escaping () -> Void = {},
          onSeekToArchive: @escaping (Double) -> Void = { _ in }) {
@@ -580,6 +584,7 @@ struct ImmersivePlayer: View {
         self.onReduce = onReduce; self.onClose = onClose
         self.onMenu = onMenu; self.onRefresh = onRefresh
         self.onToggleChat = onToggleChat; self.onSleep = onSleep
+        self.onToggleChatVisibility = onToggleChatVisibility
         self.onBackToLive = onBackToLive; self.onSeekToArchive = onSeekToArchive
         _model = StateObject(wrappedValue: ImmersivePlayerModel(
             url: url, isLive: isLive, savedTime: savedTime,
@@ -671,12 +676,22 @@ struct ImmersivePlayer: View {
             // faisait que la rendre plus haute que large et rogner les côtés.
             .ignoresSafeArea(isLandscape ? SafeAreaRegions.all : [])
 
-            // Zones de double-tap ±10 s (VOD et direct rembobinable).
-            if canScrub {
+            // Double-tap ±10 s, en VOD seulement. En direct, avancer n'a pas
+            // de sens (on est au bord, ou presque) : en paysage, le double-tap
+            // affiche ou masque le chat, et le bouton « Direct » des commandes
+            // ramène au bord après une pause ou un retard.
+            if !isLive {
                 HStack(spacing: 0) {
                     seekZone(seconds: -10, label: "−10 s")
                     seekZone(seconds:  10, label: "+10 s")
                 }
+            } else if isLandscape {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        let mode = onToggleChatVisibility()
+                        flash(store.t(mode.labelKey))
+                    }
             }
 
             if let flash = seekFlash {
@@ -1041,19 +1056,35 @@ struct ImmersivePlayer: View {
 
             HStack(spacing: TSpace.md) {
                 if isLive {
+                    // Au bord : point rouge et durée du live. En retard (pause,
+                    // coupure, retour en arrière), un vrai bouton « Direct » avec
+                    // le retard, qui ramène au bord — le point grisé d'avant
+                    // passait inaperçu.
                     Button {
                         model.goLive(); scheduleAutoHide()
                     } label: {
-                        HStack(spacing: TSpace.xs) {
-                            Circle()
-                                .fill(model.atLiveEdge ? Color.tLive : Color.white.opacity(0.5))
-                                .frame(width: 7, height: 7)
-                            Text(info.uptime.isEmpty ? store.t("live_on") : info.uptime)
-                                .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                        if model.atLiveEdge && model.isPlaying {
+                            HStack(spacing: TSpace.xs) {
+                                Circle().fill(Color.tLive).frame(width: 7, height: 7)
+                                Text(info.uptime.isEmpty ? store.t("live_on") : info.uptime)
+                                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                            }
+                            .foregroundColor(.white)
+                        } else {
+                            HStack(spacing: TSpace.xs) {
+                                Image(systemName: "forward.end.fill").font(.system(size: 10, weight: .bold))
+                                Text(store.t("back_to_live") + lateLabel(model.endTime - model.position))
+                                    .font(.system(size: 12, weight: .bold).monospacedDigit())
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, TSpace.sm)
+                            .frame(height: 28)
+                            .background(Color.tLive.opacity(0.85))
+                            .clipShape(Capsule())
                         }
-                        .foregroundColor(.white)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(store.t("back_to_live"))
 
                     if info.viewers > 0 {
                         overlayMeta(icon: "eye.fill", text: formatViewers(info.viewers))
@@ -1327,6 +1358,14 @@ struct ImmersivePlayer: View {
         }
         zoomBase = 1
         panBase = .zero
+    }
+
+    /// Retard sur le direct, à côté de « Direct » : « · −45 s », « · −2:05 » ;
+    /// rien sous 15 s (une pause à peine commencée).
+    private func lateLabel(_ seconds: Double) -> String {
+        let s = Int(max(0, seconds).rounded())
+        guard s >= 15 else { return "" }
+        return s >= 60 ? " · −\(s / 60):\(String(format: "%02d", s % 60))" : " · −\(s) s"
     }
 
     /// Moitié d'écran qui recule ou avance de 10 s au double-tap.

@@ -757,8 +757,11 @@ func searchCategories(token: String, query: String) async throws -> [TwitchCateg
 
 /// Lives d'une catégorie. Twitch les renvoie déjà par audience décroissante ;
 /// les autres tris sont appliqués côté app (voir CategoriesView).
-func getStreamsByCategory(token: String, gameId: String, cursor: String? = nil) async throws -> (streams: [TwitchStream], cursor: String?) {
+func getStreamsByCategory(token: String, gameId: String, cursor: String? = nil,
+                          lang: String? = nil) async throws -> (streams: [TwitchStream], cursor: String?) {
     var urlStr = "https://api.twitch.tv/helix/streams?first=100&game_id=\(gameId)"
+    // Langue au format Helix (« fr », « zh-hk »).
+    if let lang { urlStr += "&language=\(lang)" }
     if let cursor { urlStr += "&after=\(cursor)" }
     guard let url = URL(string: urlStr) else { return ([], nil) }
     var req = URLRequest(url: url)
@@ -1208,14 +1211,17 @@ func searchCategoriesGQL(query: String) async -> [TwitchCategory]? {
     return edges.compactMap { ($0["node"] as? [String: Any]).flatMap(categoryFromGQL) }
 }
 
-/// Les 100 lives les plus regardés d'une catégorie. nil si Twitch n'a pas répondu.
-func getStreamsByCategoryGQL(gameId: String) async -> [TwitchStream]? {
+/// Les 100 lives les plus regardés d'une catégorie, d'une langue si `lang`
+/// (format Helix). nil si Twitch n'a pas répondu.
+func getStreamsByCategoryGQL(gameId: String, lang: String? = nil) async -> [TwitchStream]? {
     let q = """
-    query($id: ID!) { game(id: $id) { streams(first: 100) { edges { node {
+    query($id: ID!, $langs: [Language!]) { game(id: $id) { streams(first: 100, options: { broadcasterLanguages: $langs }) { edges { node {
       title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
       broadcaster { id login displayName } } } } } }
     """
-    guard let d = await gqlRequest(q, ["id": gameId]),
+    var vars: [String: Any] = ["id": gameId]
+    if let lang { vars["langs"] = [lang.uppercased().replacingOccurrences(of: "-", with: "_")] }
+    guard let d = await gqlRequest(q, vars),
           let edges = ((d["game"] as? [String: Any])?["streams"] as? [String: Any])?["edges"] as? [[String: Any]]
     else { return nil }
     return edges.compactMap { e in

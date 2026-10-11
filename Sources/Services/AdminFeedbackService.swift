@@ -73,6 +73,10 @@ final class AdminFeedbackService: ObservableObject {
     /// Retours où la personne attend une réponse.
     var awaitingCount: Int { items.filter(\.awaiting).count }
 
+    /// Le Worker connaît « Vu » : il rend `seenAt` sur chaque retour. Celui de
+    /// production d'avant refuse l'action (« Action inconnue », HTTP 400).
+    var supportsSeen: Bool { items.contains { $0.seenAt != nil } }
+
     private var token: String?
     private var photoCache: [String: UIImage] = [:]
 

@@ -755,6 +755,7 @@ struct MainTabView: View {
                 onMenu:   { showPlayerMenu = true },
                 onRefresh: { reloadCurrent() },
                 onToggleChat: { withAnimation { store.landscapeChat = store.landscapeChat.next } },
+                onToggleChatVisibility: { withAnimation { store.toggleLandscapeChatVisibility() } },
                 onSleep: { showSleepSheet = true },
                 onBackToLive: { backToLiveAction?() },
                 onSeekToArchive: { offset in

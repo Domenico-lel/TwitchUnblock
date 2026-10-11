@@ -33,7 +33,10 @@ no key to paste. The backend is already hosted and shared by every install.
   Twitch does it. Play/pause, scrubbing, quality, refresh, orientation. Apple's
   native player stays available as a fallback in Settings.
 * ⏩ **Double-tap to skip ±10 s** — consecutive taps add up, so three taps read
-  "+30 s" instead of three separate "+10 s".
+  "+30 s" instead of three separate "+10 s". On a live there's nothing to skip
+  ahead to: in landscape, double-tap shows or hides the chat instead, and once
+  you fall behind (pause, network drop) a red **Live** button with the delay
+  brings you back to the edge.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps.
 * ⚙️ **Quality selector** — every resolution the channel broadcasts, Source
   included.
@@ -147,8 +150,10 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 🏠 **Home** — your followed channels that are live, top streams (France or
   worldwide).
-* 🎮 **Categories** — browse by game, then the live channels in it. Search
-  puts the exact match first ("valorant" → VALORANT), with sharp box art.
+* 🎮 **Categories** — browse by game, then the live channels in it, filtered
+  by language if you like (all, or a single one — kept for every category).
+  Search puts the exact match first ("valorant" → VALORANT), with sharp box
+  art.
 * 🏷 **Stream tags** — language, DropsEnabled… under each live stream, like on
   Twitch.
 * 🔍 **Search** — by streamer name, channel link, or VOD ID.

@@ -224,7 +224,20 @@ final class AppStore: ObservableObject {
     /// Place du chat en paysage : colonne, superposé à l'image, ou replié.
     /// Mémorisé, parce qu'on choisit ça une fois puis on n'y revient plus.
     @Published var landscapeChat: LandscapeChat = .column {
-        didSet { UserDefaults.standard.set(landscapeChat.rawValue, forKey: "cfg_landscape_chat") }
+        didSet {
+            UserDefaults.standard.set(landscapeChat.rawValue, forKey: "cfg_landscape_chat")
+            if landscapeChat != .hidden { lastShownLandscapeChat = landscapeChat }
+        }
+    }
+    /// Dernière façon d'afficher le chat en paysage : le double-tap la remet.
+    private(set) var lastShownLandscapeChat: LandscapeChat = .column
+
+    /// Chat affiché ↔ masqué en paysage (double-tap sur un direct) ; rend le
+    /// nouvel état.
+    @discardableResult
+    func toggleLandscapeChatVisibility() -> LandscapeChat {
+        landscapeChat = landscapeChat == .hidden ? lastShownLandscapeChat : .hidden
+        return landscapeChat
     }
 
     // MARK: – Apparence du chat
@@ -343,6 +356,12 @@ final class AppStore: ObservableObject {
     /// Langue du top des lives ; nil = celle de l'appareil.
     @Published var topLang: String? = nil {
         didSet { UserDefaults.standard.set(topLang, forKey: "cfg_top_lang") }
+    }
+
+    /// Langue des lives dans les catégories (« fr »…) ; nil = toutes. La
+    /// même pour toutes les catégories.
+    @Published var categoryLang: String? = nil {
+        didSet { UserDefaults.standard.set(categoryLang, forKey: "cfg_category_lang") }
     }
 
     // MARK: – Apparence
@@ -486,6 +505,7 @@ final class AppStore: ObservableObject {
         fillScreen         = ud.object(forKey: "cfg_fill_screen") as? Bool ?? false
         landscapeChat      = LandscapeChat(rawValue: ud.string(forKey: "cfg_landscape_chat") ?? "")
                              ?? .column
+        if landscapeChat != .hidden { lastShownLandscapeChat = landscapeChat }
         chatFontSize       = ud.object(forKey: "cfg_chat_font")    as? Double ?? 13
         chatSpacing        = ud.object(forKey: "cfg_chat_spacing") as? Double ?? 8
         chatBadgeScale     = ud.object(forKey: "cfg_chat_badge")   as? Double ?? 1
@@ -497,6 +517,7 @@ final class AppStore: ObservableObject {
         chatShowDeleted    = ud.object(forKey: "cfg_chat_deleted")      as? Bool ?? false
         shareUsage         = ud.object(forKey: "cfg_share_usage") as? Bool ?? true
         topLang            = ud.string(forKey: "cfg_top_lang")
+        categoryLang       = ud.string(forKey: "cfg_category_lang").flatMap { TopLanguage.codes.contains($0) ? $0 : nil }
         localFollows       = ud.stringArray(forKey: "local_follows") ?? []
         followedCategories = (ud.array(forKey: "followed_categories") as? [[String: String]] ?? []).compactMap { d in
             guard let id = d["id"] else { return nil }

@@ -18,6 +18,7 @@ struct AdminFeedbackList: View {
     @State private var filter = ""
     @State private var testing = false
     @State private var testResult: Bool? = nil
+    @State private var seenUnsupported = false
 
     private var shown: [AdminFeedbackItem] {
         admin.items
@@ -44,6 +45,7 @@ struct AdminFeedbackList: View {
                     .contextMenu {
                         if f.status == "new" || f.awaiting {
                             Button {
+                                guard admin.supportsSeen else { seenUnsupported = true; return }
                                 Task { _ = await admin.markSeen(f.key) }
                             } label: {
                                 Label(store.t("adm_mark_seen"), systemImage: "eye")
@@ -57,6 +59,9 @@ struct AdminFeedbackList: View {
         .background(Color.tDark.ignoresSafeArea())
         .navigationTitle(store.t("adm_feedback"))
         .navigationBarTitleDisplayMode(.inline)
+        .alert(store.t("adm_seen_needs_update"), isPresented: $seenUnsupported) {
+            Button("OK", role: .cancel) {}
+        }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button(store.t("close")) { dismiss() }
@@ -183,6 +188,7 @@ struct AdminFeedbackThread: View {
     @State private var sending = false
     @State private var failed = false
     @State private var confirmDelete = false
+    @State private var seenUnsupported = false
 
     private var item: AdminFeedbackItem? { admin.items.first { $0.key == key } }
     private var thread: [FeedbackMessage] {
@@ -222,6 +228,7 @@ struct AdminFeedbackThread: View {
             ToolbarItem(placement: .primaryAction) {
                 if let item, item.status == "new" || item.awaiting {
                     Button {
+                        guard admin.supportsSeen else { seenUnsupported = true; return }
                         Task { if !(await admin.markSeen(key)) { failed = true } }
                     } label: {
                         Image(systemName: "eye")
@@ -323,6 +330,7 @@ struct AdminFeedbackThread: View {
                 ForEach(feedbackStatuses, id: \.self) { s in
                     TChip(title: store.t("fb_status_\(s)"), isOn: f.status == s) {
                         guard f.status != s else { return }
+                        if s == "seen", !admin.supportsSeen { seenUnsupported = true; return }
                         Task { if !(await admin.setStatus(key, s)) { failed = true } }
                     }
                 }
@@ -336,6 +344,10 @@ struct AdminFeedbackThread: View {
         VStack(alignment: .leading, spacing: TSpace.sm) {
             if failed {
                 Text(store.t("adm_failed")).font(.tMeta).foregroundColor(.tDanger)
+            }
+            if seenUnsupported {
+                Text(store.t("adm_seen_needs_update")).font(.tMeta).foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             FeedbackPhotoPicker(images: $images)
             HStack(alignment: .bottom, spacing: TSpace.sm) {
