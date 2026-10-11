@@ -32,6 +32,12 @@ struct TwitchUnblockApp: App {
                         // fermer l'app ensuite sans prévenir.
                         store.flushToCloud(force: true)
                         LiveNotifier.schedule()
+                        VodDownloads.shared.sceneInactive()
+                    case .inactive:
+                        // Téléchargements : ce qui manque passe à iOS, avant
+                        // que l'app soit en arrière-plan (sinon iOS attend
+                        // le Wi-Fi ou la charge pour s'y mettre).
+                        VodDownloads.shared.sceneInactive()
                     case .active:
                         // Le service ne laisse passer qu'un ping par heure :
                         // on compte des journées actives.
@@ -48,9 +54,10 @@ struct TwitchUnblockApp: App {
                         Task { await FeedbackStore.shared.refresh() }
                         // ntfy : chaînes suivies changées (ou une fois par jour).
                         Task { await NtfyNotifier.sync(lang: store.lang) }
-                        // Téléchargements : ce qui manque est redemandé (app
-                        // fermée en la balayant…), les chats inachevés repris.
-                        VodDownloads.shared.reconcile()
+                        // Téléchargements : l'app reprend la main sur iOS,
+                        // redemande ce qui manque (app fermée en la
+                        // balayant…) et reprend les chats inachevés.
+                        VodDownloads.shared.sceneActive()
                     default:
                         break
                     }

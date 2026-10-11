@@ -229,8 +229,14 @@ struct DownloadRow: View {
         var parts = ["\(dlClock(item.start)) → \(dlClock(item.end))", dlBytes(item.bytes)]
         switch item.state {
         case .paused: parts.append(store.t("dl_paused"))
-        case .failed: parts.append(store.t("dl_failed"))
-        case .downloading: parts.append("\(Int(item.progress * 100)) %")
+        case .failed: parts.append(failure)
+        case .downloading:
+            if item.total == 0 {
+                parts.append(store.t("dl_preparing"))
+            } else {
+                parts.append("\(Int(item.progress * 100)) %")
+                parts.append("\(item.done)/\(item.total)")
+            }
         case .done:
             if item.restored > 0 { parts.append(store.t("dl_restored").replacingOccurrences(of: "{d}", with: dlClock(item.restored))) }
             if item.muted > 0 { parts.append(store.t("dl_muted").replacingOccurrences(of: "{d}", with: dlClock(item.muted))) }
@@ -240,6 +246,20 @@ struct DownloadRow: View {
                          ?? store.t("dl_chat_pending"))
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// Pourquoi il s'est arrêté, quand on le sait.
+    private var failure: String {
+        let reason = item.reason ?? ""
+        switch reason {
+        case VodDownloadFailure.network: return store.t("dl_failed_network")
+        case VodDownloadFailure.space: return store.t("dl_failed_space")
+        case VodDownloadFailure.playlist: return store.t("dl_failed_playlist")
+        default:
+            guard reason.hasPrefix("http:") else { return store.t("dl_failed") }
+            return store.t("dl_failed_refused")
+                .replacingOccurrences(of: "{c}", with: "HTTP " + String(reason.dropFirst(5)))
+        }
     }
 
     /// Un seul fichier, proposé à la feuille de partage (Fichiers, AirDrop,
@@ -283,7 +303,7 @@ struct DownloadRow: View {
                     Text([item.streamer, item.quality].filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.tMeta).foregroundColor(.tPurple).lineLimit(1)
                     Text(detail)
-                        .font(.tMeta).foregroundColor(.tMuted).lineLimit(2)
+                        .font(.tMeta).foregroundColor(item.state == .failed ? .tDanger : .tMuted).lineLimit(3)
                     if item.state != .done {
                         ProgressView(value: item.progress).tint(.tPrimary)
                     }

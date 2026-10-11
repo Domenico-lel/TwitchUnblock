@@ -70,9 +70,11 @@ no key to paste. The backend is already hosted and shared by every install.
   played with the original chat replayed.
 * 📥 **Offline downloads** — download a whole VOD or just a part of it (from one
   time to another, from where you are, the next 10 minutes) in the quality you
-  pick, then watch it without a connection from the My VODs tab. Downloads keep
-  going in the background, even with the app closed (resumed if you swipe it
-  away). Parts muted for copyrighted music keep their original sound when
+  pick, then watch it without a connection from the My VODs tab. With the app
+  open, the app downloads the segments itself (four at a time, any error shown
+  under the download); when you leave it, what's left goes to iOS's background
+  downloads, in batches, and keeps going even with the app closed (resumed if
+  you swipe it away). Parts muted for copyrighted music keep their original sound when
   Twitch still has it (a day or two after the stream). The chat can be kept
   too and is replayed offline, emotes included. Export a download as a single
   file (Files, AirDrop, VLC). Pause, resume and delete from the list.

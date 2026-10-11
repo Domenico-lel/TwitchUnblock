@@ -734,7 +734,7 @@ final class AppStore: ObservableObject {
 
 /// Tâche d'arrière-plan à clore une seule fois, quel que soit le premier
 /// des deux à finir : la requête, ou le délai accordé par iOS.
-private final class BackgroundTaskBox {
+final class BackgroundTaskBox {
     var id: UIBackgroundTaskIdentifier = .invalid
     // Pas d'annotation d'acteur : appelé depuis le délai d'expiration d'iOS,
     // dont l'isolation varie selon la version du SDK. Toujours sur le fil

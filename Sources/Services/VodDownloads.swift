@@ -10,10 +10,15 @@ import UserNotifications
 //  passage, posés dans un dossier avec une playlist locale, puis lus par le
 //  mini-serveur de l'app (OfflineServer).
 //
-//  Les segments passent par une session de téléchargement d'arrière-plan
-//  d'iOS (VodDownloader) : ils continuent de venir app en arrière-plan, ou
-//  fermée par iOS. Si on la ferme en la balayant, iOS annule tout : ce qui
-//  manque est redemandé au retour, sans retélécharger ce qui est là.
+//  App ouverte, c'est l'app qui télécharge (VodFetcher : une session
+//  ordinaire, quatre fichiers à la fois) : rapide, et toute erreur se voit.
+//  Dès qu'on la quitte, ce qui manque passe à la session de téléchargement
+//  d'arrière-plan d'iOS (VodDownloader), qui continue sans elle, par
+//  fournées ; au retour, l'app reprend la main. Tout confier à iOS dès le
+//  départ ne marchait pas : des centaines de tâches d'arrière-plan d'un
+//  coup, iOS pouvait les laisser en attente — le téléchargement restait à
+//  0 %. Si on ferme l'app en la balayant, iOS annule tout : ce qui manque
+//  est redemandé au retour, sans retélécharger ce qui est là.
 //
 //  Passages coupés pour musique protégée : un jour ou deux après le live, le
 //  CDN de Twitch garde encore le son d'origine (« N.ts » à la place de
@@ -51,6 +56,8 @@ struct VodDownload: Identifiable, Codable, Equatable {
     /// n'est pas fini).
     var withChat: Bool? = nil
     var chatCount: Int? = nil
+    /// Pourquoi il s'est arrêté (VodDownloadFailure, ou « http:403 »…).
+    var reason: String? = nil
 
     var duration: Double { max(0, end - start) }
     var progress: Double { total > 0 ? min(1, Double(done) / Double(total)) : 0 }
@@ -99,7 +106,8 @@ struct VodDownloadPlan: Codable {
     var fileCount: Int { segments.count + (map == nil ? 0 : 1) }
 
     static func fetch(_ playlist: URL) async -> String? {
-        guard let (data, resp) = try? await URLSession.shared.data(from: playlist),
+        let req = URLRequest(url: playlist, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         let text = String(decoding: data, as: UTF8.self)
         return text.hasPrefix("#EXTM3U") ? text : nil
@@ -149,18 +157,42 @@ struct VodDownloadPlan: Codable {
     }
 }
 
+/// Raisons d'arrêt montrées sous un téléchargement (avec « http:<code> »).
+enum VodDownloadFailure {
+    static let network = "network"
+    static let space = "space"
+    static let playlist = "playlist"
+}
+
 // MARK: – Gestionnaire
 @MainActor
 final class VodDownloads: ObservableObject {
     static let shared = VodDownloads()
 
+    /// Fichiers demandés à la fois, app ouverte.
+    nonisolated static var parallel: Int { 4 }
+    /// Fichiers confiés à iOS d'un coup, app quittée : par milliers, iOS les
+    /// traîne. La fournée suivante part quand celle-ci est finie (iOS réveille
+    /// l'app pour ça).
+    nonisolated static var batchSize: Int { 300 }
+
     @Published private(set) var items: [VodDownload] = []
-    /// Préparations en cours (playlist, sondage des originaux, mise en file).
+    /// Préparations en cours (playlist, sondage des originaux).
     private var preparing: [String: Task<Void, Never>] = [:]
+    /// Téléchargements faits par l'app (app ouverte).
+    private var runners: [String: Task<Void, Never>] = [:]
     /// Chats en cours de téléchargement.
     private var chats: [String: Task<Void, Never>] = [:]
-    /// Fichiers perdus pour de bon (après les essais), par téléchargement.
-    private var failures: [String: Int] = [:]
+    /// Cases remplies (un segment, ou sa version muette) par téléchargement
+    /// en cours : un fichier reçu deux fois ne compte qu'une fois.
+    private var present: [String: Set<String>] = [:]
+    /// Côté iOS : fichiers abandonnés (refusés, après les nouveaux essais),
+    /// pas redemandés avant le retour dans l'app.
+    private var lost: [String: Set<String>] = [:]
+    /// Côté iOS : vérifications de fin de fournée prévues.
+    private var batchChecks: [String: Task<Void, Never>] = [:]
+    /// App à l'écran : c'est elle qui télécharge.
+    private var foreground = false
     private var unsaved = 0
 
     /// Application Support/Downloads, exclu des sauvegardes iCloud.
@@ -224,8 +256,12 @@ final class VodDownloads: ObservableObject {
 
     func resume(_ id: String) {
         guard let current = item(id), current.state != .done else { return }
-        update(id) { $0.state = .downloading }
-        failures[id] = 0
+        update(id) {
+            $0.state = .downloading
+            $0.reason = nil
+        }
+        // On réessaie aussi ce qu'iOS avait abandonné.
+        lost[id] = nil
         save()
         prepare(id)
     }
@@ -238,6 +274,8 @@ final class VodDownloads: ObservableObject {
 
     func delete(_ id: String) {
         stopWork(id)
+        present[id] = nil
+        lost[id] = nil
         try? FileManager.default.removeItem(at: Self.folder(id))
         items.removeAll { $0.id == id }
         save()
@@ -246,19 +284,57 @@ final class VodDownloads: ObservableObject {
     private func stopWork(_ id: String) {
         preparing[id]?.cancel()
         preparing[id] = nil
+        runners[id]?.cancel()
+        runners[id] = nil
         chats[id]?.cancel()
         chats[id] = nil
+        batchChecks[id]?.cancel()
+        batchChecks[id] = nil
         VodDownloader.shared.cancel(item: id)
     }
 
-    /// Au lancement et au retour dans l'app : ce qui manque est redemandé
-    /// (app fermée en la balayant, réseau perdu…) et les chats inachevés
-    /// repris. Les fichiers encore attendus par iOS ne sont pas redemandés.
-    func reconcile() {
-        for d in items where d.state == .downloading { prepare(d.id) }
+    // MARK: App à l'écran, ou quittée
+    /// Au lancement et au retour dans l'app : elle reprend la main sur ce
+    /// qu'iOS téléchargeait (ses tâches annulées, les fichiers reçus restent),
+    /// redemande ce qui manque (app fermée en la balayant, réseau perdu…) et
+    /// reprend les chats inachevés.
+    func sceneActive() {
+        foreground = true
+        let generation = VodDownloader.shared.generation
+        for d in items where d.state == .downloading {
+            batchChecks[d.id]?.cancel()
+            batchChecks[d.id] = nil
+            // Seulement les fournées déjà parties : pas une qui partirait
+            // juste après (app aussitôt quittée). Redit un peu plus tard :
+            // une fournée encore en création au retour y échappait.
+            VodDownloader.shared.cancel(item: d.id, upTo: generation)
+            prepare(d.id)
+        }
+        let ids = items.filter { $0.state == .downloading }.map(\.id)
+        if !ids.isEmpty {
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                for id in ids { VodDownloader.shared.cancel(item: id, upTo: generation) }
+            }
+        }
         for d in items where d.state != .paused && d.withChat == true && d.chatCount == nil {
             startChat(d.id)
         }
+    }
+
+    /// L'app quitte l'écran : ce qui manque passe à iOS, qui continue sans
+    /// elle. Dès qu'elle n'est plus active, avant d'être en arrière-plan : une
+    /// tâche créée app en arrière-plan, iOS la garde pour quand ça l'arrange
+    /// (Wi-Fi, en charge).
+    func sceneInactive() {
+        guard foreground else { return }
+        foreground = false
+        for d in items where d.state == .downloading && runners[d.id] != nil {
+            runners[d.id]?.cancel()
+            runners[d.id] = nil
+            if let plan = Self.loadPlan(d.id) { handOff(d.id, plan) }
+        }
+        // Préparation en cours : elle passera la main elle-même.
     }
 
     /// Lecture hors ligne : la playlist locale, servie par OfflineServer.
@@ -271,61 +347,62 @@ final class VodDownloads: ObservableObject {
 
     // MARK: Préparation
     private func prepare(_ id: String) {
-        guard preparing[id] == nil else { return }
-        preparing[id] = Task { [weak self] in
-            await self?.runPrepare(id)
-            self?.preparing[id] = nil
+        guard preparing[id] == nil, runners[id] == nil else { return }
+        preparing[id] = Task {
+            let plan = await self.makePlan(id)
+            // Arrêtée (pause, suppression) : une autre a peut-être pris sa place.
+            guard !Task.isCancelled else { return }
+            self.preparing[id] = nil
+            guard let plan, self.item(id)?.state == .downloading else { return }
+            self.proceed(id, plan)
         }
     }
 
-    private func runPrepare(_ id: String) async {
-        guard let current = item(id) else { return }
-        let folder = Self.folder(id)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-
-        var plan = Self.loadPlan(id)
-        if plan == nil {
-            logger.info("DOWNLOAD", "Téléchargement…", "\(current.title) · \(current.quality)")
-            guard let url = URL(string: current.playlist), let text = await VodDownloadPlan.fetch(url) else {
-                fail(id)
-                return
-            }
-            var made = VodDownloadPlan.make(text, base: url, from: current.start, to: current.end)
-            guard !made.segments.isEmpty else { fail(id); return }
-            if current.restoreAudio { made.useOriginals = await Self.originalsAvailable(made) }
-            Self.savePlan(made, id)
-            plan = made
+    /// Plan gardé sur le disque, ou fait d'après la playlist (et le sondage
+    /// des originaux).
+    private func makePlan(_ id: String) async -> VodDownloadPlan? {
+        guard let current = item(id) else { return nil }
+        try? FileManager.default.createDirectory(at: Self.folder(id), withIntermediateDirectories: true)
+        if let saved = Self.loadPlan(id) { return saved }
+        logger.info("DOWNLOAD", "Téléchargement…", "\(current.title) · \(current.quality)")
+        guard let url = URL(string: current.playlist), let text = await VodDownloadPlan.fetch(url) else {
+            if !Task.isCancelled { fail(id, VodDownloadFailure.playlist) }
+            return nil
         }
-        guard let plan, !Task.isCancelled else { return }
+        var made = VodDownloadPlan.make(text, base: url, from: current.start, to: current.end)
+        guard !made.segments.isEmpty else { fail(id, VodDownloadFailure.playlist); return nil }
+        if current.restoreAudio { made.useOriginals = await Self.originalsAvailable(made) }
+        guard !Task.isCancelled else { return nil }
+        Self.savePlan(made, id)
+        return made
+    }
 
-        // Déjà là (reprise) : compté, pas redemandé.
-        let (present, bytes) = Self.scan(plan, folder: folder)
+    /// Plan prêt : ce qui est déjà là est compté, le reste téléchargé — par
+    /// l'app si elle est à l'écran, par iOS sinon.
+    private func proceed(_ id: String, _ plan: VodDownloadPlan) {
+        let (names, bytes) = Self.scan(plan, folder: Self.folder(id))
+        present[id] = names
         update(id) {
             $0.total = plan.fileCount
-            $0.done = present
+            $0.done = names.count
             $0.bytes = bytes
         }
-        if current.withChat == true, current.chatCount == nil { startChat(id) }
-        if present >= plan.fileCount { finalize(id, plan); return }
-
-        let pending = await VodDownloader.shared.pendingFiles(item: id)
-        guard !Task.isCancelled, item(id)?.state == .downloading else { return }
-        let jobs = Self.missingJobs(plan, item: id, folder: folder, skipping: pending)
-        VodDownloader.shared.enqueue(jobs)
-        if !jobs.isEmpty { logger.info("DOWNLOAD", "Fichiers demandés", "\(jobs.count) · \(id)") }
+        if let d = item(id), d.withChat == true, d.chatCount == nil { startChat(id) }
+        if names.count >= plan.fileCount { finalize(id, plan); return }
+        if foreground { runInApp(id, plan) } else { handOff(id, plan) }
     }
 
-    /// Ce qui manque sur le disque et n'est pas déjà attendu.
+    /// Ce qui manque sur le disque, sauf ce qui est à laisser de côté.
     nonisolated private static func missingJobs(_ plan: VodDownloadPlan, item: String, folder: URL,
-                                                skipping pending: Set<String>) -> [VodDownloader.Job] {
+                                                skipping skipped: Set<String>) -> [VodDownloader.Job] {
         let fm = FileManager.default
         let has = { (name: String) in fm.fileExists(atPath: folder.appendingPathComponent(name).path) }
         var jobs: [VodDownloader.Job] = []
-        if let map = plan.map, let name = plan.mapFileName, !has(name), !pending.contains(name) {
+        if let map = plan.map, let name = plan.mapFileName, !has(name), !skipped.contains(name) {
             jobs.append(.init(item: item, kind: .initSegment, url: map, fallback: nil, fileName: name))
         }
         for s in plan.segments where !has(s.fileName) && !has(s.mutedFileName)
-            && !pending.contains(s.fileName) && !pending.contains(s.mutedFileName) {
+            && !skipped.contains(s.fileName) && !skipped.contains(s.mutedFileName) {
             if s.original == nil {
                 jobs.append(.init(item: item, kind: .normal, url: s.url, fallback: nil, fileName: s.fileName))
             } else if plan.useOriginals, let original = s.original {
@@ -337,40 +414,160 @@ final class VodDownloads: ObservableObject {
         return jobs
     }
 
-    // MARK: Nouvelles du téléchargeur
-    func fileDone(item id: String, size: Int64) {
-        guard let i = items.firstIndex(where: { $0.id == id }), items[i].state == .downloading else { return }
-        items[i].done += 1
-        items[i].bytes += size
-        unsaved += 1
-        if unsaved >= 25 { save() }
-        settleIfFinished(id)
-    }
-
-    func fileFailed(item id: String) {
-        failures[id, default: 0] += 1
-        settleIfFinished(id)
-    }
-
-    /// Plus rien d'attendu : fini (playlist écrite) ou interrompu (à reprendre).
-    private func settleIfFinished(_ id: String) {
-        guard let d = item(id), d.state == .downloading, preparing[id] == nil,
-              d.done + (failures[id] ?? 0) >= d.total else { return }
-        Task {
-            guard let plan = Self.loadPlan(id) else { fail(id); return }
-            let (present, bytes) = Self.scan(plan, folder: Self.folder(id))
-            if present >= plan.fileCount { finalize(id, plan); return }
-            // Compteurs faussés (fichier reçu deux fois…) : le disque fait foi.
-            update(id) { $0.done = present; $0.bytes = bytes }
-            if await VodDownloader.shared.pendingFiles(item: id).isEmpty { fail(id) }
+    // MARK: Téléchargement par l'app
+    private func runInApp(_ id: String, _ plan: VodDownloadPlan) {
+        guard runners[id] == nil else { return }
+        let folder = Self.folder(id)
+        let jobs = Self.missingJobs(plan, item: id, folder: folder, skipping: [])
+        logger.info("DOWNLOAD", "Téléchargement par l'app", "\(jobs.count) fichiers · \(id)")
+        runners[id] = Task {
+            // Premier problème rencontré : la raison montrée si des fichiers manquent.
+            var problem: String? = nil
+            await withTaskGroup(of: VodFetcher.Outcome.self) { group in
+                var queue = jobs[...]
+                for _ in 0 ..< Self.parallel {
+                    guard let job = queue.popFirst() else { break }
+                    group.addTask { await VodFetcher.fetch(job, into: folder) }
+                }
+                while let result = await group.next() {
+                    switch result {
+                    case .saved(let name, let size):
+                        self.fileArrived(item: id, name: name, size: size)
+                    case .refused(let reason):
+                        // Les autres fichiers continuent.
+                        if problem == nil {
+                            problem = reason
+                            logger.warn("DOWNLOAD", "Fichier refusé", "\(reason) · \(id)")
+                        }
+                    case .fatal(let reason):
+                        // Réseau perdu, plus de place : inutile d'insister.
+                        problem = reason
+                        queue.removeAll()
+                        group.cancelAll()
+                    case .cancelled:
+                        break
+                    }
+                    if Task.isCancelled {
+                        queue.removeAll()
+                        group.cancelAll()
+                    }
+                    if let job = queue.popFirst() {
+                        group.addTask { await VodFetcher.fetch(job, into: folder) }
+                    }
+                }
+            }
+            // Arrêté (pause, app quittée) : rien à conclure.
+            guard !Task.isCancelled else { return }
+            self.runners[id] = nil
+            self.settle(id, plan, problem: problem)
         }
     }
 
-    private func fail(_ id: String) {
+    /// Fin du téléchargement par l'app : tout est là, ou on dit pourquoi.
+    private func settle(_ id: String, _ plan: VodDownloadPlan, problem: String?) {
         guard item(id)?.state == .downloading else { return }
-        update(id) { $0.state = .failed }
+        let (names, bytes) = Self.scan(plan, folder: Self.folder(id))
+        present[id] = names
+        update(id) {
+            $0.done = names.count
+            $0.bytes = bytes
+        }
+        if names.count >= plan.fileCount { finalize(id, plan); return }
+        fail(id, problem)
+    }
+
+    // MARK: Fichiers reçus (app ou iOS)
+    /// « seg_00012.muted.ts » occupe la case de « seg_00012.ts ».
+    nonisolated private static func slot(_ name: String) -> String {
+        name.replacingOccurrences(of: ".muted.", with: ".")
+    }
+
+    func fileArrived(item id: String, name: String, size: Int64) {
+        guard item(id)?.state == .downloading else { return }
+        if present[id] == nil {
+            // App relancée par iOS pour lui livrer ses fichiers : le disque fait foi.
+            guard let plan = Self.loadPlan(id) else { return }
+            let (names, bytes) = Self.scan(plan, folder: Self.folder(id))
+            present[id] = names
+            update(id) {
+                $0.total = plan.fileCount
+                $0.done = names.count
+                $0.bytes = bytes
+            }
+        } else if present[id]?.insert(Self.slot(name)).inserted == true {
+            let count = present[id]?.count ?? 0
+            update(id) {
+                $0.done = count
+                $0.bytes += size
+            }
+        } else {
+            return
+        }
+        unsaved += 1
+        if unsaved >= 25 { save() }
+        // Par l'app, la fin se décide quand tout a été demandé (settle).
+        if runners[id] == nil, let now = item(id), now.total > 0, now.done >= now.total,
+           let plan = Self.loadPlan(id) {
+            finalize(id, plan)
+        }
+    }
+
+    /// Fichier abandonné par iOS (refusé, après le repli muet et les nouveaux
+    /// essais) : pas redemandé avant le retour dans l'app, qui dira pourquoi.
+    func fileLost(item id: String, name: String) {
+        lost[id, default: []].insert(name)
+    }
+
+    // MARK: Côté iOS (app quittée)
+    /// Fournée suivante confiée à iOS : au plus `batchSize` fichiers.
+    private func handOff(_ id: String, _ plan: VodDownloadPlan) {
+        let jobs = Self.missingJobs(plan, item: id, folder: Self.folder(id), skipping: lost[id] ?? [])
+        guard !jobs.isEmpty else { return }
+        let batch = Array(jobs.prefix(Self.batchSize))
+        VodDownloader.shared.enqueue(batch)
+        logger.info("DOWNLOAD", "Suite confiée à iOS", "\(batch.count)/\(jobs.count) fichiers · \(id)")
+    }
+
+    /// Nouvelles d'iOS : quelques secondes après le dernier fichier arrivé,
+    /// on regarde si la fournée est finie, pour lancer la suivante.
+    func backgroundProgress(item id: String) {
+        guard !foreground else { return }
+        batchChecks[id]?.cancel()
+        batchChecks[id] = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self.checkBatch(id)
+        }
+    }
+
+    /// iOS a livré tout ce qu'il avait (app réveillée pour ça) : fournées
+    /// suivantes, avant de lui rendre la main.
+    func backgroundEventsDelivered() async {
+        for d in items where d.state == .downloading {
+            batchChecks[d.id]?.cancel()
+            batchChecks[d.id] = nil
+            await checkBatch(d.id)
+        }
+    }
+
+    private func checkBatch(_ id: String) async {
+        guard !foreground, item(id)?.state == .downloading, runners[id] == nil,
+              let pending = await VodDownloader.shared.pendingFiles(item: id), pending.isEmpty,
+              !foreground, item(id)?.state == .downloading, let plan = Self.loadPlan(id) else { return }
+        let (names, _) = Self.scan(plan, folder: Self.folder(id))
+        if names.count >= plan.fileCount { finalize(id, plan); return }
+        handOff(id, plan)
+    }
+
+    // MARK: Fin
+    private func fail(_ id: String, _ reason: String?) {
+        guard item(id)?.state == .downloading else { return }
+        update(id) {
+            $0.state = .failed
+            $0.reason = reason
+        }
         save()
-        logger.warn("DOWNLOAD", "Téléchargement interrompu", id)
+        logger.warn("DOWNLOAD", "Téléchargement interrompu", "\(reason ?? "?") · \(id)")
     }
 
     private func finalize(_ id: String, _ plan: VodDownloadPlan) {
@@ -391,12 +588,19 @@ final class VodDownloads: ObservableObject {
         do {
             try Self.writePlaylist(plan, folder: folder, names: names)
         } catch {
-            fail(id)
+            fail(id, VodDownloadFailure.space)
             return
         }
+        runners[id]?.cancel()
+        runners[id] = nil
+        present[id] = nil
+        lost[id] = nil
+        // Doublons encore attendus d'iOS : plus utiles.
+        VodDownloader.shared.cancel(item: id)
         update(id) {
             $0.state = .done
             $0.done = $0.total
+            $0.reason = nil
             $0.restored = restored
             $0.muted = muted
         }
@@ -485,18 +689,18 @@ final class VodDownloads: ObservableObject {
         if let data = try? JSONEncoder().encode(plan) { try? data.write(to: planURL(id), options: .atomic) }
     }
 
-    /// Fichiers déjà là (segment, ou sa version muette) et leur taille.
-    nonisolated private static func scan(_ plan: VodDownloadPlan, folder: URL) -> (Int, Int64) {
+    /// Cases déjà remplies (segment, ou sa version muette) et leur taille.
+    nonisolated private static func scan(_ plan: VodDownloadPlan, folder: URL) -> (Set<String>, Int64) {
         let urls = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.fileSizeKey])) ?? []
         var sizes: [String: Int64] = [:]
         for u in urls { sizes[u.lastPathComponent] = Int64((try? u.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
-        var present = 0
+        var names: Set<String> = []
         var bytes: Int64 = 0
-        if let name = plan.mapFileName, let size = sizes[name] { present += 1; bytes += size }
+        if let name = plan.mapFileName, let size = sizes[name] { names.insert(name); bytes += size }
         for s in plan.segments {
-            if let size = sizes[s.fileName] ?? sizes[s.mutedFileName] { present += 1; bytes += size }
+            if let size = sizes[s.fileName] ?? sizes[s.mutedFileName] { names.insert(s.fileName); bytes += size }
         }
-        return (present, bytes)
+        return (names, bytes)
     }
 
     /// Son d'origine encore là ? Quatre premiers passages coupés : tous
@@ -527,7 +731,102 @@ final class VodDownloads: ObservableObject {
     }
 }
 
-// MARK: – Téléchargements en arrière-plan
+// MARK: – Téléchargement par l'app (app ouverte)
+/// Une session ordinaire : pour des centaines de petits fichiers, bien plus
+/// rapide que celle d'arrière-plan, et chaque erreur se voit.
+enum VodFetcher {
+    enum Outcome: Sendable {
+        case saved(String, Int64)
+        /// Refusé par le serveur (« http:403 »…) : les autres continuent.
+        case refused(String)
+        /// Réseau perdu, plus de place : inutile de continuer.
+        case fatal(String)
+        case cancelled
+    }
+
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.httpMaximumConnectionsPerHost = VodDownloads.parallel
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        return URLSession(configuration: config)
+    }()
+
+    /// Un fichier, rangé dans le dossier du téléchargement. Original refusé :
+    /// la version muette ; serveur débordé ou réseau instable : trois
+    /// nouveaux essais, de plus en plus espacés.
+    static func fetch(_ job: VodDownloader.Job, into folder: URL) async -> Outcome {
+        let fm = FileManager.default
+        var url = job.url, name = job.fileName, kind = job.kind
+        var attempt = 0
+        while true {
+            if Task.isCancelled { return .cancelled }
+            // Déjà là (livré par iOS entre-temps) : rien à refaire.
+            for existing in [name, VodDownloader.counterpart(name)] {
+                if let size = size(folder.appendingPathComponent(existing)) { return .saved(existing, size) }
+            }
+            do {
+                let (tmp, response) = try await session.download(for: URLRequest(url: url))
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if code == 200 {
+                    let dest = folder.appendingPathComponent(name)
+                    try? fm.removeItem(at: dest)
+                    do {
+                        try fm.moveItem(at: tmp, to: dest)
+                    } catch {
+                        try? fm.removeItem(at: tmp)
+                        // Dossier effacé entre-temps (téléchargement supprimé).
+                        guard fm.fileExists(atPath: folder.path) else { return .cancelled }
+                        return isOutOfSpace(error) ? .fatal(VodDownloadFailure.space) : .refused("storage")
+                    }
+                    return .saved(name, size(dest) ?? 0)
+                }
+                try? fm.removeItem(at: tmp)
+                // Son d'origine effacé du CDN : la version muette.
+                if kind == .original, let fallback = job.fallback {
+                    url = fallback
+                    name = VodDownloader.mutedName(job.fileName)
+                    kind = .muted
+                    attempt = 0
+                    continue
+                }
+                if code == 429 || code >= 500, attempt < 3 {
+                    attempt += 1
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+                    continue
+                }
+                return .refused("http:\(code)")
+            } catch {
+                if Task.isCancelled || (error as? URLError)?.code == .cancelled { return .cancelled }
+                if isOutOfSpace(error) { return .fatal(VodDownloadFailure.space) }
+                if attempt < 3 {
+                    attempt += 1
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+                    continue
+                }
+                return .fatal(VodDownloadFailure.network)
+            }
+        }
+    }
+
+    private static func size(_ url: URL) -> Int64? {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let n = attrs[.size] as? NSNumber else { return nil }
+        return n.int64Value
+    }
+
+    private static func isOutOfSpace(_ error: Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain, ns.code == NSFileWriteOutOfSpaceError { return true }
+        if ns.domain == NSPOSIXErrorDomain, ns.code == Int(ENOSPC) { return true }
+        if let url = error as? URLError, url.code == .cannotWriteToFile || url.code == .cannotCreateFile { return true }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? Error { return isOutOfSpace(underlying) }
+        return false
+    }
+}
+
+// MARK: – Téléchargements en arrière-plan (app quittée)
 /// Session de téléchargement d'arrière-plan d'iOS : un fichier par tâche,
 /// rangé dans le dossier du téléchargement dès qu'il arrive, puis
 /// VodDownloads prévenu. iOS relance l'app en arrière-plan pour livrer les
@@ -574,55 +873,99 @@ final class VodDownloader: NSObject, URLSessionDownloadDelegate {
     /// Recréer la session au lancement : iOS lui rend les tâches en cours.
     func activate() {}
 
+    // MARK: Fournées
+    private static let generationKey = "dl_generation"
+    /// Numéro de la dernière fournée confiée à iOS (gardé d'un lancement à
+    /// l'autre) : au retour dans l'app, seules les fournées déjà parties
+    /// sont annulées.
+    var generation: Int { UserDefaults.standard.integer(forKey: Self.generationKey) }
+
+    /// Fichiers confiés à iOS, avec un peu de temps demandé pour finir de
+    /// tout créer même si l'app passe en arrière-plan entre-temps.
+    @MainActor
     func enqueue(_ jobs: [Job]) {
         guard !jobs.isEmpty else { return }
-        queue.addOperation { [self] in jobs.forEach(start) }
-    }
-
-    private func start(_ job: Job) {
-        let task = session.downloadTask(with: job.url)
-        task.taskDescription = Self.describe(job)
-        task.resume()
-    }
-
-    func cancel(item: String) {
-        session.getAllTasks { tasks in
-            for t in tasks where Self.parse(t.taskDescription)?.item == item { t.cancel() }
+        let next = generation + 1
+        UserDefaults.standard.set(next, forKey: Self.generationKey)
+        let time = BackgroundTaskBox()
+        time.id = UIApplication.shared.beginBackgroundTask(withName: "downloads") { time.end() }
+        queue.addOperation { [self] in
+            for job in jobs { start(job, generation: next) }
+            Task { @MainActor in time.end() }
         }
     }
 
-    /// Fichiers encore attendus pour ce téléchargement.
-    func pendingFiles(item: String) async -> Set<String> {
-        let tasks = await session.allTasks
-        return Set(tasks.compactMap { t -> String? in
-            guard t.state == .running || t.state == .suspended,
-                  let job = Self.parse(t.taskDescription), job.item == item else { return nil }
-            return job.fileName
-        })
+    private func start(_ job: Job, generation: Int) {
+        let task = session.downloadTask(with: job.url)
+        task.taskDescription = Self.describe(job, generation: generation)
+        task.resume()
     }
 
-    // MARK: Description d'une tâche : « téléchargement|type|fichier|repli »
-    private static func describe(_ job: Job) -> String {
-        [job.item, job.kind.rawValue, job.fileName, job.fallback?.absoluteString ?? ""].joined(separator: "|")
+    /// Tâches de ce téléchargement, des fournées jusqu'à `upTo` comprise.
+    func cancel(item: String, upTo generation: Int = .max) {
+        session.getAllTasks { tasks in
+            for t in tasks {
+                guard let parsed = Self.parse(t.taskDescription), parsed.job.item == item,
+                      parsed.generation <= generation else { continue }
+                t.cancel()
+            }
+        }
     }
 
-    private static func parse(_ text: String?) -> Job? {
-        guard let parts = text?.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false),
-              parts.count == 4, let kind = Kind(rawValue: String(parts[1])) else { return nil }
-        return Job(item: String(parts[0]), kind: kind, url: URL(fileURLWithPath: "/"),
-                   fallback: URL(string: String(parts[3])), fileName: String(parts[2]))
+    /// Fichiers encore attendus d'iOS pour ce téléchargement ; nil si la
+    /// session ne répond pas.
+    func pendingFiles(item: String) async -> Set<String>? {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Set<String>?, Never>) in
+            let once = Once()
+            session.getAllTasks { tasks in
+                let names = Set(tasks.compactMap { t -> String? in
+                    guard t.state == .running || t.state == .suspended,
+                          let parsed = Self.parse(t.taskDescription), parsed.job.item == item else { return nil }
+                    return parsed.job.fileName
+                })
+                if once.claim() { continuation.resume(returning: names) }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+                if once.claim() { continuation.resume(returning: nil) }
+            }
+        }
+    }
+
+    // MARK: Description d'une tâche : « téléchargement|type|fichier|repli|fournée »
+    private static func describe(_ job: Job, generation: Int) -> String {
+        [job.item, job.kind.rawValue, job.fileName, job.fallback?.absoluteString ?? "", String(generation)]
+            .joined(separator: "|")
+    }
+
+    /// Les tâches d'avant les fournées n'ont pas de numéro : 0.
+    private static func parse(_ text: String?) -> (job: Job, generation: Int)? {
+        guard var parts = text?.components(separatedBy: "|"), parts.count >= 4,
+              let kind = Kind(rawValue: parts[1]) else { return nil }
+        var generation = 0
+        if parts.count >= 5, let g = Int(parts[parts.count - 1]) {
+            generation = g
+            parts.removeLast()
+        }
+        let job = Job(item: parts[0], kind: kind, url: URL(fileURLWithPath: "/"),
+                      fallback: URL(string: parts[3...].joined(separator: "|")), fileName: parts[2])
+        return (job, generation)
     }
 
     /// « seg_00012.ts » → « seg_00012.muted.ts ».
-    private static func mutedName(_ name: String) -> String {
+    static func mutedName(_ name: String) -> String {
         let ns = name as NSString
         return ns.deletingPathExtension + ".muted." + ns.pathExtension
+    }
+
+    /// « seg_00012.ts » ⇄ « seg_00012.muted.ts ».
+    static func counterpart(_ name: String) -> String {
+        name.contains(".muted.") ? name.replacingOccurrences(of: ".muted.", with: ".") : mutedName(name)
     }
 
     // MARK: URLSessionDownloadDelegate
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
-        guard let job = Self.parse(downloadTask.taskDescription) else { return }
+        guard let job = Self.parse(downloadTask.taskDescription)?.job else { return }
         let code = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { refused[downloadTask.taskIdentifier] = code; return }
         // À ranger avant de rendre la main : iOS efface le fichier ensuite.
@@ -639,11 +982,14 @@ final class VodDownloader: NSObject, URLSessionDownloadDelegate {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let job = Self.parse(task.taskDescription) else { return }
+        guard let (job, generation) = Self.parse(task.taskDescription) else { return }
         let key = task.taskDescription ?? ""
         if let size = finished.removeValue(forKey: task.taskIdentifier) {
             retries[key] = nil
-            Task { @MainActor in VodDownloads.shared.fileDone(item: job.item, size: size) }
+            Task { @MainActor in
+                VodDownloads.shared.fileArrived(item: job.item, name: job.fileName, size: size)
+                VodDownloads.shared.backgroundProgress(item: job.item)
+            }
             return
         }
         if let code = refused.removeValue(forKey: task.taskIdentifier) {
@@ -651,10 +997,10 @@ final class VodDownloader: NSObject, URLSessionDownloadDelegate {
             // Son d'origine refusé (effacé du CDN) : la version muette.
             if job.kind == .original, let fallback = job.fallback {
                 start(Job(item: job.item, kind: .muted, url: fallback, fallback: nil,
-                          fileName: Self.mutedName(job.fileName)))
+                          fileName: Self.mutedName(job.fileName)), generation: generation)
                 return
             }
-            Task { @MainActor in VodDownloads.shared.fileFailed(item: job.item) }
+            lose(job)
             return
         }
         if (error as? URLError)?.code == .cancelled { return }
@@ -662,17 +1008,40 @@ final class VodDownloader: NSObject, URLSessionDownloadDelegate {
         let count = (retries[key] ?? 0) + 1
         retries[key] = count
         if count <= 3, let url = task.originalRequest?.url {
-            start(Job(item: job.item, kind: job.kind, url: url, fallback: job.fallback, fileName: job.fileName))
+            start(Job(item: job.item, kind: job.kind, url: url, fallback: job.fallback, fileName: job.fileName),
+                  generation: generation)
         } else {
             retries[key] = nil
-            Task { @MainActor in VodDownloads.shared.fileFailed(item: job.item) }
+            lose(job)
+        }
+    }
+
+    private func lose(_ job: Job) {
+        Task { @MainActor in
+            VodDownloads.shared.fileLost(item: job.item, name: job.fileName)
+            VodDownloads.shared.backgroundProgress(item: job.item)
         }
     }
 
     func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-        DispatchQueue.main.async {
+        Task { @MainActor in
+            await VodDownloads.shared.backgroundEventsDelivered()
             self.backgroundCompletion?()
             self.backgroundCompletion = nil
         }
+    }
+}
+
+/// Vrai la première fois seulement : la réponse ou le délai, le premier gagne.
+private final class Once {
+    private let lock = NSLock()
+    private var done = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if done { return false }
+        done = true
+        return true
     }
 }
