@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.0",
+          "buildVersion": "277",
+          "date": "2026-10-11",
+          "localizedDescription": "- Pick an app icon in Settings → General → Appearance: Classic, Purple, Night, Light, Contrast or Neon; “Contrast” stays the sharpest with iOS 26's clear and tinted icons. An app signed with a certificate's generic identifier can't change its icon: the setting says so.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-277/TwitchUnblock.ipa",
+          "size": 2932361,
+          "commit": "8ee28ab29a6f5243ea60faa14cea2b06430871d5"
+        },
+        {
           "version": "1.2.52",
           "buildVersion": "276",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-245/TwitchUnblock.ipa",
           "size": 2206098,
           "commit": "4394291ce9078a17006e345e2241eeb1b30445a0"
-        },
-        {
-          "version": "1.2.21",
-          "buildVersion": "243",
-          "date": "2026-10-10",
-          "localizedDescription": "- Live streams are much closer to real time: about 6 seconds of delay instead of about 20 (Low latency mode, now on by default).",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-243/TwitchUnblock.ipa",
-          "size": 2205875,
-          "commit": "faa1c56c9a8151ab153defc450b2b5dd5859b5fb"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.52",
+      "version": "1.3.0",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-276/TwitchUnblock.ipa",
-      "size": 2932362
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-277/TwitchUnblock.ipa",
+      "size": 2932361
     }
   ],
   "news": []
