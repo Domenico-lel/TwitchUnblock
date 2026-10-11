@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.0",
+          "buildVersion": "278",
+          "date": "2026-10-11",
+          "localizedDescription": "- Pick an app icon in Settings → General → Appearance: Classic, Purple, Night, Light, Contrast or Neon; “Contrast” stays the sharpest with iOS 26's clear and tinted icons. An app signed with a certificate's generic identifier can't change its icon: the setting says so.\n- Chat: the room's modes (followers only and for how long, subscribers only, slow mode…) show above the message box, the channel's chat rules are shown to accept before your first message, and a message Twitch refuses is removed with the reason.\n- Expert settings (Settings → Other): if the official Workers go down, give the address of your own Worker; it's checked, then tried first for lives, VODs and playlists, or used for everything.\n- Lives: double-tap no longer skips ahead; in landscape it shows or hides the chat, and a red Live button with the delay brings you back to the edge after a pause.\n- Categories: filter the lives by language (all, or a single one).\n- Pick the order of the live sources in Settings → Player: if one doesn't answer, the next one takes over; picking a source from the player menu moves it to the top.\n- My reports: a new “Seen” status once your message has been read.\n- Fixed a black screen in “Source” on Luminous Europe for channels that stream with multiple encodes (each quality now keeps its own name).\n- Downloads run faster while the app is open, and iOS takes over when you leave it; a stopped download now says why (connection lost, storage full, segments refused by Twitch).\n- Instant live notifications, even with the app closed, through the free ntfy app (Settings → Features in testing): add the topic shown there in ntfy, and tapping a notification opens the stream.\n- Multi-live on iPad: the chat of the stream you hear shows next to the mosaic (button in the mosaic, or Settings → Player).\n- Downloads keep going in the background, even with the app closed; the chat can be kept and replayed offline (emotes included); a finished download can be exported as a single file (Files, AirDrop, VLC).\n- Fixed a black screen on some recent VODs with muted parts (Twitch's new MP4 format); their original sound is restored too while Twitch still has it.\n- Multi-live: watch up to four streams side by side. Long-press a live card (or use the player's ⋯ menu) to add it, then tap Watch in the bar at the bottom; tap a stream to hear it.\n- Download a whole VOD or just a part of it (from one time to another) to watch offline, from the player's ⋯ menu. Parts muted for copyrighted music keep their original sound while Twitch still has it. Your downloads are in the My VODs tab.\n- Drops: a notification when a drop is ready to claim, or when the app has claimed it for you (Settings → Drops → Notify me).\n- Usage stats (if enabled) now also include the app language, iPhone or iPad, the iOS version and anonymous play counters (which source served a live, failures) — never the channels.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-278/TwitchUnblock.ipa",
+          "size": 2932347,
+          "commit": "451d56662d8ecec306251dbf68b51b71a3bcf4e6"
+        },
+        {
           "version": "1.2.29",
           "buildVersion": "254",
           "date": "2026-10-11",
@@ -132,10 +141,10 @@
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.29",
+      "version": "1.3.0",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-254/TwitchUnblock.ipa",
-      "size": 2443181
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-278/TwitchUnblock.ipa",
+      "size": 2932347
     }
   ],
   "news": []
