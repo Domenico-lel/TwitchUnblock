@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.27",
+          "buildVersion": "251",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops: new Settings → Drops page with your campaigns' progress, a Claim button and automatic claiming.\n- Drops now progress while you watch a live with drops (Twitch only counts them when your account loads the stream; the app does it with small requests, no extra video download).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-251/TwitchUnblock.ipa",
+          "size": 2393455,
+          "commit": "587645a1afc9ea013221b9b87ffdd64e9a0b357c"
+        },
+        {
           "version": "1.2.26",
           "buildVersion": "250",
           "date": "2026-10-11",
@@ -286,10 +295,10 @@
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.26",
+      "version": "1.2.27",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-250/TwitchUnblock.ipa",
-      "size": 2319397
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-251/TwitchUnblock.ipa",
+      "size": 2393455
     }
   ],
   "news": []
