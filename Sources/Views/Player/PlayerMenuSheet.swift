@@ -23,6 +23,8 @@ struct PlayerMenuSheet: View {
     var liveSource: String? = nil
     /// Changer de source : le direct est relancé par elle.
     var onSelectSource: ((String) -> Void)? = nil
+    /// VOD : télécharger un passage pour le regarder hors ligne.
+    var onDownload: (() -> Void)? = nil
 
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -107,6 +109,12 @@ struct PlayerMenuSheet: View {
                     } else if canRewind {
                         row(icon: "gobackward", title: store.t("rewind"),
                             detail: store.t("rewind_sub"), action: onRewind)
+                        divider
+                    }
+
+                    if let onDownload {
+                        row(icon: "arrow.down.circle", title: store.t("dl_download"),
+                            detail: store.t("dl_download_sub"), action: onDownload)
                         divider
                     }
 

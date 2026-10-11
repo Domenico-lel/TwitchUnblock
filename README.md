@@ -68,6 +68,11 @@ no key to paste. The backend is already hosted and shared by every install.
   third party).
 * ✂️ **Clips** — a Clips tab on every channel (24 h, 7 days, 30 days, all time),
   played with the original chat replayed.
+* 📥 **Offline downloads** — download a whole VOD or just a part of it (from one
+  time to another, from where you are, the next 10 minutes) in the quality you
+  pick, then watch it without a connection from the My VODs tab. Parts muted
+  for copyrighted music keep their original sound when Twitch still has it
+  (a day or two after the stream). Pause, resume and delete from the list.
 
 ### Chat
 

@@ -39,6 +39,8 @@ struct TwitchUnblockApp: App {
                         Task { await LiveNotifier.check(notify: false) }
                         Task { await AnnouncementService.shared.refresh() }
                         Task { await FeedbackStore.shared.refresh() }
+                        // VODs en cours de téléchargement coupées entre-temps.
+                        VodDownloads.shared.resumeInterrupted()
                     default:
                         break
                     }

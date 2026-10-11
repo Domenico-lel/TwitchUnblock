@@ -34,6 +34,8 @@ struct MainTabView: View {
     @State private var liveGame: String = ""
     /// Source qui sert le direct en cours (menu du lecteur).
     @State private var liveSourceUsed: String? = nil
+    /// Feuille « Télécharger » (VOD en cours).
+    @State private var showDownloadSheet = false
     @State private var liveStartedAt: Date? = nil
     @State private var liveUptimeText: String = ""
     @State private var refreshTimer: Timer? = nil
@@ -242,7 +244,8 @@ struct MainTabView: View {
                                               onPlayClip: { playClip($0, $1) },
                                               onPlayQueue: { playQueue($0, $1) },
                                               onRecovered: { playRecovered($0) })
-                    case .library: LibraryView(onPlayVod: { playVod($0, $1, $2, $3) })
+                    case .library: LibraryView(onPlayVod: { playVod($0, $1, $2, $3) },
+                                               onPlayOffline: { playRecovered($0) })
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -309,9 +312,18 @@ struct MainTabView: View {
                     logger.settingChanged("Source du direct", value: id)
                     store.liveSource = id
                     reloadCurrent()
-                }
+                },
+                onDownload: downloadAction
             )
             .presentationDetents([.medium])
+        }
+        // Télécharger un passage de la VOD en cours (menu ⋯ du lecteur).
+        .sheet(isPresented: $showDownloadSheet) {
+            if let ctx = downloadContext {
+                VodDownloadSheet(context: ctx)
+                    .environmentObject(store)
+                    .presentationDetents([.large])
+            }
         }
         // Réglages : ouverts depuis l'avatar de l'en-tête.
         .sheet(isPresented: $showSettings) {
@@ -897,6 +909,31 @@ struct MainTabView: View {
             .onEnded { v in
                 endPull(max(0, v.translation.height), predicted: v.predictedEndTranslation.height)
             }
+    }
+
+    /// VOD en cours : de quoi proposer d'en télécharger un passage (liens
+    /// directs, sans l'adresse maison des passages coupés).
+    private var downloadContext: VodDownloadContext? {
+        guard let links = qualityLinks?.mapValues({ VodUnmuteLoader.unwrap($0) }), !links.isEmpty else { return nil }
+        switch playerMode {
+        case .vod(let id, let title, let thumb, let streamer)?:
+            return VodDownloadContext(vodId: id, title: title ?? statusTitle, streamer: streamer ?? "",
+                                      thumbnail: thumb ?? "", links: links, position: vodPlaybackTime)
+        case .recovered(let rec)? where !rec.streamID.hasPrefix("offline-"):
+            // VOD supprimée retrouvée : la garder avant qu'elle ne quitte le CDN.
+            return VodDownloadContext(vodId: "r\(rec.streamID)", title: rec.title.isEmpty ? statusTitle : rec.title,
+                                      streamer: rec.streamer, thumbnail: "", links: links, position: vodPlaybackTime)
+        default:
+            return nil
+        }
+    }
+
+    private var downloadAction: (() -> Void)? {
+        guard downloadContext != nil else { return nil }
+        return {
+            showPlayerMenu = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showDownloadSheet = true }
+        }
     }
 
     /// Source du direct pour le menu du lecteur : seulement pendant un direct

@@ -1,0 +1,172 @@
+import Foundation
+import Network
+import UIKit
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Mini-serveur HTTP local pour lire les VODs téléchargées.
+//
+//  AVPlayer ne lit une playlist HLS que par HTTP : pas de lecture directe d'un
+//  .m3u8 et de ses segments posés sur le disque. Ce serveur n'écoute que sur
+//  l'interface de bouclage (127.0.0.1 : rien n'est joignable depuis le
+//  réseau) et sert le dossier des téléchargements, le temps de la lecture.
+// ═══════════════════════════════════════════════════════════════════════════
+
+final class OfflineServer {
+    static let shared = OfflineServer()
+
+    private let queue = DispatchQueue(label: "tu.offline.server")
+    private var listener: NWListener?
+    private var port: UInt16?
+    /// Port du dernier serveur, repris quand il faut le relancer : la lecture
+    /// en cours (adresses déjà données à AVPlayer) peut ainsi continuer.
+    private var lastPort: UInt16?
+    private var waiting: [(UInt16?) -> Void] = []
+
+    private init() {
+        // iOS ferme le serveur pendant que l'app est suspendue : relancé au retour.
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                                               object: nil, queue: nil) { [weak self] _ in
+            guard let self else { return }
+            self.queue.async { if self.lastPort != nil { self.ensureStarted { _ in } } }
+        }
+    }
+
+    /// http://127.0.0.1:<port>, serveur démarré au besoin. nil s'il ne peut pas.
+    func baseURL() async -> URL? {
+        let port: UInt16? = await withCheckedContinuation { cont in
+            queue.async { self.ensureStarted { cont.resume(returning: $0) } }
+        }
+        return port.flatMap { URL(string: "http://127.0.0.1:\($0)") }
+    }
+
+    private func ensureStarted(_ done: @escaping (UInt16?) -> Void) {
+        if let port { done(port); return }
+        waiting.append(done)
+        if listener == nil { startListener() }   // sinon : démarrage déjà en cours
+    }
+
+    private func startListener() {
+        let params = NWParameters.tcp
+        params.requiredInterfaceType = .loopback
+        params.allowLocalEndpointReuse = true
+        let wanted = lastPort.flatMap { NWEndpoint.Port(rawValue: $0) } ?? .any
+        guard let l = try? NWListener(using: params, on: wanted) else {
+            if lastPort != nil { lastPort = nil; startListener() } else { finish(nil) }
+            return
+        }
+        l.stateUpdateHandler = { [weak self, weak l] state in
+            guard let self, let l else { return }
+            switch state {
+            case .ready:
+                self.port = l.port?.rawValue
+                self.lastPort = self.port
+                self.finish(self.port)
+            case .waiting, .failed:
+                l.cancel()   // → .cancelled
+            case .cancelled:
+                guard self.listener === l else { return }
+                let wasReady = self.port != nil
+                self.port = nil
+                self.listener = nil
+                if !wasReady, self.lastPort != nil, !self.waiting.isEmpty {
+                    // L'ancien port est pris : un autre.
+                    self.lastPort = nil
+                    self.startListener()
+                } else {
+                    self.finish(nil)
+                }
+            default:
+                break
+            }
+        }
+        l.newConnectionHandler = { [weak self] conn in self?.serve(conn) }
+        listener = l
+        l.start(queue: queue)
+    }
+
+    private func finish(_ port: UInt16?) {
+        let callbacks = waiting
+        waiting.removeAll()
+        callbacks.forEach { $0(port) }
+    }
+
+    // MARK: Requêtes
+    private func serve(_ conn: NWConnection) {
+        conn.start(queue: queue)
+        receive(conn, buffer: Data())
+    }
+
+    private func receive(_ conn: NWConnection, buffer: Data) {
+        conn.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, complete, error in
+            guard let self else { conn.cancel(); return }
+            var buf = buffer
+            if let data { buf.append(data) }
+            if let end = buf.range(of: Data("\r\n\r\n".utf8)) {
+                self.respond(conn, request: String(decoding: buf[..<end.lowerBound], as: UTF8.self))
+            } else if complete || error != nil || buf.count > 65_536 {
+                conn.cancel()
+            } else {
+                self.receive(conn, buffer: buf)
+            }
+        }
+    }
+
+    private func respond(_ conn: NWConnection, request: String) {
+        let lines = request.components(separatedBy: "\r\n")
+        let parts = (lines.first ?? "").split(separator: " ")
+        guard parts.count >= 2, parts[0] == "GET" || parts[0] == "HEAD" else {
+            send(conn, status: "405 Method Not Allowed", headers: [:], body: Data())
+            return
+        }
+        let rawPath = String(parts[1]).components(separatedBy: "?").first ?? ""
+        let path = (rawPath.removingPercentEncoding ?? rawPath).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let file = VodDownloads.directory.appendingPathComponent(path)
+        // Rien en dehors du dossier des téléchargements.
+        guard !path.isEmpty, !path.contains(".."),
+              let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
+            send(conn, status: "404 Not Found", headers: [:], body: Data())
+            return
+        }
+        var status = "200 OK"
+        var body = data
+        var headers = ["Content-Type": Self.mime(file.pathExtension), "Accept-Ranges": "bytes"]
+        if let line = lines.first(where: { $0.lowercased().hasPrefix("range:") }),
+           let range = Self.byteRange(line, size: data.count) {
+            status = "206 Partial Content"
+            body = data.subdata(in: range)
+            headers["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(data.count)"
+        }
+        headers["Content-Length"] = "\(body.count)"
+        send(conn, status: status, headers: headers, body: parts[0] == "HEAD" ? Data() : body)
+    }
+
+    private func send(_ conn: NWConnection, status: String, headers: [String: String], body: Data) {
+        var head = "HTTP/1.1 \(status)\r\nConnection: close\r\n"
+        for (key, value) in headers { head += "\(key): \(value)\r\n" }
+        head += "\r\n"
+        var out = Data(head.utf8)
+        out.append(body)
+        conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
+    }
+
+    /// « Range: bytes=début-fin » (fin facultative).
+    private static func byteRange(_ line: String, size: Int) -> Range<Int>? {
+        guard size > 0, let spec = line.split(separator: "=", maxSplits: 1).last else { return nil }
+        let bounds = spec.split(separator: "-", omittingEmptySubsequences: false)
+        guard bounds.count == 2 else { return nil }
+        let start = Int(bounds[0].trimmingCharacters(in: .whitespaces)) ?? 0
+        let end = Int(bounds[1].trimmingCharacters(in: .whitespaces)).map { min($0, size - 1) } ?? size - 1
+        guard start <= end, start < size else { return nil }
+        return start ..< end + 1
+    }
+
+    private static func mime(_ ext: String) -> String {
+        switch ext.lowercased() {
+        case "m3u8":       return "application/vnd.apple.mpegurl"
+        case "ts":         return "video/mp2t"
+        case "mp4", "m4s": return "video/mp4"
+        case "aac":        return "audio/aac"
+        default:           return "application/octet-stream"
+        }
+    }
+}
