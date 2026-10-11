@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.51",
+          "buildVersion": "275",
+          "date": "2026-10-11",
+          "localizedDescription": "- Expert settings (Settings → Other): if the official Workers go down, give the address of your own Worker; it's checked, then tried first for lives, VODs and playlists, or used for everything.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-275/TwitchUnblock.ipa",
+          "size": 2911295,
+          "commit": "31c986b07ee07398146d753a680ace0704a8bc0b"
+        },
+        {
           "version": "1.2.49",
           "buildVersion": "273",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-241/TwitchUnblock.ipa",
           "size": 2200820,
           "commit": "a63155a675daf193424f85330706ae490ea9e547"
-        },
-        {
-          "version": "1.2.19",
-          "buildVersion": "239",
-          "date": "2026-10-10",
-          "localizedDescription": "- Passages coupés : plus d'avertissement de concurrence à la publication du résultat",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-239/TwitchUnblock.ipa",
-          "size": 2200788,
-          "commit": "a9859acd86aea48f43c7f5e7b7024cdb1004d51c"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.49",
+      "version": "1.2.51",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-273/TwitchUnblock.ipa",
-      "size": 2894308
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-275/TwitchUnblock.ipa",
+      "size": 2911295
     }
   ],
   "news": []
