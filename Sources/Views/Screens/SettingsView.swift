@@ -558,7 +558,7 @@ struct SettingsView: View {
                     }
                     .tint(.tPrimary)
                     .onChange(of: customWorkerAll) { on in
-                        logger.settingChanged("Tout par le Worker personnel", value: on)
+                        logger.settingChanged("Tout par le Worker personnel", value: on ? "oui" : "non")
                     }
                 }
             }
