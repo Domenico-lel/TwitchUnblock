@@ -37,6 +37,11 @@ no key to paste. The backend is already hosted and shared by every install.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps.
 * ⚙️ **Quality selector** — every resolution the channel broadcasts, Source
   included.
+* 🛡 **Ad-free lives, from the source you pick** — lives come from ad-free
+  sources (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous Europe),
+  tried in that order. Pick one in Settings → Player or from the player's ⋯
+  menu, which also shows the source in use; official Twitch (with ads) is there
+  too. If the chosen source doesn't answer, the others take over.
 * ⏪ **Rewind a live stream (DVR)** — when the channel archives its broadcasts,
   the progress bar covers the *whole* stream, not just the rewindable window.
   Scrub past that window and the recording takes over at that exact moment.
@@ -48,6 +53,9 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
   right in the player.
 * 📡 **AirPlay** — send the stream to an Apple TV or a compatible TV.
+* 🎧 **Spatial audio (AirPods)** — turn it off in the app, head tracking
+  included (Settings → Player). iOS doesn't let apps pick "Fixed" or "Head
+  Tracked": that choice stays in Control Center.
 * 🧭 **VOD chapters** — game changes marked on the progress bar; tap the current
   chapter to jump to another.
 * 🔇 **Muted parts** — passages Twitch muted for copyrighted music show in orange
@@ -92,6 +100,18 @@ no key to paste. The backend is already hosted and shared by every install.
   badge above the chat, or in Settings.
 * 📼 **VOD chat** — replayed in sync with playback position.
 
+### Drops
+
+* 🎁 **Drops page** (Settings → Drops) — your campaigns in progress with their
+  progress bars, every open campaign (all games) with its rewards, a **Claim**
+  button and automatic claiming, a step-by-step guide, and a live status that
+  tells you whether the stream you're watching counts.
+* 📈 **Progress while you watch** — since October 2026, Twitch only counts drops
+  when your own account loads the stream. During a live with drops, the app does
+  that with small requests, without downloading the video a second time.
+* Needs the Twitch web session, like channel points. Game accounts must be
+  linked: Twitch no longer grants rewards without it.
+
 ### Chat layout
 
 * 📐 **Resizable** — drag the divider between video and chat; the width is
@@ -106,7 +126,10 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 🏠 **Home** — your followed channels that are live, top streams (France or
   worldwide).
-* 🎮 **Categories** — browse by game, then the live channels in it.
+* 🎮 **Categories** — browse by game, then the live channels in it. Search
+  puts the exact match first ("valorant" → VALORANT), with sharp box art.
+* 🏷 **Stream tags** — language, DropsEnabled… under each live stream, like on
+  Twitch.
 * 🔍 **Search** — by streamer name, channel link, or VOD ID.
 * ℹ️ **About** — a channel's description, followers, social links and panels.
 * 🕒 **History** — recently watched VODs and channels, each removable.
@@ -139,7 +162,9 @@ no key to paste. The backend is already hosted and shared by every install.
   quietly reusing the previous one.
 * 🔐 **Web session check** — the Twitch web session has no known expiry date;
   it's verified at launch, and you're told when it needs restoring instead of
-  channel points silently going quiet.
+  channel points silently going quiet. It must also be the app's account:
+  another account is refused at sign-in (and disconnected if found later), so
+  points, drops and predictions never go to the wrong account.
 * 📊 **Usage count** — logged in, your Twitch account (counted once across the
   app and the website); logged out, a random install ID. Plus the app version,
   at most once an hour. No channels watched, no IP address. Switching it off
@@ -183,15 +208,18 @@ and shares this app's backend (the Cloudflare Worker, which now lives there too)
 What you get on the web:
 
 * Top streams without logging in, followed channels once logged in
+* Ad-free lives from the source you pick (settings, or the player's ⚙ menu),
+  a few seconds behind live
 * Live and VOD player with quality picker, speed, ±10 s, picture in picture, mini player
 * Native chat: Twitch, BTTV, FFZ and 7TV emotes, badges, chat history, pinned message, replies
 * VOD chat replayed in sync with the video
+* Stream tags, clips, categories, Twitch-style links (`/xqc`, `/videos/…`)
 * Resume VODs where you left off, history synced with your Twitch account
-* French, English and Spanish
+* English, French, Spanish and Russian
 
-Channel points, polls and predictions are **not** in the web version and cannot
-be: they need the `twitch.tv` session cookie, which no third-party site can
-read. For those, use the app.
+Channel points, drops and betting on predictions are **not** in the web version
+and cannot be: they need the `twitch.tv` session cookie, which no third-party
+site can read. For those, use the app.
 
 ---
 
