@@ -77,6 +77,52 @@ enum EmoteSource: String {
     case twitch, bttv, ffz, seventv
 }
 
+// MARK: – Modes du salon
+/// Ce qui limite qui peut écrire dans un chat, et les règles à accepter.
+struct ChatRoomModes: Equatable {
+    /// Minutes de suivi exigées (0 : suivre suffit) ; nil : pas de mode followers.
+    var followersMinutes: Int? = nil
+    var subsOnly = false
+    var emoteOnly = false
+    var slowSeconds = 0
+    var uniqueChat = false
+    var verifiedOnly = false
+
+    var isEmpty: Bool {
+        followersMinutes == nil && !subsOnly && !emoteOnly && slowSeconds == 0 && !uniqueChat && !verifiedOnly
+    }
+
+    /// « 10 min », « 1 h 30 min », « 1 j » dans la langue de l'app.
+    static func duration(_ minutes: Int, lang: Lang) -> String {
+        let f = DateComponentsFormatter()
+        f.unitsStyle = .abbreviated
+        f.allowedUnits = minutes >= 1440 ? [.day, .hour] : (minutes >= 60 ? [.hour, .minute] : [.minute])
+        f.maximumUnitCount = 2
+        var calendar = Calendar.current
+        calendar.locale = Locale(identifier: lang.rawValue)
+        f.calendar = calendar
+        return f.string(from: TimeInterval(minutes * 60)) ?? "\(minutes) min"
+    }
+}
+
+/// Règles du chat acceptées, par chaîne, sur cet appareil ; redemandées si
+/// la chaîne les change.
+enum ChatRules {
+    private static let key = "chat_rules_ok"
+
+    static func accepted(_ channel: String, rules: [String]) -> Bool {
+        let saved = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        return saved[channel.lowercased()] == rules.joined(separator: "\n")
+    }
+
+    static func accept(_ channel: String, rules: [String]) {
+        var saved = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        if saved.count > 300 { saved.removeAll() }
+        saved[channel.lowercased()] = rules.joined(separator: "\n")
+        UserDefaults.standard.set(saved, forKey: key)
+    }
+}
+
 // MARK: – Badge
 struct TwitchBadge: Identifiable, Hashable {
     let id: String   // e.g. "moderator/1"

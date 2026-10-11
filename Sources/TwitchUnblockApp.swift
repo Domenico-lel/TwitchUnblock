@@ -18,6 +18,13 @@ struct TwitchUnblockApp: App {
                 .task { await AnnouncementService.shared.refresh(force: true) }
                 // Réponses aux retours envoyés depuis l'app (pastille).
                 .task { await FeedbackStore.shared.refresh(force: true) }
+                // Notification ntfy touchée : twitchunblock://live/<chaîne>.
+                .onOpenURL { url in
+                    guard url.scheme == "twitchunblock", url.host == "live",
+                          let login = url.pathComponents.dropFirst().first, !login.isEmpty else { return }
+                    NotificationCenter.default.post(name: .openLiveChannel, object: nil,
+                                                    userInfo: ["login": login.lowercased()])
+                }
                 .onChange(of: scenePhase) { phase in
                     switch phase {
                     case .background:
@@ -25,6 +32,12 @@ struct TwitchUnblockApp: App {
                         // fermer l'app ensuite sans prévenir.
                         store.flushToCloud(force: true)
                         LiveNotifier.schedule()
+                        VodDownloads.shared.sceneInactive()
+                    case .inactive:
+                        // Téléchargements : ce qui manque passe à iOS, avant
+                        // que l'app soit en arrière-plan (sinon iOS attend
+                        // le Wi-Fi ou la charge pour s'y mettre).
+                        VodDownloads.shared.sceneInactive()
                     case .active:
                         // Le service ne laisse passer qu'un ping par heure :
                         // on compte des journées actives.
@@ -39,6 +52,12 @@ struct TwitchUnblockApp: App {
                         Task { await LiveNotifier.check(notify: false) }
                         Task { await AnnouncementService.shared.refresh() }
                         Task { await FeedbackStore.shared.refresh() }
+                        // ntfy : chaînes suivies changées (ou une fois par jour).
+                        Task { await NtfyNotifier.sync(lang: store.lang) }
+                        // Téléchargements : l'app reprend la main sur iOS,
+                        // redemande ce qui manque (app fermée en la
+                        // balayant…) et reprend les chats inachevés.
+                        VodDownloads.shared.sceneActive()
                     default:
                         break
                     }

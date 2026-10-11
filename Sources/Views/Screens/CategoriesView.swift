@@ -334,9 +334,10 @@ struct CategoryStreamsView: View {
             .padding(.top, TSpace.md)
             .padding(.bottom, TSpace.sm)
 
-            // ── Tri ─────────────────────────────────────────────────
+            // ── Langue et tri ───────────────────────────────────────
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: TSpace.sm) {
+                    languageMenu
                     ForEach(StreamSort.allCases) { s in
                         TChip(title: s.label(store), icon: s.icon, isOn: sort == s) { sort = s }
                     }
@@ -379,6 +380,50 @@ struct CategoryStreamsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.tDark)
         .onAppear { if streams.isEmpty { Task { await load() } } }
+        .onChange(of: store.categoryLang) { _ in
+            streams = []
+            cursor = nil
+            Task { await load() }
+        }
+    }
+
+    /// Langue des lives (la même pour toutes les catégories) : toutes, celle
+    /// de l'appareil, ou une autre.
+    private var languageMenu: some View {
+        let current = store.categoryLang
+        let device = TopLanguage.device
+        let others = TopLanguage.codes
+            .filter { $0 != device }
+            .map { ($0, TopLanguage.name($0, in: store.lang)) }
+            .sorted { $0.1.localizedCompare($1.1) == .orderedAscending }
+        return Menu {
+            Button { store.categoryLang = nil } label: {
+                if current == nil { Label(store.t("cat_lang_all"), systemImage: "checkmark") }
+                else { Text(store.t("cat_lang_all")) }
+            }
+            Button { store.categoryLang = device } label: {
+                if current == device { Label(TopLanguage.name(device, in: store.lang), systemImage: "checkmark") }
+                else { Text(TopLanguage.name(device, in: store.lang)) }
+            }
+            Divider()
+            ForEach(others, id: \.0) { code, name in
+                Button { store.categoryLang = code } label: {
+                    if current == code { Label(name, systemImage: "checkmark") } else { Text(name) }
+                }
+            }
+        } label: {
+            HStack(spacing: TSpace.xs) {
+                Image(systemName: "globe").font(.system(size: 11, weight: .semibold))
+                Text(current.map { TopLanguage.name($0, in: store.lang) } ?? store.t("cat_lang_all"))
+                    .font(.tLabel).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .foregroundColor(current == nil ? .tMuted : .white)
+            .padding(.horizontal, TSpace.md)
+            .frame(height: 32)
+            .background(current == nil ? Color.tSurface : Color.tPrimary)
+            .cornerRadius(TRadius.chip)
+        }
     }
 
     @MainActor private func load() async {
@@ -387,7 +432,7 @@ struct CategoryStreamsView: View {
         guard let token = store.twitchToken else {
             // Sans compte : les 100 lives les plus regardés (GQL public, pas
             // de page suivante sans jeton d'intégrité).
-            if let list = await getStreamsByCategoryGQL(gameId: category.id) {
+            if let list = await getStreamsByCategoryGQL(gameId: category.id, lang: store.categoryLang) {
                 streams = list
                 cursor = nil
             } else if streams.isEmpty {
@@ -397,7 +442,7 @@ struct CategoryStreamsView: View {
             return
         }
         do {
-            let page = try await getStreamsByCategory(token: token, gameId: category.id)
+            let page = try await getStreamsByCategory(token: token, gameId: category.id, lang: store.categoryLang)
             streams = page.streams
             cursor  = page.cursor
         } catch is CancellationError {
@@ -412,7 +457,8 @@ struct CategoryStreamsView: View {
         guard let token = store.twitchToken, let c = cursor, !loadingMore else { return }
         loadingMore = true
         defer { loadingMore = false }
-        guard let page = try? await getStreamsByCategory(token: token, gameId: category.id, cursor: c)
+        guard let page = try? await getStreamsByCategory(token: token, gameId: category.id, cursor: c,
+                                                         lang: store.categoryLang)
         else { return }
         let known = Set(streams.map(\.id))
         streams += page.streams.filter { !known.contains($0.id) }

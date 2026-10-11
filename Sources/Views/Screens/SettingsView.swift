@@ -16,6 +16,18 @@ struct SettingsView: View {
     @State private var mutedDraft      = ""
     @State private var liveNotif       = LiveNotifier.isEnabled
     @State private var notifTestResult: String? = nil
+    @State private var ntfyOn          = NtfyNotifier.isEnabled
+    @State private var ntfyResult: String? = nil
+    @State private var ntfyCopied      = false
+    @State private var ntfySynced      = !NtfyNotifier.isPending
+    @State private var appIcon: AppIconChoice = .standard
+    @State private var appIconError: String? = nil
+    // Réglages experts : Worker personnel.
+    @AppStorage(APIConfig.customKey) private var customWorker = ""
+    @AppStorage(APIConfig.allKey) private var customWorkerAll = false
+    @State private var workerInput = ""
+    @State private var workerChecking = false
+    @State private var workerOK: Bool? = nil
     @AppStorage("onboarding_done") private var onboardingDone = false
     @State private var showLogoutAlert = false
     @State private var showClearAlert  = false
@@ -481,6 +493,7 @@ struct SettingsView: View {
                     debugCard
                 case .other:
                     aboutCard
+                    expertCard
                 case .changelog:
                     ChangelogList()
                 }
@@ -490,6 +503,91 @@ struct SettingsView: View {
             .padding(.top, 12)
         }
         .background(Color.tDark)
+    }
+
+    // ── Réglages experts : Worker personnel ──────────────────────────────
+    @ViewBuilder private var expertCard: some View {
+        settingCard {
+            VStack(alignment: .leading, spacing: 12) {
+                label("server.rack", store.t("expert"))
+                Text(store.t("expert_worker")).font(.tCardTitle).foregroundColor(.tText)
+                Text(store.t("expert_worker_sub"))
+                    .font(.tMeta).foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextField(store.t("expert_worker_ph"), text: $workerInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .submitLabel(.done)
+                    .onSubmit { checkWorker() }
+                    .font(.tBody)
+                    .foregroundColor(.tText)
+                    .padding(10)
+                    .background(Color.tSurface)
+                    .cornerRadius(10)
+                HStack(spacing: 16) {
+                    Button { checkWorker() } label: {
+                        HStack(spacing: 6) {
+                            if workerChecking { ProgressView().scaleEffect(0.7) }
+                            Text(store.t("expert_check"))
+                        }
+                    }
+                    .disabled(workerChecking || workerInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if !customWorker.isEmpty {
+                        Button(store.t("expert_reset"), role: .destructive) { resetWorker() }
+                    }
+                }
+                .font(.tLabel)
+                .buttonStyle(.borderless)
+                if let ok = workerOK {
+                    Text(store.t(ok ? "expert_ok" : "expert_bad"))
+                        .font(.tMeta).foregroundColor(ok ? .tSuccess : .tDanger)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !customWorker.isEmpty {
+                    Text(store.t("expert_using").replacingOccurrences(of: "{u}", with: customWorker))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                }
+                if !customWorker.isEmpty {
+                    Toggle(isOn: $customWorkerAll) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(store.t("expert_all")).font(.tCardTitle).foregroundColor(.tText)
+                            Text(store.t("expert_all_sub"))
+                                .font(.tMeta).foregroundColor(.tMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .tint(.tPrimary)
+                    .onChange(of: customWorkerAll) { on in
+                        logger.settingChanged("Tout par le Worker personnel", value: on ? "oui" : "non")
+                    }
+                }
+            }
+        }
+        .onAppear { if workerInput.isEmpty { workerInput = customWorker } }
+    }
+
+    /// Adresse vérifiée (c'est bien un Worker TwitchUnblock) avant d'être gardée.
+    private func checkWorker() {
+        guard let base = APIConfig.normalize(workerInput) else { workerOK = false; return }
+        workerChecking = true
+        workerOK = nil
+        Task {
+            let ok = await APIConfig.check(base)
+            workerChecking = false
+            workerOK = ok
+            guard ok else { return }
+            customWorker = base
+            workerInput = base
+            logger.settingChanged("Worker personnel", value: base)
+        }
+    }
+
+    private func resetWorker() {
+        customWorker = ""
+        customWorkerAll = false
+        workerInput = ""
+        workerOK = nil
+        logger.settingChanged("Worker personnel", value: "officiels")
     }
 
     @ViewBuilder private var langueCard: some View {
@@ -579,6 +677,8 @@ struct SettingsView: View {
                     }
                 }
                 Divider().background(Color.tBorder)
+                appIconRow
+                Divider().background(Color.tBorder)
                 if Theme.glassSupported {
                     toggleRow(store.t("liquid_glass"), store.t("liquid_glass_sub"),
                               $store.liquidGlass, log: "Verre liquide")
@@ -593,6 +693,67 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// Icône de l'app : « Contraste » reste nette en icônes transparentes ou
+    /// teintées (iOS 26), toutes ont leurs versions sombre et teintée.
+    @ViewBuilder private var appIconRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(store.t("app_icon"))
+                .font(.tCardTitle).foregroundColor(.tText)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(AppIconChoice.allCases) { choice in
+                        let on = appIcon == choice
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            appIconError = nil
+                            choice.apply { error in
+                                guard let error else {
+                                    appIcon = choice
+                                    logger.settingChanged("Icône de l'app", value: choice.rawValue)
+                                    return
+                                }
+                                appIconError = error == AppIconChoice.unsupported
+                                    ? store.t("app_icon_unsupported")
+                                    : store.t("app_icon_failed").replacingOccurrences(of: "{e}", with: error)
+                            }
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(choice.previewName)
+                                    .resizable()
+                                    .frame(width: 58, height: 58)
+                                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                        .stroke(on ? Color.tPrimary : Color.tBorder, lineWidth: on ? 3 : 1))
+                                Text(store.t(choice.labelKey))
+                                    .font(.tMeta)
+                                    .foregroundColor(on ? .tText : .tMuted)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(store.t(choice.labelKey))
+                    }
+                }
+                .padding(.vertical, 3)
+            }
+            if let appIconError {
+                Text(appIconError)
+                    .font(.tMeta).foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Signée avec l'identifiant générique d'un certificat (Feather sans
+            // « Merge Entitlements ») : iOS refuse le changement d'icône.
+            if SigningInfo.signedForOtherIdentifier, let id = SigningInfo.applicationIdentifier {
+                Text(store.t("app_icon_wildcard").replacingOccurrences(of: "{id}", with: id))
+                    .font(.tMeta).foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(store.t("app_icon_sub"))
+                .font(.tMeta).foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .onAppear { appIcon = AppIconChoice.current }
     }
 
     /// Langue des streamers dans « Top des lives » (appareil par défaut).
@@ -889,6 +1050,9 @@ struct SettingsView: View {
                 toggleRow(store.t("restore_muted"), store.t("restore_muted_sub"),
                           $store.restoreMutedAudio, log: "Rétablir le son des passages coupés")
                 Divider().background(Color.tBorder)
+                toggleRow(store.t("multi_chat"), store.t("multi_chat_sub"),
+                          $store.multiLiveChat, log: "Chat dans le multi-live")
+                Divider().background(Color.tBorder)
                 spatialAudioRow
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
@@ -919,42 +1083,73 @@ struct SettingsView: View {
         }
     }
 
-    /// Source du direct : la préférée est essayée en premier (voir getLive).
+    /// Ordre des sources du direct : getLive les essaie l'une après l'autre.
     @ViewBuilder private var liveSourceRow: some View {
-        HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.t("live_source"))
+                Text(store.t("live_source_order"))
                     .font(.tCardTitle)
                     .foregroundColor(.tText)
-                Text(store.t("live_source_sub"))
+                Text(store.t("live_source_order_sub"))
                     .font(.tMeta)
                     .foregroundColor(.tMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 8)
-            Menu {
-                ForEach(kLiveSourceChoices, id: \.self) { id in
-                    Button {
-                        logger.settingChanged("Source du direct", value: id)
-                        store.liveSource = id
-                    } label: {
-                        if store.liveSource == id { Label(store.t("src_\(id)"), systemImage: "checkmark") }
-                        else { Text(store.t("src_\(id)")) }
+            ForEach(Array(store.liveSourceOrder.enumerated()), id: \.element) { index, id in
+                HStack(spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.tBadge)
+                        .foregroundColor(.tPrimary)
+                        .frame(width: 22, height: 22)
+                        .background(Color.tPrimary.opacity(0.15))
+                        .clipShape(Circle())
+                    Text(store.t("src_\(id)"))
+                        .font(.tCardTitle)
+                        .foregroundColor(.tText)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    sourceArrow("chevron.up", label: "src_up", enabled: index > 0) {
+                        store.moveLiveSource(id, by: -1)
+                    }
+                    sourceArrow("chevron.down", label: "src_down", enabled: index < store.liveSourceOrder.count - 1) {
+                        store.moveLiveSource(id, by: 1)
                     }
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(store.t("src_\(store.liveSource)"))
-                        .font(.tCardTitle)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundColor(.tPrimary)
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color.tPrimary.opacity(0.12))
+                .padding(.vertical, 3)
+                .padding(.leading, 10)
+                .padding(.trailing, 4)
+                .background(Color.tSurface)
                 .cornerRadius(10)
             }
+            if store.liveSourceOrder != kLiveSources {
+                Button(store.t("src_reset")) {
+                    withAnimation { store.liveSourceOrder = kLiveSources }
+                }
+                .font(.tLabel)
+                .foregroundColor(.tPrimary)
+                .buttonStyle(.plain)
+            }
         }
+        .onChange(of: store.liveSourceOrder) { order in
+            logger.settingChanged("Ordre des sources", value: order.joined(separator: ","))
+        }
+    }
+
+    private func sourceArrow(_ icon: String, label: String, enabled: Bool,
+                             action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.2)) { action() }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(enabled ? .tPrimary : .tMuted.opacity(0.4))
+                .frame(width: 34, height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(store.t(label))
     }
 
     @ViewBuilder private var veilleCard: some View {
@@ -1294,8 +1489,106 @@ struct SettingsView: View {
                               }
                           }), log: "Notifications de live")
                 if liveNotif { liveNotifTools }
+                Divider().background(Color.tBorder)
+                // Instantanées, même app fermée : par l'app ntfy.
+                toggleRow(store.t("ntfy_live"), store.t("ntfy_live_sub"),
+                          Binding(get: { ntfyOn }, set: { on in
+                              ntfyOn = on
+                              ntfyResult = nil
+                              Task {
+                                  if on {
+                                      // Reste activé même si le serveur ne répond pas
+                                      // encore : nouvel essai à chaque retour dans l'app.
+                                      let ok = await NtfyNotifier.enable(lang: store.lang)
+                                      await MainActor.run {
+                                          ntfySynced = ok
+                                          if !ok { ntfyResult = ntfyPendingText }
+                                      }
+                                  } else {
+                                      await NtfyNotifier.disable()
+                                  }
+                              }
+                          }), log: "Notifications ntfy")
+                if ntfyOn { ntfyTools }
             }
         }
+    }
+
+    /// Activé, mais pas encore accepté par le serveur : pourquoi, et la suite.
+    private var ntfyPendingText: String {
+        store.t(NtfyNotifier.serverNotReady ? "ntfy_not_ready" : "ntfy_pending")
+    }
+
+    /// ntfy : le sujet à ajouter dans l'app ntfy, l'installer, tester.
+    @ViewBuilder private var ntfyTools: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(store.t("ntfy_steps"))
+                .font(.tMeta).foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text(NtfyNotifier.topic)
+                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.tText)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .textSelection(.enabled)
+                Spacer(minLength: 4)
+                Button {
+                    UIPasteboard.general.string = NtfyNotifier.topic
+                    ntfyCopied = true
+                } label: {
+                    Label(store.t(ntfyCopied ? "ntfy_copied" : "ntfy_copy"),
+                          systemImage: ntfyCopied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.tPrimary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(10)
+            .background(Color.tSurface)
+            .cornerRadius(10)
+            HStack(spacing: 8) {
+                Link(destination: NtfyNotifier.appStoreURL) {
+                    ntfyPill(store.t("ntfy_install"), icon: "arrow.down.app.fill")
+                }
+                Button {
+                    ntfyResult = nil
+                    Task {
+                        let ok = await NtfyNotifier.sendTest(lang: store.lang)
+                        await MainActor.run { ntfyResult = store.t(ok ? "ntfy_test_sent" : "ntfy_failed") }
+                    }
+                } label: {
+                    ntfyPill(store.t("notif_test"), icon: "bell.badge.fill")
+                }
+                .buttonStyle(.plain)
+            }
+            if let ntfyResult {
+                Text(ntfyResult).font(.tMeta).foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if ntfySynced {
+                Text(store.t("ntfy_status").replacingOccurrences(
+                    of: "{n}", with: "\(UserDefaults.standard.integer(forKey: NtfyNotifier.countKey))"))
+                    .font(.tMeta).foregroundColor(.tMuted)
+            } else if ntfyResult == nil {
+                Text(ntfyPendingText).font(.tMeta).foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(store.t("ntfy_privacy"))
+                .font(.tMeta).foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.leading, 2)
+    }
+
+    private func ntfyPill(_ title: String, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+            Text(title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+        }
+        .foregroundColor(.tPrimary)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color.tPrimary.opacity(0.12))
+        .cornerRadius(10)
     }
 
     private var versionLabel: String {

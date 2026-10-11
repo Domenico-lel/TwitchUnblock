@@ -23,10 +23,12 @@ struct AdminFeedbackItem: Decodable, Identifiable, Hashable {
     let lastFrom: String
     let count: Int
     let photos: Int
+    /// Dernière fois que tu l'as vu (« Vu », réponse ou nouvel état).
+    let seenAt: Double?
 
     var id: String { key }
-    /// La personne a répondu en dernier : à toi de jouer.
-    var awaiting: Bool { lastFrom == "u" && count > 1 }
+    /// La personne a répondu en dernier, et rien depuis : à toi de jouer.
+    var awaiting: Bool { lastFrom == "u" && count > 1 && updatedAt > (seenAt ?? 0) }
     var date: Date { Date(timeIntervalSince1970: at / 1000) }
     var updatedDate: Date { Date(timeIntervalSince1970: updatedAt / 1000) }
 
@@ -70,6 +72,10 @@ final class AdminFeedbackService: ObservableObject {
 
     /// Retours où la personne attend une réponse.
     var awaitingCount: Int { items.filter(\.awaiting).count }
+
+    /// Le Worker connaît « Vu » : il rend `seenAt` sur chaque retour. Celui de
+    /// production d'avant refuse l'action (« Action inconnue », HTTP 400).
+    var supportsSeen: Bool { items.contains { $0.seenAt != nil } }
 
     private var token: String?
     private var photoCache: [String: UIImage] = [:]
@@ -117,6 +123,12 @@ final class AdminFeedbackService: ObservableObject {
         await post(["status": ["key": key, "status": status]])
     }
 
+    /// Vu : un retour nouveau passe à « Vu » (la personne le voit) ; ce
+    /// qu'elle a écrit jusque-là n'est plus « à répondre ».
+    func markSeen(_ key: String) async -> Bool {
+        await post(["seen": ["key": key]])
+    }
+
     /// Supprime le retour et ses photos.
     func delete(_ key: String) async -> Bool {
         guard await request("POST", "/api/admin/feedback", body: ["delete": key]) != nil else { return false }
@@ -159,7 +171,7 @@ final class AdminFeedbackService: ObservableObject {
     }
 
     private func request(_ method: String, _ path: String, body: [String: Any]? = nil) async -> Data? {
-        guard let token, let url = URL(string: kAPIURL + path) else { return nil }
+        guard let token, let url = URL(string: APIConfig.base + path) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.cachePolicy = .reloadIgnoringLocalCacheData

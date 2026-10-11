@@ -12,7 +12,12 @@ final class ChatService: NSObject, ObservableObject {
 
     private var webSocketTask: URLSessionWebSocketTask?
     private let session = URLSession(configuration: .default)
-    private var channelName = ""
+    private(set) var channelName = ""
+    /// Modes du salon qui limitent qui peut écrire (abonnés, followers…) :
+    /// les réglages du chat (GQL), puis le ROOMSTATE au fil du direct.
+    @Published private(set) var roomModes = ChatRoomModes()
+    /// Règles du chat de la chaîne, à accepter avant le premier message.
+    @Published private(set) var rules: [String] = []
     private var pingTimer: Timer?
     private var connectionTimeoutTask: Task<Void, Never>?
     private let maxMessages = 200
@@ -95,6 +100,10 @@ final class ChatService: NSObject, ObservableObject {
         channelName = channel.lowercased()
         lastToken = token
         lastLogin = login
+        roomModes = ChatRoomModes()
+        rules = []
+        let name = channelName
+        Task { await loadChatSettings(name) }
         logger.info("CHAT", "Connexion IRC → #\(channelName)")
 
         guard let url = URL(string: "wss://irc-ws.chat.twitch.tv:443") else { return }
@@ -337,6 +346,8 @@ final class ChatService: NSObject, ObservableObject {
                 if let who = irc.tags["login"] ?? irc.prefixNick { presentUsers.insert(who.lowercased()) }
             case "PART":
                 if let who = irc.tags["login"] ?? irc.prefixNick { presentUsers.remove(who.lowercased()) }
+            case "ROOMSTATE":
+                applyRoomState(irc.tags)
             case "NOTICE":
                 await handleNotice(irc)
             case "CLEARCHAT":
@@ -523,15 +534,70 @@ final class ChatService: NSObject, ObservableObject {
             return
         }
 
-        let chatErrorIds: Set<String> = [
-            "msg_banned","msg_timedout","msg_subsonly","msg_followersonly",
-            "msg_verified_email","msg_emotesonly","msg_slowmode",
-            "msg_duplicate","no_permission","unrecognized_cmd"
-        ]
+        // Message refusé par Twitch (mode abonnés, followers, lent…) : la
+        // raison dans la langue de l'app, et le message, affiché d'avance
+        // comme envoyé, retiré — sinon on croyait qu'il était passé.
+        if let key = Self.rejectionKeys[msgId] ?? (msgId.hasPrefix("msg_") ? "chat_rej_generic" : nil) {
+            logger.warn("CHAT", "Message refusé : \(msgId)", text)
+            if let i = messages.firstIndex(where: { $0.id.hasPrefix("local-") }),
+               Date().timeIntervalSince(messages[i].timestamp) < 20 {
+                messages.remove(at: i)
+            }
+            let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+            let minutes = roomModes.followersMinutes ?? 0
+            insertSystemMessage(translate(key, lang)
+                .replacingOccurrences(of: "{d}", with: minutes > 0 ? ChatRoomModes.duration(minutes, lang: lang) : "")
+                .replacingOccurrences(of: "{t}", with: text))
+            return
+        }
+        let chatErrorIds: Set<String> = ["no_permission", "unrecognized_cmd"]
         if chatErrorIds.contains(msgId) {
             logger.warn("CHAT", "NOTICE \(msgId)", text)
             insertSystemMessage(text)
         }
+    }
+
+    /// Refus de Twitch (msg-id du NOTICE) → texte traduit.
+    private static let rejectionKeys: [String: String] = [
+        "msg_followersonly": "chat_rej_followers", "msg_followersonly_zero": "chat_rej_followers",
+        "msg_followersonly_followed": "chat_rej_followers_time",
+        "msg_subsonly": "chat_rej_subs", "msg_emoteonly": "chat_rej_emotes", "msg_emotesonly": "chat_rej_emotes",
+        "msg_slowmode": "chat_rej_slow", "msg_r9k": "chat_rej_unique", "msg_duplicate": "chat_rej_duplicate",
+        "msg_verified_email": "chat_rej_verified", "msg_requires_verified_phone_number": "chat_rej_verified",
+        "msg_timedout": "chat_rej_timeout", "msg_banned": "chat_rej_banned",
+        "msg_rejected": "chat_rej_automod", "msg_rejected_mandatory": "chat_rej_automod",
+        "msg_ratelimit": "chat_rej_ratelimit", "msg_channel_suspended": "chat_rej_suspended",
+        "msg_suspended": "chat_rej_suspended",
+    ]
+
+    // MARK: – Modes du salon et règles
+    /// ROOMSTATE : complet à l'arrivée, puis seulement ce qui change.
+    private func applyRoomState(_ tags: [String: String]) {
+        var m = roomModes
+        if let v = tags["followers-only"], let n = Int(v) { m.followersMinutes = n < 0 ? nil : n }
+        if let v = tags["subs-only"] { m.subsOnly = v == "1" }
+        if let v = tags["emote-only"] { m.emoteOnly = v == "1" }
+        if let v = tags["slow"], let n = Int(v) { m.slowSeconds = n }
+        if let v = tags["r9k"] { m.uniqueChat = v == "1" }
+        roomModes = m
+    }
+
+    /// Règles et modes du chat (GQL public, sans compte).
+    private func loadChatSettings(_ login: String) async {
+        let q = "query { user(login: \"\(gqlStr(login))\") { chatSettings { rules followersOnlyDurationMinutes isSubscribersOnlyModeEnabled isEmoteOnlyModeEnabled slowModeDurationSeconds requireVerifiedAccount isUniqueChatModeEnabled } } }"
+        guard let user = (await VodChatService.rawGQL(q)?["data"] as? [String: Any])?["user"] as? [String: Any],
+              let cs = user["chatSettings"] as? [String: Any], login == channelName else { return }
+        rules = (cs["rules"] as? [String] ?? [])
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var m = roomModes
+        m.followersMinutes = cs["followersOnlyDurationMinutes"] as? Int
+        m.subsOnly = cs["isSubscribersOnlyModeEnabled"] as? Bool ?? false
+        m.emoteOnly = cs["isEmoteOnlyModeEnabled"] as? Bool ?? false
+        m.slowSeconds = cs["slowModeDurationSeconds"] as? Int ?? 0
+        m.uniqueChat = cs["isUniqueChatModeEnabled"] as? Bool ?? false
+        m.verifiedOnly = cs["requireVerifiedAccount"] as? Bool ?? false
+        roomModes = m
     }
 
     private func insertSystemMessage(_ text: String) {

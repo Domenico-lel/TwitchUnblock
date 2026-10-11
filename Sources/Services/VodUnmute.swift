@@ -154,13 +154,20 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
                 pending = Double(line.dropFirst(8).split(separator: ",").first ?? "") ?? 0
                 continue
             }
-            guard !line.isEmpty, !line.hasPrefix("#"),
-                  let abs = URL(string: line, relativeTo: base)?.absoluteURL else { continue }
+            if line.hasPrefix("#") {
+                // Segment d'initialisation des VODs en fMP4 : il passait par ce
+                // chargeur, qui ne sert que des playlists — image noire.
+                if let fixed = absoluteURIAttribute(line, base: base) { lines[i] = fixed }
+                continue
+            }
+            guard !line.isEmpty, let abs = URL(string: line, relativeTo: base)?.absoluteURL else { continue }
             var segment = abs.absoluteString
-            if let r = segment.range(of: #"-(un)?muted\.ts"#, options: .regularExpression) {
+            // « N-muted.ts », ou « N-muted.mp4 » pour les VODs en fMP4.
+            if let r = segment.range(of: #"-(un)?muted\.(ts|mp4)"#, options: .regularExpression) {
+                let ext = segment[r].hasSuffix(".mp4") ? "mp4" : "ts"
                 // « -unmuted » n'existe pas sur le CDN : la version muette sert de repli.
-                let original = segment.replacingCharacters(in: r, with: ".ts")
-                segment = segment.replacingCharacters(in: r, with: "-muted.ts")
+                let original = segment.replacingCharacters(in: r, with: ".\(ext)")
+                segment = segment.replacingCharacters(in: r, with: "-muted.\(ext)")
                 if let o = URL(string: original) {
                     muted.append(Muted(index: i, original: o, start: clock, duration: pending))
                 }
@@ -232,4 +239,16 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         let code = (try? await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode
         return code == 200
     }
+}
+
+/// Balise avec une adresse relative (`#EXT-X-MAP:URI="init-0.mp4"`) : adresse
+/// rendue absolue. Une playlist servie par un chargeur maison (`tuunmute://`,
+/// `tulive://`) n'a plus le CDN pour base : AVPlayer demanderait le fichier
+/// au chargeur. nil : rien à changer.
+func absoluteURIAttribute(_ line: String, base: URL) -> String? {
+    // L'attribut URI lui-même (pas « …-URL » d'une autre balise).
+    guard let r = line.range(of: #"(?<=[:,])URI="[^"]+""#, options: .regularExpression) else { return nil }
+    let value = String(line[r].dropFirst(5).dropLast())
+    guard let abs = URL(string: value, relativeTo: base)?.absoluteURL.absoluteString, abs != value else { return nil }
+    return line.replacingCharacters(in: r, with: "URI=\"\(abs)\"")
 }

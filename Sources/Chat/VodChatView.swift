@@ -7,6 +7,8 @@ struct VodChatView: View {
     let playbackTime: Double
     /// Présentation : plein cadre, colonne étroite, ou calque sur l'image.
     var style: ChatStyle = .standard
+    /// VOD téléchargée : le chat gardé avec elle (chat.json), lu sans réseau.
+    var offlineFile: URL? = nil
 
     @EnvironmentObject private var store: AppStore
     @StateObject private var vod = VodChatService()
@@ -135,7 +137,10 @@ struct VodChatView: View {
                 Color.tDark
             }
         }
-        .task(id: videoId) { await vod.start(videoId: videoId) }
+        .task(id: videoId) {
+            if let offlineFile { await vod.startOffline(file: offlineFile) }
+            else { await vod.start(videoId: videoId) }
+        }
         // La position de lecture pilote la libération des messages.
         .onChange(of: playbackTime) { t in
             Task { await vod.update(offset: t) }

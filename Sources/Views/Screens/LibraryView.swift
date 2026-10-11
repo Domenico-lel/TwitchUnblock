@@ -7,9 +7,12 @@ import SwiftUI
 
 struct LibraryView: View {
     let onPlayVod: (String, String?, String?, String?) -> Void
+    /// VOD téléchargée : lue hors ligne, par le serveur local.
+    var onPlayOffline: (RecoveredVod) -> Void = { _ in }
 
     @EnvironmentObject private var store: AppStore
     @ObservedObject private var metaStore = VodMetaStore.shared
+    @ObservedObject private var downloads = VodDownloads.shared
 
     @State private var confirmClear = false
 
@@ -17,7 +20,7 @@ struct LibraryView: View {
 
     var body: some View {
         Group {
-            if vods.isEmpty {
+            if vods.isEmpty && downloads.items.isEmpty {
                 VStack {
                     Spacer()
                     TEmptyState(icon: "film.stack",
@@ -28,18 +31,29 @@ struct LibraryView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: TSpace.md) {
-                        TSectionHeader("\(vods.count) \(store.t("vods"))", icon: "clock.arrow.circlepath") {
-                            Button { confirmClear = true } label: {
-                                Text(store.t("btn_clear"))
-                                    .font(.tMeta).foregroundColor(.tDanger)
+                        if !downloads.items.isEmpty {
+                            TSectionHeader("\(store.t("dl_section")) · \(ByteCountFormatter.string(fromByteCount: downloads.totalBytes, countStyle: .file))",
+                                           icon: "arrow.down.circle") { EmptyView() }
+                                .padding(.top, TSpace.md)
+                            ForEach(downloads.items) { item in
+                                DownloadRow(item: item) { playOffline($0) }
                             }
-                            .buttonStyle(.plain)
                         }
-                        .padding(.top, TSpace.md)
 
-                        ForEach(vods) { item in
-                            row(item)
-                                .task { await metaStore.load(item.term) }
+                        if !vods.isEmpty {
+                            TSectionHeader("\(vods.count) \(store.t("vods"))", icon: "clock.arrow.circlepath") {
+                                Button { confirmClear = true } label: {
+                                    Text(store.t("btn_clear"))
+                                        .font(.tMeta).foregroundColor(.tDanger)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.top, TSpace.md)
+
+                            ForEach(vods) { item in
+                                row(item)
+                                    .task { await metaStore.load(item.term) }
+                            }
                         }
 
                         Spacer(minLength: 40)
@@ -56,6 +70,12 @@ struct LibraryView: View {
             }
         } message: {
             Text(store.t("confirm"))
+        }
+    }
+
+    private func playOffline(_ item: VodDownload) {
+        Task {
+            if let rec = await downloads.playback(item) { onPlayOffline(rec) }
         }
     }
 

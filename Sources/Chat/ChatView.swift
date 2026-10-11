@@ -26,6 +26,9 @@ struct ChatView: View {
     @State private var messageText      = ""
     @State private var showEmotePicker  = false
     @State private var showChatMenu     = false
+    /// Règles du chat à accepter avant le premier message, et ce message en attente.
+    @State private var showRules        = false
+    @State private var pendingMessage: String? = nil
     @State private var showPointsSheet  = false
     @State private var showWebLogin     = false
     @State private var webLoginClear    = false   // true = re-login forcé (token web expiré)
@@ -372,6 +375,10 @@ struct ChatView: View {
                 .presentationDragIndicator(.visible)
         }
         // ── Menu « … » du chat ───────────────────────────────────────
+        .sheet(isPresented: $showRules) {
+            ChatRulesSheet(channel: chat.channelName, rules: chat.rules) { closeRules(accepted: $0) }
+                .environmentObject(store)
+        }
         .sheet(isPresented: $showChatMenu) {
             ChatMenuSheet(
                 channelName: channelName,
@@ -652,6 +659,7 @@ struct ChatView: View {
             autocompleteBar
             if !style.translucent { Divider().background(Color.tBorder) }
             VStack(spacing: 4) {
+                roomModesLine
                 HStack(spacing: 6) {
 
                     // 🎁 Points de chaîne — le jeton prend de la place et n'a rien
@@ -748,12 +756,65 @@ struct ChatView: View {
         }
     }
 
+    /// Modes du salon qui limitent qui peut écrire, au-dessus du champ : on le
+    /// sait avant d'écrire, plutôt qu'en voyant son message refusé.
+    @ViewBuilder private var roomModesLine: some View {
+        let m = chat.roomModes
+        if !m.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    if let minutes = m.followersMinutes {
+                        modeChip("person.2.fill", minutes > 0
+                                 ? store.t("chat_mode_followers_min")
+                                     .replacingOccurrences(of: "{d}", with: ChatRoomModes.duration(minutes, lang: store.lang))
+                                 : store.t("chat_mode_followers"))
+                    }
+                    if m.subsOnly { modeChip("star.fill", store.t("chat_mode_subs")) }
+                    if m.emoteOnly { modeChip("face.smiling", store.t("chat_mode_emotes")) }
+                    if m.slowSeconds > 0 {
+                        modeChip("tortoise.fill", store.t("chat_mode_slow").replacingOccurrences(of: "{s}", with: "\(m.slowSeconds)"))
+                    }
+                    if m.uniqueChat { modeChip("square.on.square", store.t("chat_mode_unique")) }
+                    if m.verifiedOnly { modeChip("checkmark.seal.fill", store.t("chat_mode_verified")) }
+                }
+            }
+        }
+    }
+
+    private func modeChip(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon).font(.system(size: 10, weight: .bold))
+            Text(text).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+        }
+        .foregroundColor(.tWarning)
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(Color.tWarning.opacity(0.14))
+        .clipShape(Capsule())
+    }
+
     // MARK: – Actions
     private func sendMessage() {
         let trimmed = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 500 else { return }
+        // Règles du chat pas encore acceptées (comme sur Twitch) : elles
+        // d'abord, le message part une fois acceptées.
+        if !chat.rules.isEmpty, !ChatRules.accepted(chat.channelName, rules: chat.rules) {
+            pendingMessage = trimmed
+            isInputFocused = false
+            showRules = true
+            return
+        }
         messageText = ""; autoScroll = true
         Task { await chat.sendMessage(trimmed) }
+    }
+
+    private func closeRules(accepted: Bool) {
+        showRules = false
+        defer { pendingMessage = nil }
+        guard accepted, let text = pendingMessage else { return }
+        ChatRules.accept(chat.channelName, rules: chat.rules)
+        messageText = ""; autoScroll = true
+        Task { await chat.sendMessage(text) }
     }
 
     private func insertEmote(_ emote: TwitchEmote) {
@@ -1018,5 +1079,51 @@ private struct PinnedSlotKey: PreferenceKey {
     static var defaultValue: Anchor<CGRect>? = nil
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
         value = value ?? nextValue()
+    }
+}
+
+// MARK: – Règles du chat
+/// Règles de la chaîne, à accepter avant d'écrire (comme sur Twitch).
+struct ChatRulesSheet: View {
+    let channel: String
+    let rules: [String]
+    let done: (Bool) -> Void
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label(store.t("chat_rules_title").replacingOccurrences(of: "{c}", with: channel),
+                  systemImage: "list.bullet.rectangle")
+                .font(.tSection).foregroundColor(.tText)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(rules.enumerated()), id: \.offset) { _, rule in
+                        Text(rule)
+                            .font(.tBody).foregroundColor(.tText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            HStack(spacing: 12) {
+                Button(store.t("cancel")) { done(false) }
+                    .foregroundColor(.tMuted)
+                Spacer()
+                Button {
+                    done(true)
+                } label: {
+                    Text(store.t("chat_rules_accept"))
+                        .font(.tLabel).foregroundColor(.white)
+                        .padding(.horizontal, 18).frame(height: 40)
+                        .background(Color.tPrimary)
+                        .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.tDark.ignoresSafeArea())
+        .presentationDetents([.medium, .large])
     }
 }

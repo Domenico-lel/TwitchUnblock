@@ -6,17 +6,20 @@ import UIKit
 //  Comptage d'utilisation.
 //
 //  L'app signale « je suis vivante » au Worker, qui compte les identifiants
-//  distincts. Ce qui part du téléphone se limite à trois choses :
+//  distincts. Ce qui part du téléphone :
 //
 //    • un identifiant tiré au hasard à la première ouverture, propre à cette
-//      installation — aucun lien avec le compte Twitch, ni avec l'appareil
-//      (pas d'IDFV, pas de numéro de série) ;
-//    • la version de l'app ;
-//    • « ios ».
+//      installation — aucun lien avec l'appareil (pas d'IDFV, pas de numéro
+//      de série) ; connecté, le jeton Twitch, pour compter le compte une seule
+//      fois sur l'app et le site ;
+//    • la version de l'app, « ios », la langue de l'app, iPhone ou iPad et la
+//      version majeure d'iOS ;
+//    • le nombre de lectures depuis le signal précédent : quelle source a
+//      servi chaque live, combien ont échoué, combien de VODs (compteurs
+//      seulement — aucune chaîne, aucun titre).
 //
-//  Pas de pseudo, pas de chaîne regardée, pas d'historique. Le Worker ne
-//  conserve pas les adresses IP. Le comptage est débrayable dans les Réglages,
-//  et le retrait efface l'identifiant côté serveur.
+//  Pas d'historique. Le Worker ne conserve pas les adresses IP. Le comptage
+//  est débrayable dans les Réglages, et le retrait efface tout côté serveur.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Nombre d'installations actives sur une version donnée.
@@ -111,6 +114,25 @@ final class UsageService: ObservableObject {
         return key.isEmpty ? nil : key
     }
 
+    // MARK: – Compteurs de lecture
+    /// Lectures depuis le dernier ping, par issue (« live_as », « vod_fail »…) :
+    /// envoyées avec le ping suivant, puis retirées. Gardées sur l'appareil
+    /// en attendant (un ping par heure au plus).
+    private let eventsKey = "usage_events"
+
+    private var pendingEvents: [String: Int] {
+        UserDefaults.standard.dictionary(forKey: eventsKey) as? [String: Int] ?? [:]
+    }
+
+    /// Une lecture de plus pour /stats (santé du direct). Rien si le comptage
+    /// est coupé.
+    func count(_ event: String) {
+        guard UserDefaults.standard.object(forKey: "cfg_share_usage") as? Bool ?? true else { return }
+        var all = pendingEvents
+        all[event, default: 0] += 1
+        UserDefaults.standard.set(all, forKey: eventsKey)
+    }
+
     // MARK: – Ping
     /// Signale l'installation au Worker. Sans effet si le comptage est coupé.
     func ping(enabled: Bool, force: Bool = false) async {
@@ -118,7 +140,7 @@ final class UsageService: ObservableObject {
         if !force, let last = lastPing, Date().timeIntervalSince(last) < pingInterval {
             return
         }
-        guard let url = URL(string: "\(kAPIURL)/api/ping") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/ping") else { return }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -135,11 +157,17 @@ final class UsageService: ObservableObject {
         if let token = Keychain.loadToken("twitch_token"), !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+        let events = pendingEvents
+        var body: [String: Any] = [
             "id": installId,
             "version": appVersion,
             "platform": "ios",
-        ])
+            "lang": UserDefaults.standard.string(forKey: "lang") ?? "en",
+            "os": String(UIDevice.current.systemVersion.split(separator: ".").first ?? ""),
+            "device": UIDevice.current.userInterfaceIdiom == .pad ? "ipad" : "iphone",
+        ]
+        if !events.isEmpty { body["ev"] = events }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
         do {
             let (_, resp) = try await URLSession.shared.data(for: req)
@@ -150,6 +178,15 @@ final class UsageService: ObservableObject {
             }
             lastPing = Date()
             UserDefaults.standard.set(lastPing!.timeIntervalSince1970, forKey: "usage_last_ping")
+            // Partis : retirés (ceux arrivés pendant l'envoi restent).
+            if !events.isEmpty {
+                var left = pendingEvents
+                for (key, n) in events {
+                    let rest = (left[key] ?? 0) - n
+                    left[key] = rest > 0 ? rest : nil
+                }
+                UserDefaults.standard.set(left, forKey: eventsKey)
+            }
             logger.debug("USAGE", "Ping envoyé", "version \(appVersion)")
         } catch {
             logger.debug("USAGE", "Ping impossible", error.localizedDescription)
@@ -158,7 +195,7 @@ final class UsageService: ObservableObject {
 
     // MARK: – Lecture des compteurs
     func loadStats() async {
-        guard let url = URL(string: "\(kAPIURL)/api/stats") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/stats") else { return }
         loading = true
         lastError = nil
         defer { loading = false }
@@ -214,7 +251,7 @@ final class UsageService: ObservableObject {
     // MARK: – Retrait
     /// Efface cette installation côté serveur (quand on coupe le comptage).
     func forget() async {
-        guard let url = URL(string: "\(kAPIURL)/api/ping") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/ping") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -230,6 +267,7 @@ final class UsageService: ObservableObject {
         _ = try? await URLSession.shared.data(for: req)
         lastPing = nil
         UserDefaults.standard.removeObject(forKey: "usage_last_ping")
+        UserDefaults.standard.removeObject(forKey: eventsKey)
         logger.info("USAGE", "Retrait du comptage demandé", nil)
     }
 }

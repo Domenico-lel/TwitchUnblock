@@ -6,3 +6,11 @@ ef44a116eaa26a6046bb7518d7fbce687a6a75d8  retrait de l'option A
 ee34401ebbdb21db777c00cbee38f1af22d3f799  secours « prêt » : annoncé par le commit qui l'active
 06039382e9828e61377b53711f47c8cc64049b4c  comptage : mesure serveur interne, pas une fonctionnalité
 4e5251d52719a22cd3bd1fc18bf74af0f6ec7e18  gestion des retours : réservée au compte propriétaire, pas une nouveauté pour les utilisateurs
+d92524de00221d78fa2fbbbfb385ccbab523310b  app Apple TV : pas une nouveauté de l'app iPhone (code partagé seulement isolé)
+441d09619fe7b997fcfcaab0dbcb84be0c169511  app Apple TV (cartes, chat, icône) : pas une nouveauté de l'app iPhone
+8be9a8761a1ccaca77f3870e1bc1dcccbd71c3f7  icônes au choix : correctif du message (annoncées par 3c5ebbe)
+85526635a1b31e8ea6d1d8858b5d686e07316215  téléchargements : correctif (annoncés par 9284438, 028e816, c72a771)
+f35ce49eeb1ab0f978a2b6624bb43103bf1e9852  ntfy : correctif (annoncé par 8abcbb0)
+3e3b6f8587d6b2eeb443cbb757cf5c0b3cd01873  icônes au choix : correctif (annoncées par 3c5ebbe)
+5143e8d1852e4f978047e9dafa7f756ddc5cffed  icônes au choix : correctif (annoncées par 3c5ebbe)
+3c5ebbec3724b599665c8838b8dd4de2626ca927  icônes au choix : ligne remplacée (versions sombre et teintée retirées des icônes au choix), voir le commit du commentaire de make_icons.py

@@ -21,6 +21,195 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.52",
+          "buildVersion": "276",
+          "date": "2026-10-11",
+          "localizedDescription": "- Chat: the room's modes (followers only and for how long, subscribers only, slow mode…) show above the message box, the channel's chat rules are shown to accept before your first message, and a message Twitch refuses is removed with the reason.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-276/TwitchUnblock.ipa",
+          "size": 2932362,
+          "commit": "a2fd4eb5d764bc3052d16283183d5dc7b1254df3"
+        },
+        {
+          "version": "1.2.51",
+          "buildVersion": "275",
+          "date": "2026-10-11",
+          "localizedDescription": "- Expert settings (Settings → Other): if the official Workers go down, give the address of your own Worker; it's checked, then tried first for lives, VODs and playlists, or used for everything.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-275/TwitchUnblock.ipa",
+          "size": 2911295,
+          "commit": "31c986b07ee07398146d753a680ace0704a8bc0b"
+        },
+        {
+          "version": "1.2.49",
+          "buildVersion": "273",
+          "date": "2026-10-11",
+          "localizedDescription": "- Améliorations et corrections",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-273/TwitchUnblock.ipa",
+          "size": 2894308,
+          "commit": "e1182c51813650c434f7923d3fca365ec4e2a3c2"
+        },
+        {
+          "version": "1.2.48",
+          "buildVersion": "272",
+          "date": "2026-10-11",
+          "localizedDescription": "- Icônes : « Merge Entitlements » n'existe pas encore dans Feather publié",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-272/TwitchUnblock.ipa",
+          "size": 2894312,
+          "commit": "8be9a8761a1ccaca77f3870e1bc1dcccbd71c3f7"
+        },
+        {
+          "version": "1.2.47",
+          "buildVersion": "271",
+          "date": "2026-10-11",
+          "localizedDescription": "- Lives: double-tap no longer skips ahead; in landscape it shows or hides the chat, and a red Live button with the delay brings you back to the edge after a pause.\n- Categories: filter the lives by language (all, or a single one).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-271/TwitchUnblock.ipa",
+          "size": 2894237,
+          "commit": "5c61522f21db22dfb59c4da6bd3bf8678a600545"
+        },
+        {
+          "version": "1.2.46",
+          "buildVersion": "270",
+          "date": "2026-10-11",
+          "localizedDescription": "- Pick the order of the live sources in Settings → Player: if one doesn't answer, the next one takes over; picking a source from the player menu moves it to the top.\n- My reports: a new “Seen” status once your message has been read.\n- Fixed a black screen in “Source” on Luminous Europe for channels that stream with multiple encodes (each quality now keeps its own name).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-270/TwitchUnblock.ipa",
+          "size": 2880302,
+          "commit": "21b7a5e4cba231b3ceb80e492aa848493edaf642"
+        },
+        {
+          "version": "1.2.44",
+          "buildVersion": "269",
+          "date": "2026-10-11",
+          "localizedDescription": "- Téléchargements : l'app sait qu'elle est à l'écran dès son lancement",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-269/TwitchUnblock.ipa",
+          "size": 2864582,
+          "commit": "85526635a1b31e8ea6d1d8858b5d686e07316215"
+        },
+        {
+          "version": "1.2.43",
+          "buildVersion": "268",
+          "date": "2026-10-11",
+          "localizedDescription": "- Downloads run faster while the app is open, and iOS takes over when you leave it; a stopped download now says why (connection lost, storage full, segments refused by Twitch).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-268/TwitchUnblock.ipa",
+          "size": 2864633,
+          "commit": "c72a771563d7c54bc1ca54d45e8dbc6f67712f26"
+        },
+        {
+          "version": "1.2.42",
+          "buildVersion": "267",
+          "date": "2026-10-11",
+          "localizedDescription": "- ntfy : le réglage reste activé quand le serveur n'est pas prêt",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-267/TwitchUnblock.ipa",
+          "size": 2842732,
+          "commit": "f35ce49eeb1ab0f978a2b6624bb43103bf1e9852"
+        },
+        {
+          "version": "1.2.41",
+          "buildVersion": "266",
+          "date": "2026-10-11",
+          "localizedDescription": "- Icônes au choix en fichiers séparés, comme Feather",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-266/TwitchUnblock.ipa",
+          "size": 2841757,
+          "commit": "3e3b6f8587d6b2eeb443cbb757cf5c0b3cd01873"
+        },
+        {
+          "version": "1.2.40",
+          "buildVersion": "265",
+          "date": "2026-10-11",
+          "localizedDescription": "- Icône de l'app : un refus d'iOS se voit, nouvel essai",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-265/TwitchUnblock.ipa",
+          "size": 3451957,
+          "commit": "5143e8d1852e4f978047e9dafa7f756ddc5cffed"
+        },
+        {
+          "version": "1.2.39",
+          "buildVersion": "264",
+          "date": "2026-10-11",
+          "localizedDescription": "- Pick an app icon in Settings → General → Appearance: Classic, Purple, Night, Light, Contrast or Neon, each with dark and tinted versions — “Contrast” stays sharp with iOS 26's clear icons.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-264/TwitchUnblock.ipa",
+          "size": 3448728,
+          "commit": "3c5ebbec3724b599665c8838b8dd4de2626ca927"
+        },
+        {
+          "version": "1.2.38",
+          "buildVersion": "263",
+          "date": "2026-10-11",
+          "localizedDescription": "- Instant live notifications, even with the app closed, through the free ntfy app (Settings → Features in testing): add the topic shown there in ntfy, and tapping a notification opens the stream.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-263/TwitchUnblock.ipa",
+          "size": 2674453,
+          "commit": "8abcbb07d9f80b8e6f8de0fde0c610cf3b17bcc3"
+        },
+        {
+          "version": "1.2.37",
+          "buildVersion": "262",
+          "date": "2026-10-11",
+          "localizedDescription": "- Multi-live on iPad: the chat of the stream you hear shows next to the mosaic (button in the mosaic, or Settings → Player).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-262/TwitchUnblock.ipa",
+          "size": 2655098,
+          "commit": "5875746a6e1c2e7e8ed04539ad7f832ddf970c86"
+        },
+        {
+          "version": "1.2.36",
+          "buildVersion": "261",
+          "date": "2026-10-11",
+          "localizedDescription": "- Downloads keep going in the background, even with the app closed; the chat can be kept and replayed offline (emotes included); a finished download can be exported as a single file (Files, AirDrop, VLC).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-261/TwitchUnblock.ipa",
+          "size": 2648332,
+          "commit": "028e8169a58b91f9fd62389dbae8740a43db3274"
+        },
+        {
+          "version": "1.2.35",
+          "buildVersion": "260",
+          "date": "2026-10-11",
+          "localizedDescription": "- Fixed a black screen on some recent VODs with muted parts (Twitch's new MP4 format); their original sound is restored too while Twitch still has it.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-260/TwitchUnblock.ipa",
+          "size": 2598048,
+          "commit": "f0ede2e4b435a6c29be078d563ab8a3619f96e27"
+        },
+        {
+          "version": "1.2.34",
+          "buildVersion": "259",
+          "date": "2026-10-11",
+          "localizedDescription": "- Multi-live: watch up to four streams side by side. Long-press a live card (or use the player's ⋯ menu) to add it, then tap Watch in the bar at the bottom; tap a stream to hear it.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-259/TwitchUnblock.ipa",
+          "size": 2596972,
+          "commit": "eaaf0d39e0ead64052b8bc59fdd320872d99eb91"
+        },
+        {
+          "version": "1.2.33",
+          "buildVersion": "258",
+          "date": "2026-10-11",
+          "localizedDescription": "- Download a whole VOD or just a part of it (from one time to another) to watch offline, from the player's ⋯ menu. Parts muted for copyrighted music keep their original sound while Twitch still has it. Your downloads are in the My VODs tab.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-258/TwitchUnblock.ipa",
+          "size": 2542788,
+          "commit": "9284438af8a98715ec531b42ae0d832573ca963c"
+        },
+        {
+          "version": "1.2.32",
+          "buildVersion": "257",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops: a notification when a drop is ready to claim, or when the app has claimed it for you (Settings → Drops → Notify me).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-257/TwitchUnblock.ipa",
+          "size": 2449430,
+          "commit": "6937a6cf54b07f00aad8b9f169f3fbdfdbefe397"
+        },
+        {
+          "version": "1.2.31",
+          "buildVersion": "256",
+          "date": "2026-10-11",
+          "localizedDescription": "- Usage stats (if enabled) now also include the app language, iPhone or iPad, the iOS version and anonymous play counters (which source served a live, failures) — never the channels.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-256/TwitchUnblock.ipa",
+          "size": 2446765,
+          "commit": "ad3cb9d208e1d036c9cd84142d1c778654fa19b4"
+        },
+        {
+          "version": "1.2.30",
+          "buildVersion": "255",
+          "date": "2026-10-11",
+          "localizedDescription": "- Améliorations et corrections",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-255/TwitchUnblock.ipa",
+          "size": 2443205,
+          "commit": "b747f346277a8f2a7a882ee41efb7b2fd9a778a9"
+        },
+        {
           "version": "1.2.29",
           "buildVersion": "253",
           "date": "2026-10-11",
@@ -100,205 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-243/TwitchUnblock.ipa",
           "size": 2205875,
           "commit": "faa1c56c9a8151ab153defc450b2b5dd5859b5fb"
-        },
-        {
-          "version": "1.2.20",
-          "buildVersion": "241",
-          "date": "2026-10-10",
-          "localizedDescription": "- Liquid Glass: buttons in the player (and the way back to home) work again while watching a stream.\n- My reports: replies and status changes now show up on their own, no need to refresh.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-241/TwitchUnblock.ipa",
-          "size": 2200820,
-          "commit": "a63155a675daf193424f85330706ae490ea9e547"
-        },
-        {
-          "version": "1.2.19",
-          "buildVersion": "239",
-          "date": "2026-10-10",
-          "localizedDescription": "- Passages coupés : plus d'avertissement de concurrence à la publication du résultat",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-239/TwitchUnblock.ipa",
-          "size": 2200788,
-          "commit": "a9859acd86aea48f43c7f5e7b7024cdb1004d51c"
-        },
-        {
-          "version": "1.2.18",
-          "buildVersion": "238",
-          "date": "2026-10-10",
-          "localizedDescription": "- iPad: the back, AirPlay and close buttons at the top of the immersive player work again in landscape.\n- Chat auto-sync: a more accurate delay that no longer drifts every few seconds; fine-tune it by ±1 s from the chat's ⏱ badge or in Settings.\n- Themes: choose an accent color and a background (dark, OLED black, slate) in Settings > General > Appearance.\n- Liquid Glass option (iOS 26): floating tab bar and glass buttons.\n- Russian language, translated with AI (corrections welcome from Settings).\n- VODs: parts muted by Twitch show in orange with a Skip button; on recent VODs the original sound is restored when Twitch still has it.\n- Switch account button in Settings; after logging out, Twitch now asks which account to use.\n- Feedback: attach screenshots, follow your reports in \"My reports\", read the reply and answer back; a badge shows new replies.\n- The website moved to twitchunblock.vercel.app (Settings link updated).",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-238/TwitchUnblock.ipa",
-          "size": 2200788,
-          "commit": "f45f161fab979a7f547e988b1d21a1d1f31387ff"
-        },
-        {
-          "version": "1.2.16",
-          "buildVersion": "236",
-          "date": "2026-10-07",
-          "localizedDescription": "- The bug report / idea form is now one tap away: header, Settings home and the player ⋯ menu",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-236/TwitchUnblock.ipa",
-          "size": 2017903,
-          "commit": "fcf736da47aa23dde6b91449b90550371142f930"
-        },
-        {
-          "version": "1.2.15",
-          "buildVersion": "235",
-          "date": "2026-10-07",
-          "localizedDescription": "- New \"Report a bug or suggest an idea\" form in Settings\n- Swiping the player down recovers if interrupted, adapts to the screen size and respects Reduce Motion\n- Without an account, the app explains why lists stop at 100",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-235/TwitchUnblock.ipa",
-          "size": 2009715,
-          "commit": "89676cd22c1a6cc7caa97a522d91f2d63c65de5a"
-        },
-        {
-          "version": "1.2.14",
-          "buildVersion": "234",
-          "date": "2026-10-07",
-          "localizedDescription": "- Predictions: you can now place bets (tap an outcome, pick an amount, Predict)\n- Swiping the player down is now smooth and slides it away like the Twitch app\n- Channel page: new \"About\" tab with the description, social links and panels\n- Clips: 100 at once instead of 30, and \"Load more\" when logged in\n- Links in bot command replies are now tappable\n- Tapping a streamer's name on a stream card opens their channel\n- Settings: option to hide recent streamers\n- Pasting a Twitch link (twitch.tv/xqc) in Search opens the channel",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-234/TwitchUnblock.ipa",
-          "size": 1977408,
-          "commit": "48f131039bd25a83235a56384d73d257c3b809d6"
-        },
-        {
-          "version": "1.2.13",
-          "buildVersion": "233",
-          "date": "2026-10-06",
-          "localizedDescription": "- The Categories tab is now available without a Twitch account\n- Deleted or hidden VODs now appear right among a channel's VODs, marked \"Unlisted VOD\" (the \"Deleted\" tab is gone)\n- Recovered VODs that start with a muted (copyrighted) part now play\n- Swipe down on the player to minimize it, like the back arrow\n- Auto chat sync no longer lags 10+ s behind on channels that stream with a delay",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-233/TwitchUnblock.ipa",
-          "size": 1909625,
-          "commit": "dc32c0605f64caa0700825455bc7d560d64dadf1"
-        },
-        {
-          "version": "1.2.12",
-          "buildVersion": "231",
-          "date": "2026-10-06",
-          "localizedDescription": "- New interactive tutorial: a guided tour over the real screens (replay it from Settings > About)\n- Home: offline followed channels now have their own \"Offline\" tab, next to Top streams\n- Settings: new \"Changelog\" page listing every version and what changed\n- Channel page: the \"Deleted\" tab now comes right after VODs",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-231/TwitchUnblock.ipa",
-          "size": 1888489,
-          "commit": "6ff7e129a953f063955493717d2d8f8b4fd95916"
-        },
-        {
-          "version": "1.2.11",
-          "buildVersion": "230",
-          "date": "2026-10-06",
-          "localizedDescription": "- New \"Deleted\" tab on a channel page: recover recently deleted VODs while Twitch still serves their segments.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-230/TwitchUnblock.ipa",
-          "size": 1842921,
-          "commit": "54e947072d512b5d9f95950c3feda637b304e3d4"
-        },
-        {
-          "version": "1.2.10",
-          "buildVersion": "229",
-          "date": "2026-10-06",
-          "localizedDescription": "- Améliorations et corrections",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-229/TwitchUnblock.ipa",
-          "size": 1809924,
-          "commit": "076fbda9e093ba023d290d2f4bd570c50fa328ee"
-        },
-        {
-          "version": "1.2.9",
-          "buildVersion": "227",
-          "date": "2026-10-05",
-          "localizedDescription": "- If the main server reaches its daily limit, VODs and lives switch to a backup server automatically.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-227/TwitchUnblock.ipa",
-          "size": 1809263,
-          "commit": "268b0ecc3ea8984bff2fba158d7730809dff7e80"
-        },
-        {
-          "version": "1.2.8",
-          "buildVersion": "226",
-          "date": "2026-10-05",
-          "localizedDescription": "- Live Activity: the stream you are watching on the lock screen and in the Dynamic Island, with viewers and uptime, or the VOD's progress.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-226/TwitchUnblock.ipa",
-          "size": 1809743,
-          "commit": "59d5e502f7d9c1641c911996a1e116a2937ace76"
-        },
-        {
-          "version": "1.2.7",
-          "buildVersion": "225",
-          "date": "2026-10-05",
-          "localizedDescription": "- Ready to switch VODs and lives to a backup server when the main one reaches its daily limit.\n- Seek bar: while dragging, a bubble shows the exact time you are seeking to (and the chapter on VODs).\n- Pinch with two fingers to zoom into the video, then drag to move around; pinch out to reset.\n- Lock screen and Control Center: title, channel and picture, with play/pause and ±10 s controls. Audio keeps playing when the phone is locked.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-225/TwitchUnblock.ipa",
-          "size": 1733170,
-          "commit": "ee34401ebbdb21db777c00cbee38f1af22d3f799"
-        },
-        {
-          "version": "1.2.5",
-          "buildVersion": "224",
-          "date": "2026-10-05",
-          "localizedDescription": "- Retrait du secours VODs abonnés/masquées (option A)",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-224/TwitchUnblock.ipa",
-          "size": 1707923,
-          "commit": "ef44a116eaa26a6046bb7518d7fbce687a6a75d8"
-        },
-        {
-          "version": "1.2.4",
-          "buildVersion": "223",
-          "date": "2026-10-04",
-          "localizedDescription": "- More subscriber-only or hidden VODs now play: the fallback finds the video even when Twitch no longer provides its usual preview.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-223/TwitchUnblock.ipa",
-          "size": 1708891,
-          "commit": "8d337bbbb1692840b0ca64c49efeda9efed6c69e"
-        },
-        {
-          "version": "1.2.3",
-          "buildVersion": "222",
-          "date": "2026-10-04",
-          "localizedDescription": "- Minimized player: tapping the Search or VODs tab no longer re-opens the player full screen.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-222/TwitchUnblock.ipa",
-          "size": 1707923,
-          "commit": "d716dee6593d036cecbc64595f2903341ad4475d"
-        },
-        {
-          "version": "1.2.2",
-          "buildVersion": "220",
-          "date": "2026-10-04",
-          "localizedDescription": "- Backup: export and import your follows, followed categories and settings (Settings > General), compatible with the website.\n- Channel page now has VODs, Highlights, Playlists and Clips tabs.\n- Audio only is remembered: new streams start in audio only until you pick another quality.\n- The streamer's profile picture now loads on VODs without a Twitch account.\n- Offline channels show how long ago and the date of their last stream, on the channel page and in Home.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-220/TwitchUnblock.ipa",
-          "size": 1707540,
-          "commit": "9ca6b8d1976ebb867481aad344ffd0e7f9dbbcfe"
-        },
-        {
-          "version": "1.2.1",
-          "buildVersion": "219",
-          "date": "2026-10-04",
-          "localizedDescription": "- Channel playlists: new Playlists tab on the channel page, with \"Play all\" to chain the videos.\n- Highlights (playlist videos) now play even when Twitch refuses the playback token.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-219/TwitchUnblock.ipa",
-          "size": 1678957,
-          "commit": "c6dfb9a0877af1190fe4b92a9a440d5df8c3b1bb"
-        },
-        {
-          "version": "1.1.11",
-          "buildVersion": "217",
-          "date": "2026-10-04",
-          "localizedDescription": "- Low latency mode now keeps you close to live (gently speeds up when behind)\n- Channel pages open in a sheet without switching to the Search tab\n- Expanded pinned message now stays above the chat\n- Fixed Top streams not loading without a Twitch account",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-217/TwitchUnblock.ipa",
-          "size": 1663751,
-          "commit": "853726b00bc3a5743abb77c5a90e5bf2680eba92"
-        },
-        {
-          "version": "1.1.10",
-          "buildVersion": "215",
-          "date": "2026-10-04",
-          "localizedDescription": "- Streams tab split into Followed and Top tabs\n- Followed now also lists offline channels, tap one to open its page\n- Tap the streamer name in the player to open their channel page\n- Categories: Followed and All tabs, with a Follow button on each category",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-215/TwitchUnblock.ipa",
-          "size": 1654861,
-          "commit": "4434f7125ee66785899ebd8657182fda443dc593"
-        },
-        {
-          "version": "1.1.9",
-          "buildVersion": "213",
-          "date": "2026-10-04",
-          "localizedDescription": "- Pinned message now opens over the chat instead of pushing it down\n- Follow button on channel pages (real Twitch follow with a web session)\n- Device follows are sorted with your other follows and no longer vanish on refresh\n- Welcome tutorial on first launch (replay it from Settings → About)",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-213/TwitchUnblock.ipa",
-          "size": 1617010,
-          "commit": "3fc67be384d7c198a75beeb15d547b9cef1228ac"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.29",
+      "version": "1.2.52",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-253/TwitchUnblock.ipa",
-      "size": 2443205
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-276/TwitchUnblock.ipa",
+      "size": 2932362
     }
   ],
   "news": []

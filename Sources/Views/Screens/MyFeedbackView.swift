@@ -156,6 +156,7 @@ struct FeedbackStatusPill: View {
     var body: some View {
         let tint: Color = {
             switch status {
+            case "seen":     return .tPrimary
             case "accepted": return .tOutplayer
             case "progress": return .tWarning
             case "done":     return .tSuccess

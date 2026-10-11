@@ -33,10 +33,20 @@ no key to paste. The backend is already hosted and shared by every install.
   Twitch does it. Play/pause, scrubbing, quality, refresh, orientation. Apple's
   native player stays available as a fallback in Settings.
 * ⏩ **Double-tap to skip ±10 s** — consecutive taps add up, so three taps read
-  "+30 s" instead of three separate "+10 s".
+  "+30 s" instead of three separate "+10 s". On a live there's nothing to skip
+  ahead to: in landscape, double-tap shows or hides the chat instead, and once
+  you fall behind (pause, network drop) a red **Live** button with the delay
+  brings you back to the edge.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps.
 * ⚙️ **Quality selector** — every resolution the channel broadcasts, Source
   included.
+* 🛡 **Ad-free lives, in the source order you pick** — lives come from ad-free
+  sources (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous Europe)
+  or official Twitch (with ads), tried one after the other until one answers.
+  Reorder them in Settings → Player; picking a source from the player's ⋯
+  menu (which also shows the source in use) moves it to the top. Channels that
+  stream with multiple encodes (Enhanced Broadcasting) keep each quality's own
+  name on every source.
 * ⏪ **Rewind a live stream (DVR)** — when the channel archives its broadcasts,
   the progress bar covers the *whole* stream, not just the rewindable window.
   Scrub past that window and the recording takes over at that exact moment.
@@ -48,6 +58,9 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
   right in the player.
 * 📡 **AirPlay** — send the stream to an Apple TV or a compatible TV.
+* 🎧 **Spatial audio (AirPods)** — turn it off in the app, head tracking
+  included (Settings → Player). iOS doesn't let apps pick "Fixed" or "Head
+  Tracked": that choice stays in Control Center.
 * 🧭 **VOD chapters** — game changes marked on the progress bar; tap the current
   chapter to jump to another.
 * 🔇 **Muted parts** — passages Twitch muted for copyrighted music show in orange
@@ -60,6 +73,23 @@ no key to paste. The backend is already hosted and shared by every install.
   third party).
 * ✂️ **Clips** — a Clips tab on every channel (24 h, 7 days, 30 days, all time),
   played with the original chat replayed.
+* 📥 **Offline downloads** — download a whole VOD or just a part of it (from one
+  time to another, from where you are, the next 10 minutes) in the quality you
+  pick, then watch it without a connection from the My VODs tab. With the app
+  open, the app downloads the segments itself (four at a time, any error shown
+  under the download); when you leave it, what's left goes to iOS's background
+  downloads, in batches, and keeps going even with the app closed (resumed if
+  you swipe it away). Parts muted for copyrighted music keep their original sound when
+  Twitch still has it (a day or two after the stream). The chat can be kept
+  too and is replayed offline, emotes included. Export a download as a single
+  file (Files, AirDrop, VLC). Pause, resume and delete from the list.
+* 🧩 **Multi-live** — up to four lives side by side, on iPad as on iPhone:
+  long-press a live card (or use the player's ⋯ menu) to add it — a “+” then
+  shows on every card — and tap **Watch** in the bar at the bottom. Tap a
+  stream to hear it, open any of them with its chat, add a channel by name.
+  Side by side in landscape, stacked in portrait. On iPad (or a large iPhone
+  in landscape), the chat of the stream you hear shows on the right — a
+  button in the mosaic and Settings → Player turn it on or off.
 
 ### Chat
 
@@ -92,6 +122,20 @@ no key to paste. The backend is already hosted and shared by every install.
   badge above the chat, or in Settings.
 * 📼 **VOD chat** — replayed in sync with playback position.
 
+### Drops
+
+* 🎁 **Drops page** (Settings → Drops) — your campaigns in progress with their
+  progress bars, every open campaign (all games) with its rewards, a **Claim**
+  button and automatic claiming, a step-by-step guide, and a live status that
+  tells you whether the stream you're watching counts.
+* 📈 **Progress while you watch** — since October 2026, Twitch only counts drops
+  when your own account loads the stream. During a live with drops, the app does
+  that with small requests, without downloading the video a second time.
+* 🔔 **Notifications** — told when a drop is ready to claim, or when the app
+  has claimed it for you (Settings → Drops → Notify me).
+* Needs the Twitch web session, like channel points. Game accounts must be
+  linked: Twitch no longer grants rewards without it.
+
 ### Chat layout
 
 * 📐 **Resizable** — drag the divider between video and chat; the width is
@@ -106,7 +150,12 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 🏠 **Home** — your followed channels that are live, top streams (France or
   worldwide).
-* 🎮 **Categories** — browse by game, then the live channels in it.
+* 🎮 **Categories** — browse by game, then the live channels in it, filtered
+  by language if you like (all, or a single one — kept for every category).
+  Search puts the exact match first ("valorant" → VALORANT), with sharp box
+  art.
+* 🏷 **Stream tags** — language, DropsEnabled… under each live stream, like on
+  Twitch.
 * 🔍 **Search** — by streamer name, channel link, or VOD ID.
 * ℹ️ **About** — a channel's description, followers, social links and panels.
 * 🕒 **History** — recently watched VODs and channels, each removable.
@@ -115,23 +164,51 @@ no key to paste. The backend is already hosted and shared by every install.
 * ⬆️ **Update check** — the app tells you when a new version is out on the
   source, with a shortcut to Feather / SideStore / AltStore.
 * 🔔 **Live notifications** — be told when a followed channel goes live
-  (checked in the background, as often as iOS allows).
+  (checked in the background, as often as iOS allows). For instant ones, even
+  with the app closed, turn on **ntfy** (Settings → Features in testing): the
+  app creates a secret topic, you add it in the free
+  [ntfy](https://apps.apple.com/app/ntfy/id1625396347) app, and the backend
+  posts there within a minute or two of a stream starting — tapping it opens
+  the stream in TwitchUnblock.
 
 ### Look & feel
 
 * 🎨 **Themes** — 7 accent colours and 3 backgrounds (dark, OLED black, slate),
   in Settings → General → Appearance.
+* 🖼️ **App icons** — six to pick from in Settings → General → Appearance
+  (Classic, Purple, Night, Light, Contrast, Neon); the default one has dark
+  and tinted versions, and “Contrast” stays the sharpest with iOS 26's clear
+  and tinted icons. Drawn by `assets/icons/make_icons.py`; the alternate ones
+  ship as separate PNG files (added by `buildipa.sh`), which is what works
+  for apps installed with Feather. If the app was signed with a certificate's
+  generic identifier (`TEAMID.*`, what Feather 2.9 and KSign 1.6 do with the
+  generic profile of a purchased certificate), iOS refuses to change the icon:
+  the app reads its own signature and says so. Feather's next version adds a
+  **Merge Entitlements** option that fixes the signature.
 * 🫧 **Liquid Glass** — optional on iOS 26: a floating tab bar and glass buttons
   over the picture.
 
 ### The rest
 
+* 🧰 **Your own Worker** — Settings → Other → Expert settings: if the official
+  Workers go down (or the project disappears), give the address of your own
+  (deployed from the [website's repository](https://github.com/MXFia19/TwitchUnblock-Web),
+  on Cloudflare or with Docker). It's checked, then tried first for lives,
+  VODs and playlists; **Send everything through this Worker** also moves
+  history backups, feedback, announcements, ntfy notifications and the usage
+  count there (your Twitch token is then sent to it — only for a Worker you
+  host yourself).
+* 🔒 **Chat restrictions said upfront** — above the message box, the room's
+  modes (followers only and for how long, subscribers only, emotes only, slow
+  mode, verified account…); the channel's chat rules to accept before your
+  first message, like on Twitch; and when Twitch refuses a message, it's
+  removed and the reason shown in your language instead of looking sent.
 * 🌍 **Four languages** — English (default), French, Spanish and Russian. The
   Russian translation was made with AI: the app says so next to the language
   picker, with a button to report a mistake.
 * 🐞 **Bug reports & ideas** — a form in the header, in Settings and in the
   player menu, screenshots included. **My reports** shows where each one stands
-  (received, accepted, in progress, done, declined) and the developer's reply,
+  (received, seen, accepted, in progress, done, declined) and the developer's reply,
   and lets you answer back; a badge flags new replies, and open conversations
   refresh on their own.
 * 👥 **Switch account** — sign in with another Twitch account from Settings.
@@ -139,9 +216,13 @@ no key to paste. The backend is already hosted and shared by every install.
   quietly reusing the previous one.
 * 🔐 **Web session check** — the Twitch web session has no known expiry date;
   it's verified at launch, and you're told when it needs restoring instead of
-  channel points silently going quiet.
+  channel points silently going quiet. It must also be the app's account:
+  another account is refused at sign-in (and disconnected if found later), so
+  points, drops and predictions never go to the wrong account.
 * 📊 **Usage count** — logged in, your Twitch account (counted once across the
   app and the website); logged out, a random install ID. Plus the app version,
+  the app language, iPhone or iPad, the iOS version and how many lives and
+  VODs were started (which source served a live, failures — counters only),
   at most once an hour. No channels watched, no IP address. Switching it off
   erases it server-side. Public numbers: [/stats](https://twitchunblock.vercel.app/stats). See
   [`Sources/Services/UsageService.swift`](Sources/Services/UsageService.swift).
@@ -173,6 +254,27 @@ with Sideloadly, AltStore, or TrollStore if your device supports it.
 
 ---
 
+## 📺 Apple TV (test)
+
+A first Apple TV app lives in `TV/` (target `TwitchUnblockTV`, tvOS 16+),
+built on its own by `.github/workflows/build-tvos.yml` and published as an
+unsigned `tv-test-N` pre-release:
+
+* Followed channels (sign in with a code or a QR code on twitch.tv/activate),
+  top streams, categories, search, a channel's VODs.
+* tvOS's native player, with Quality, **Chat** and, for lives, Source in its
+  bar: the chat (read-only, no account needed) sits on the right of the
+  picture — live, or a VOD's chat replayed in sync — with Twitch, BTTV, FFZ
+  and 7TV emotes.
+* Cards that grow when focused stay above their neighbours; the app has its
+  own layered icon and Top Shelf banners (`TV/make_tv_icons.py`, drawn from
+  the iPhone app's logo).
+
+Installing it needs a Mac with Xcode and the Apple TV paired with it
+(AltStore, SideStore and Feather don't handle tvOS).
+
+---
+
 ## 🌐 Web version
 
 **No install? Use it in your browser: https://twitchunblock.vercel.app**
@@ -183,15 +285,18 @@ and shares this app's backend (the Cloudflare Worker, which now lives there too)
 What you get on the web:
 
 * Top streams without logging in, followed channels once logged in
+* Ad-free lives from the source you pick (settings, or the player's ⚙ menu),
+  a few seconds behind live
 * Live and VOD player with quality picker, speed, ±10 s, picture in picture, mini player
 * Native chat: Twitch, BTTV, FFZ and 7TV emotes, badges, chat history, pinned message, replies
 * VOD chat replayed in sync with the video
+* Stream tags, clips, categories, Twitch-style links (`/xqc`, `/videos/…`)
 * Resume VODs where you left off, history synced with your Twitch account
-* French, English and Spanish
+* English, French, Spanish and Russian
 
-Channel points, polls and predictions are **not** in the web version and cannot
-be: they need the `twitch.tv` session cookie, which no third-party site can
-read. For those, use the app.
+Channel points, drops and betting on predictions are **not** in the web version
+and cannot be: they need the `twitch.tv` session cookie, which no third-party
+site can read. For those, use the app.
 
 ---
 

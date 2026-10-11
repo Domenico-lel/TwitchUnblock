@@ -34,6 +34,11 @@ struct MainTabView: View {
     @State private var liveGame: String = ""
     /// Source qui sert le direct en cours (menu du lecteur).
     @State private var liveSourceUsed: String? = nil
+    /// Feuille « Télécharger » (VOD en cours).
+    @State private var showDownloadSheet = false
+    /// Multi-live : la sélection, et la mosaïque ouverte.
+    @ObservedObject private var multi = MultiLive.shared
+    @State private var showMultiLive = false
     @State private var liveStartedAt: Date? = nil
     @State private var liveUptimeText: String = ""
     @State private var refreshTimer: Timer? = nil
@@ -242,7 +247,8 @@ struct MainTabView: View {
                                               onPlayClip: { playClip($0, $1) },
                                               onPlayQueue: { playQueue($0, $1) },
                                               onRecovered: { playRecovered($0) })
-                    case .library: LibraryView(onPlayVod: { playVod($0, $1, $2, $3) })
+                    case .library: LibraryView(onPlayVod: { playVod($0, $1, $2, $3) },
+                                               onPlayOffline: { playRecovered($0) })
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -269,6 +275,11 @@ struct MainTabView: View {
             // fondu de fermeture, le lecteur étant encore en place mais masqué.
             if playerMode != nil && !playerVisible && qualityLinks != nil && !closingPlayer {
                 miniBar.zIndex(99)
+            }
+
+            // ── Multi-live : directs choisis, prêts à être lancés ─────
+            if !multi.entries.isEmpty && !playerVisible && !closingPlayer {
+                multiBar.zIndex(98)
             }
 
             // ── Player overlay ────────────────────────────────────────
@@ -305,13 +316,33 @@ struct MainTabView: View {
                 liveSource: menuLiveSource,
                 onSelectSource: { id in
                     showPlayerMenu = false
-                    guard id != store.liveSource else { return }
-                    logger.settingChanged("Source du direct", value: id)
-                    store.liveSource = id
+                    guard id != store.liveSourceOrder.first else { return }
+                    logger.settingChanged("Source du direct en tête", value: id)
+                    store.preferLiveSource(id)
                     reloadCurrent()
-                }
+                },
+                onDownload: downloadAction,
+                onMultiLive: multiLiveAction,
+                multiLiveOn: menuMultiLiveOn,
+                multiLiveFull: multi.isFull
             )
             .presentationDetents([.medium])
+        }
+        // Multi-live : jusqu'à quatre directs côte à côte.
+        .fullScreenCover(isPresented: $showMultiLive) {
+            MultiLiveView(onWatch: { login in
+                showMultiLive = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { playLive(login) }
+            })
+            .environmentObject(store)
+        }
+        // Télécharger un passage de la VOD en cours (menu ⋯ du lecteur).
+        .sheet(isPresented: $showDownloadSheet) {
+            if let ctx = downloadContext {
+                VodDownloadSheet(context: ctx)
+                    .environmentObject(store)
+                    .presentationDetents([.large])
+            }
         }
         // Réglages : ouverts depuis l'avatar de l'en-tête.
         .sheet(isPresented: $showSettings) {
@@ -669,6 +700,12 @@ struct MainTabView: View {
                 .id("clip-\(cv)-\(Int(clipOffset))")
                 .frame(maxHeight: .infinity)
 
+        } else if let file = offlineChatFile {
+            // VOD téléchargée : le chat gardé avec elle, rejoué sans connexion.
+            VodChatView(videoId: file.path, playbackTime: vodPlaybackTime, style: style, offlineFile: file)
+                .id(file.path)
+                .frame(maxHeight: .infinity)
+
         } else {
             Spacer()
         }
@@ -718,6 +755,7 @@ struct MainTabView: View {
                 onMenu:   { showPlayerMenu = true },
                 onRefresh: { reloadCurrent() },
                 onToggleChat: { withAnimation { store.landscapeChat = store.landscapeChat.next } },
+                onToggleChatVisibility: { withAnimation { store.toggleLandscapeChatVisibility() } },
                 onSleep: { showSleepSheet = true },
                 onBackToLive: { backToLiveAction?() },
                 onSeekToArchive: { offset in
@@ -899,6 +937,47 @@ struct MainTabView: View {
             }
     }
 
+    /// VOD en cours : de quoi proposer d'en télécharger un passage (liens
+    /// directs, sans l'adresse maison des passages coupés).
+    private var downloadContext: VodDownloadContext? {
+        guard let links = qualityLinks?.mapValues({ VodUnmuteLoader.unwrap($0) }), !links.isEmpty else { return nil }
+        switch playerMode {
+        case .vod(let id, let title, let thumb, let streamer)?:
+            return VodDownloadContext(vodId: id, title: title ?? statusTitle, streamer: streamer ?? "",
+                                      thumbnail: thumb ?? "", links: links, position: vodPlaybackTime)
+        case .recovered(let rec)? where !rec.streamID.hasPrefix("offline-"):
+            // VOD supprimée retrouvée : la garder avant qu'elle ne quitte le CDN.
+            return VodDownloadContext(vodId: "r\(rec.streamID)", title: rec.title.isEmpty ? statusTitle : rec.title,
+                                      streamer: rec.streamer, thumbnail: "", links: links, position: vodPlaybackTime)
+        default:
+            return nil
+        }
+    }
+
+    /// Direct en cours : l'ajouter au multi-live, ou l'en retirer.
+    private var multiLiveAction: (() -> Void)? {
+        guard case .live(let ch)? = playerMode, dvrSourceChannel == nil else { return nil }
+        return {
+            showPlayerMenu = false
+            if multi.toggle(ch, name: ch) {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        }
+    }
+
+    private var menuMultiLiveOn: Bool {
+        guard case .live(let ch)? = playerMode else { return false }
+        return multi.contains(ch)
+    }
+
+    private var downloadAction: (() -> Void)? {
+        guard downloadContext != nil else { return nil }
+        return {
+            showPlayerMenu = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showDownloadSheet = true }
+        }
+    }
+
     /// Source du direct pour le menu du lecteur : seulement pendant un direct
     /// (pas pendant son rembobinage, qui lit la VOD en cours).
     private var menuLiveSource: String? {
@@ -927,6 +1006,14 @@ struct MainTabView: View {
     private var backToLiveAction: (() -> Void)? {
         guard let ch = dvrSourceChannel else { return nil }
         return { playLive(ch, soft: true) }
+    }
+
+    /// VOD téléchargée en lecture : le chat gardé avec elle, s'il y en a un.
+    private var offlineChatFile: URL? {
+        guard case .recovered(let rec)? = playerMode, rec.streamID.hasPrefix("offline-") else { return nil }
+        let file = VodDownloads.folder(String(rec.streamID.dropFirst("offline-".count)))
+            .appendingPathComponent(VodChatArchive.fileName)
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
     }
 
     /// Identifiant de la VOD en cours de lecture (nil en live).
@@ -975,6 +1062,48 @@ struct MainTabView: View {
         }
         .padding(.horizontal, TSpace.md)
         .padding(.bottom, 92)
+    }
+
+    /// Multi-live en préparation : les directs choisis, et « Regarder ».
+    /// Au-dessus du mini-lecteur quand il est là.
+    private var multiBar: some View {
+        let miniShown = playerMode != nil && qualityLinks != nil
+        return HStack(spacing: TSpace.sm) {
+            Image(systemName: "square.grid.2x2.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.tPurple)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(store.t("multi_title")) · \(multi.entries.count)/\(MultiLive.max)")
+                    .font(.tCardTitle).foregroundColor(.tText)
+                Text(multi.entries.map(\.name).joined(separator: ", "))
+                    .font(.tMeta).foregroundColor(.tMuted).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: openMultiLive) {
+                Label(store.t("multi_watch"), systemImage: "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12).frame(height: 32)
+                    .background(Capsule().fill(Color.tPrimary))
+            }
+            .buttonStyle(.plain)
+            TIconButton(icon: "xmark", size: 30) { multi.clear() }
+        }
+        .padding(.horizontal, TSpace.md)
+        .padding(.vertical, TSpace.sm)
+        .tGlass(in: RoundedRectangle(cornerRadius: TRadius.card, style: .continuous),
+                fallback: .tCard)
+        .overlay(RoundedRectangle(cornerRadius: TRadius.card, style: .continuous)
+            .stroke(Color.tPurple.opacity(0.35), lineWidth: 1))
+        .contentShape(Rectangle())
+        .padding(.horizontal, TSpace.md)
+        .padding(.bottom, miniShown ? 152 : 92)
+    }
+
+    /// Un seul son à la fois : le lecteur se ferme.
+    private func openMultiLive() {
+        if playerMode != nil { stopPlayer() }
+        showMultiLive = true
     }
 
     // MARK: – Playback
@@ -1116,6 +1245,8 @@ struct MainTabView: View {
                 async let markersTask = getVodMarkers(vodId: id)
                 let data = await getM3U8(vodId: id)
                 let markers = await markersTask
+                // Santé des lectures (/stats) : compteur seulement, sans la VOD.
+                await MainActor.run { UsageService.shared.count(data.links.isEmpty ? "vod_fail" : "vod") }
                 if let err = data.error, data.links.isEmpty {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }
@@ -1156,6 +1287,13 @@ struct MainTabView: View {
 
             case .live(let channel):
                 let data = await getLive(channelName: channel)
+                // Santé du direct (/stats) : la source qui a servi, ou un échec
+                // — jamais la chaîne. Hors ligne n'est pas un échec.
+                if let links = data.links, !links.isEmpty {
+                    await MainActor.run { UsageService.shared.count("live_\(data.source ?? "unknown")") }
+                } else if data.error != "offline" {
+                    await MainActor.run { UsageService.shared.count("live_fail") }
+                }
                 if let err = data.error, err != "offline" {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }

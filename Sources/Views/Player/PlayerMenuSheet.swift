@@ -23,6 +23,12 @@ struct PlayerMenuSheet: View {
     var liveSource: String? = nil
     /// Changer de source : le direct est relancé par elle.
     var onSelectSource: ((String) -> Void)? = nil
+    /// VOD : télécharger un passage pour le regarder hors ligne.
+    var onDownload: (() -> Void)? = nil
+    /// Direct : l'ajouter au multi-live (ou l'en retirer).
+    var onMultiLive: (() -> Void)? = nil
+    var multiLiveOn = false
+    var multiLiveFull = false
 
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -86,8 +92,9 @@ struct PlayerMenuSheet: View {
 
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: TSpace.sm) {
-                                ForEach(kLiveSourceChoices, id: \.self) { id in
-                                    TChip(title: store.t("src_\(id)"), isOn: id == store.liveSource) {
+                                // Dans l'ordre des réglages ; en choisir une la met en tête.
+                                ForEach(store.liveSourceOrder, id: \.self) { id in
+                                    TChip(title: store.t("src_\(id)"), isOn: id == store.liveSourceOrder.first) {
                                         onSelectSource(id)
                                     }
                                 }
@@ -107,6 +114,20 @@ struct PlayerMenuSheet: View {
                     } else if canRewind {
                         row(icon: "gobackward", title: store.t("rewind"),
                             detail: store.t("rewind_sub"), action: onRewind)
+                        divider
+                    }
+
+                    if let onDownload {
+                        row(icon: "arrow.down.circle", title: store.t("dl_download"),
+                            detail: store.t("dl_download_sub"), action: onDownload)
+                        divider
+                    }
+
+                    if let onMultiLive {
+                        row(icon: multiLiveOn ? "minus.square" : "square.grid.2x2",
+                            title: store.t(multiLiveOn ? "multi_remove" : "multi_add"),
+                            detail: store.t(multiLiveFull && !multiLiveOn ? "multi_full" : "multi_add_sub"),
+                            action: onMultiLive)
                         divider
                     }
 

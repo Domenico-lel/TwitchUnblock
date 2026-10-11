@@ -43,6 +43,30 @@ fi
 
 cp -r "$DD_APP_PATH" "$TARGET_APP"
 
+# Icônes au choix (assets/icons/loose, faites par make_icons.py) : fichiers
+# PNG séparés déclarés par CFBundleIconFiles, comme Feather pour les siennes.
+# Déclarées seulement par le catalogue (CFBundleIconName), iOS refusait de
+# les poser sur une app installée par Feather (OSStatus -54).
+LOOSE_ICONS="$WORKING_LOCATION/assets/icons/loose"
+if [ -d "$LOOSE_ICONS" ]; then
+  echo "--- Adding alternate app icons ---"
+  PLIST="$TARGET_APP/Info.plist"
+  PB=/usr/libexec/PlistBuddy
+  cp "$LOOSE_ICONS"/*.png "$TARGET_APP/"
+  for key in CFBundleIcons CFBundleIcons~ipad; do
+    $PB -c "Add :$key dict" "$PLIST" 2>/dev/null || true
+    $PB -c "Delete :$key:CFBundleAlternateIcons" "$PLIST" 2>/dev/null || true
+    $PB -c "Add :$key:CFBundleAlternateIcons dict" "$PLIST"
+    for icon in "$LOOSE_ICONS"/*@3x.png; do
+      name=$(basename "$icon" @3x.png)
+      $PB -c "Add :$key:CFBundleAlternateIcons:$name dict" "$PLIST"
+      $PB -c "Add :$key:CFBundleAlternateIcons:$name:CFBundleIconFiles array" "$PLIST"
+      $PB -c "Add :$key:CFBundleAlternateIcons:$name:CFBundleIconFiles:0 string $name" "$PLIST"
+      $PB -c "Add :$key:CFBundleAlternateIcons:$name:UIPrerenderedIcon bool false" "$PLIST"
+    done
+  done
+fi
+
 echo "--- Removing code signature ---"
 codesign --remove "$TARGET_APP"
 if [ -e "$TARGET_APP/_CodeSignature" ]; then

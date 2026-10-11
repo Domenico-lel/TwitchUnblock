@@ -33,7 +33,7 @@ final class AnnouncementService: ObservableObject {
 
     func refresh(force: Bool = false) async {
         if !force, let lastFetch, Date().timeIntervalSince(lastFetch) < 5 * 60 { pruneExpired(); return }
-        guard let url = URL(string: "\(kAPIURL)/api/announcement") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/announcement") else { return }
         var req = URLRequest(url: url)
         req.cachePolicy = .reloadIgnoringLocalCacheData
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
@@ -67,7 +67,7 @@ final class AnnouncementService: ObservableObject {
         let prev = reacted[a.id]
         let next: String? = prev == emoji ? nil : emoji
         setReaction(next, for: a.id)
-        guard let url = URL(string: "\(kAPIURL)/api/announcement/react") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/announcement/react") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

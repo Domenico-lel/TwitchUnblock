@@ -90,7 +90,7 @@ final class FeedbackStore: ObservableObject {
 
     /// Adresse d'une photo de la discussion (le jeton du retour en donne l'accès).
     func photoURL(_ r: MyFeedback, _ n: Int) -> URL? {
-        var c = URLComponents(string: "\(kAPIURL)/api/feedback/photo")
+        var c = URLComponents(string: "\(APIConfig.base)/api/feedback/photo")
         c?.queryItems = [.init(name: "id", value: r.id), .init(name: "n", value: String(n)),
                          .init(name: "token", value: r.token)]
         return c?.url
@@ -138,7 +138,7 @@ final class FeedbackStore: ObservableObject {
     }
 
     private func post(_ path: String, _ body: [String: Any]) async -> Data? {
-        guard let url = URL(string: kAPIURL + path),
+        guard let url = URL(string: APIConfig.base + path),
               let payload = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

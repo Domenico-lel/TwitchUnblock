@@ -83,6 +83,11 @@ final class LivePlaylistLoader: NSObject, AVAssetResourceLoaderDelegate {
                 longest = max(longest, Double(line.dropFirst(8).split(separator: ",").first ?? "") ?? 0)
             }
             if line.hasPrefix("#EXT-X-STREAM-INF") { nextIsVariant = true }
+            // Segment d'initialisation (fMP4), rendus audio : adresses absolues.
+            if line.hasPrefix("#"), let fixed = absoluteURIAttribute(line, base: base) {
+                out.append(fixed)
+                continue
+            }
             if !line.isEmpty, !line.hasPrefix("#"),
                let abs = URL(string: line, relativeTo: base)?.absoluteString {
                 if nextIsVariant, abs.hasPrefix("https://") {

@@ -190,7 +190,7 @@ struct FeedbackSheet: View {
     }
 
     private func send() async {
-        guard trimmed.count >= 5, let url = URL(string: "\(kAPIURL)/api/feedback") else { return }
+        guard trimmed.count >= 5, let url = URL(string: "\(APIConfig.base)/api/feedback") else { return }
         sending = true
         failure = nil
         defer { sending = false }

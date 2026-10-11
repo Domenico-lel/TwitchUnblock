@@ -78,6 +78,9 @@
     <dict>
         <key>NSAllowsArbitraryLoadsForMedia</key>
         <true/>
+        <!-- VODs téléchargées : lues par le petit serveur de l'app, sur 127.0.0.1 -->
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
     </dict>
 
     <!-- ── Orientation ────────────────────────────────────────── -->

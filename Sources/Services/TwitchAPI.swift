@@ -30,6 +30,14 @@ func parseM3U8(_ content: String, baseURL: URL? = nil) -> QualityLinks {
         guard l.hasPrefix("#EXT-X-MEDIA"), l.lowercased().contains("(source)") else { return nil }
         return m3u8Attr(l, "GROUP-ID")
     })
+    // En multi-encodage (Enhanced Broadcasting : le streamer envoie lui-même
+    // chaque qualité), le format IVS marque TOUTES les variantes « source »,
+    // audio seul compris : toutes devenaient « Source » et la dernière,
+    // l'audio seul, l'emportait — écran noir en « Source » (gotaga, miroir
+    // européen de Luminous). « Source » seulement pour une variante vidéo
+    // seule de son espèce ; sinon chaque qualité garde son nom.
+    let isIVSSource = { (l: String) in m3u8Attr(l, "IVS-VARIANT-SOURCE") == "source" && l.contains("RESOLUTION=") }
+    let singleIVSSource = lines.filter { $0.hasPrefix("#EXT-X-STREAM-INF") && isIVSSource($0) }.count == 1
     for i in 0..<lines.count {
         let line = lines[i].trimmingCharacters(in: .whitespaces)
         guard line.hasPrefix("#EXT-X-STREAM-INF") else { continue }
@@ -40,7 +48,7 @@ func parseM3U8(_ content: String, baseURL: URL? = nil) -> QualityLinks {
         var quality = "unknown"
         if let name = m3u8Attr(line, "VIDEO") ?? m3u8Attr(line, "STABLE-VARIANT-ID") ?? m3u8Attr(line, "IVS-NAME") {
             quality = name == "chunked" || sourceGroups.contains(name)
-                || m3u8Attr(line, "IVS-VARIANT-SOURCE") == "source" ? "Source" : name
+                || (singleIVSSource && isIVSSource(line)) ? "Source" : name
         } else if let r = line.range(of: #"RESOLUTION=(\d+x\d+)"#, options: .regularExpression) {
             quality = String(line[r]).replacingOccurrences(of: "RESOLUTION=", with: "")
         }
@@ -164,7 +172,7 @@ private func nextUTCMidnight() -> Date {
 /// Une réponse d'erreur du Worker lui-même (404…) n'est pas une panne : un
 /// autre Worker répondrait la même chose, on s'arrête là.
 private func workerJSON(_ path: String) async -> [String: Any]? {
-    let bases = [kAPIURL] + kAPIFallbackURLs
+    let bases = APIConfig.lookupBases
     let health = WorkerHealth.shared
     let ordered = bases.filter { !health.isDown($0) } + bases.filter { health.isDown($0) }
     var unreachable: [String] = []
@@ -193,7 +201,7 @@ private func workerJSON(_ path: String) async -> [String: Any]? {
             continue
         }
         for b in unreachable { health.markDown(b, until: Date().addingTimeInterval(30 * 60)) }
-        if base != kAPIURL { logger.info("WORKER", "Réponse du Worker de secours", base) }
+        if base != bases.first { logger.info("WORKER", "Réponse d'un autre Worker", base) }
         guard code == 200 else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
@@ -227,7 +235,7 @@ private func proxiedPlaylistURL(_ url: String, base: String) -> String {
 /// aucun. Même tri que `workerJSON` : le quota du jour atteint (429) le met
 /// de côté jusqu'à minuit UTC.
 private func workingProxyBase(for url: String) async -> String? {
-    let bases = [kAPIURL] + kAPIFallbackURLs
+    let bases = APIConfig.lookupBases
     let health = WorkerHealth.shared
     let ordered = bases.filter { !health.isDown($0) } + bases.filter { health.isDown($0) }
     for base in ordered {
@@ -352,13 +360,12 @@ func getLive(channelName: String) async -> LiveData {
 
     var links: QualityLinks = [:]
 
-    // Source choisie (Réglages → Lecteur, ou menu du lecteur) : essayée en
-    // premier ; si elle ne répond pas, les autres suivent dans l'ordre
-    // automatique, pour que le direct se lance quand même.
-    let sourcePref = UserDefaults.standard.string(forKey: "liveSource") ?? "auto"
-    logger.info("LIVE", "Source préférée : \(sourcePref.uppercased())")
+    // Ordre des sources (Réglages → Lecteur, ou menu du lecteur) : essayées
+    // l'une après l'autre, pour que le direct se lance quand même.
+    let steps = liveSourceSteps()
+    logger.info("LIVE", "Ordre des sources : \(steps.joined(separator: " → ").uppercased())")
     var usedSource: String? = nil
-    for src in liveSourceOrder(preferred: sourcePref) where links.isEmpty {
+    for src in steps where links.isEmpty {
         switch src {
         case "as":     links = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login)
         case "al":     links = await ttvlolLiveLinks(login: login)
@@ -379,13 +386,17 @@ func getLive(channelName: String) async -> LiveData {
 }
 
 // MARK: – Sources du direct
-/// Ordre des sources du direct : la préférée d'abord (réglage « Source du
-/// direct »), puis l'ordre automatique — Luminous Asie, proxy albanais,
-/// Luminous Europe, Twitch officiel (avec ses pubs), le Worker en dernier.
-func liveSourceOrder(preferred: String) -> [String] {
-    let auto = ["as", "al", "eu", "twitch", "worker"]
-    guard auto.contains(preferred) else { return auto }
-    return [preferred] + auto.filter { $0 != preferred }
+/// Ordre des sources du direct : celui des réglages (« liveSourceOrder »),
+/// sinon la source préférée d'avant (« liveSource », celle que garde l'app
+/// Apple TV) en tête de l'ordre automatique — Luminous Asie, proxy albanais,
+/// Luminous Europe, Twitch officiel (avec ses pubs). Une source inconnue est
+/// ignorée, une oubliée ajoutée à la fin ; le Worker toujours en dernier.
+func liveSourceSteps() -> [String] {
+    let ud = UserDefaults.standard
+    let saved = ud.stringArray(forKey: "liveSourceOrder") ?? [ud.string(forKey: "liveSource") ?? "auto"]
+    var order: [String] = []
+    for id in saved where kLiveSources.contains(id) && !order.contains(id) { order.append(id) }
+    return order + kLiveSources.filter { !order.contains($0) } + ["worker"]
 }
 
 /// Miroirs Luminous (sans pub), essayés dans l'ordre ; vide si aucun ne répond.
@@ -746,8 +757,11 @@ func searchCategories(token: String, query: String) async throws -> [TwitchCateg
 
 /// Lives d'une catégorie. Twitch les renvoie déjà par audience décroissante ;
 /// les autres tris sont appliqués côté app (voir CategoriesView).
-func getStreamsByCategory(token: String, gameId: String, cursor: String? = nil) async throws -> (streams: [TwitchStream], cursor: String?) {
+func getStreamsByCategory(token: String, gameId: String, cursor: String? = nil,
+                          lang: String? = nil) async throws -> (streams: [TwitchStream], cursor: String?) {
     var urlStr = "https://api.twitch.tv/helix/streams?first=100&game_id=\(gameId)"
+    // Langue au format Helix (« fr », « zh-hk »).
+    if let lang { urlStr += "&language=\(lang)" }
     if let cursor { urlStr += "&after=\(cursor)" }
     guard let url = URL(string: urlStr) else { return ([], nil) }
     var req = URLRequest(url: url)
@@ -918,6 +932,7 @@ func lastLiveEnd(publishedAt: String?, lengthSeconds: Int, lastStart: String?) -
     }
 }
 
+#if os(iOS)
 /// « 13 d · 21 sept. » : durée dans la langue de l'app, puis la date (avec
 /// l'année si ce n'est pas celle en cours).
 func offlineLabel(since end: Date, store: AppStore) -> String {
@@ -933,6 +948,7 @@ func offlineLabel(since end: Date, store: AppStore) -> String {
     df.setLocalizedDateFormatFromTemplate(sameYear ? "d MMM" : "d MMM y")
     return "\(span) · \(df.string(from: end))"
 }
+#endif
 
 func sortQualities(_ keys: [String]) -> [String] {
     let order = ["Source","chunked","source","1080p60","1080p30","1080p","720p60","720p30","720p",
@@ -1195,14 +1211,17 @@ func searchCategoriesGQL(query: String) async -> [TwitchCategory]? {
     return edges.compactMap { ($0["node"] as? [String: Any]).flatMap(categoryFromGQL) }
 }
 
-/// Les 100 lives les plus regardés d'une catégorie. nil si Twitch n'a pas répondu.
-func getStreamsByCategoryGQL(gameId: String) async -> [TwitchStream]? {
+/// Les 100 lives les plus regardés d'une catégorie, d'une langue si `lang`
+/// (format Helix). nil si Twitch n'a pas répondu.
+func getStreamsByCategoryGQL(gameId: String, lang: String? = nil) async -> [TwitchStream]? {
     let q = """
-    query($id: ID!) { game(id: $id) { streams(first: 100) { edges { node {
+    query($id: ID!, $langs: [Language!]) { game(id: $id) { streams(first: 100, options: { broadcasterLanguages: $langs }) { edges { node {
       title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
       broadcaster { id login displayName } } } } } }
     """
-    guard let d = await gqlRequest(q, ["id": gameId]),
+    var vars: [String: Any] = ["id": gameId]
+    if let lang { vars["langs"] = [lang.uppercased().replacingOccurrences(of: "-", with: "_")] }
+    guard let d = await gqlRequest(q, vars),
           let edges = ((d["game"] as? [String: Any])?["streams"] as? [String: Any])?["edges"] as? [[String: Any]]
     else { return nil }
     return edges.compactMap { e in
