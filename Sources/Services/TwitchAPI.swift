@@ -30,6 +30,14 @@ func parseM3U8(_ content: String, baseURL: URL? = nil) -> QualityLinks {
         guard l.hasPrefix("#EXT-X-MEDIA"), l.lowercased().contains("(source)") else { return nil }
         return m3u8Attr(l, "GROUP-ID")
     })
+    // En multi-encodage (Enhanced Broadcasting : le streamer envoie lui-même
+    // chaque qualité), le format IVS marque TOUTES les variantes « source »,
+    // audio seul compris : toutes devenaient « Source » et la dernière,
+    // l'audio seul, l'emportait — écran noir en « Source » (gotaga, miroir
+    // européen de Luminous). « Source » seulement pour une variante vidéo
+    // seule de son espèce ; sinon chaque qualité garde son nom.
+    let isIVSSource = { (l: String) in m3u8Attr(l, "IVS-VARIANT-SOURCE") == "source" && l.contains("RESOLUTION=") }
+    let singleIVSSource = lines.filter { $0.hasPrefix("#EXT-X-STREAM-INF") && isIVSSource($0) }.count == 1
     for i in 0..<lines.count {
         let line = lines[i].trimmingCharacters(in: .whitespaces)
         guard line.hasPrefix("#EXT-X-STREAM-INF") else { continue }
@@ -40,7 +48,7 @@ func parseM3U8(_ content: String, baseURL: URL? = nil) -> QualityLinks {
         var quality = "unknown"
         if let name = m3u8Attr(line, "VIDEO") ?? m3u8Attr(line, "STABLE-VARIANT-ID") ?? m3u8Attr(line, "IVS-NAME") {
             quality = name == "chunked" || sourceGroups.contains(name)
-                || m3u8Attr(line, "IVS-VARIANT-SOURCE") == "source" ? "Source" : name
+                || (singleIVSSource && isIVSSource(line)) ? "Source" : name
         } else if let r = line.range(of: #"RESOLUTION=(\d+x\d+)"#, options: .regularExpression) {
             quality = String(line[r]).replacingOccurrences(of: "RESOLUTION=", with: "")
         }
