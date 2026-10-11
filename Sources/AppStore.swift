@@ -183,6 +183,11 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(autoClaimDrops, forKey: "cfg_drops_autoclaim") }
     }
 
+    /// Notification quand un drop est prêt ou réclamé (lu par DropsService).
+    @Published var dropsNotify: Bool = true {
+        didSet { UserDefaults.standard.set(dropsNotify, forKey: "cfg_drops_notify") }
+    }
+
     @Published var spatialAudio: String = "auto" {
         didSet {
             UserDefaults.standard.set(spatialAudio, forKey: SpatialAudio.key)
@@ -460,6 +465,7 @@ final class AppStore: ObservableObject {
         spatialAudio       = ud.string(forKey: SpatialAudio.key) == "off" ? "off" : "auto"
         dropsProgress      = ud.object(forKey: "cfg_drops_progress")  as? Bool ?? true
         autoClaimDrops     = ud.object(forKey: "cfg_drops_autoclaim") as? Bool ?? true
+        dropsNotify        = ud.object(forKey: "cfg_drops_notify")    as? Bool ?? true
         fillScreen         = ud.object(forKey: "cfg_fill_screen") as? Bool ?? false
         landscapeChat      = LandscapeChat(rawValue: ud.string(forKey: "cfg_landscape_chat") ?? "")
                              ?? .column

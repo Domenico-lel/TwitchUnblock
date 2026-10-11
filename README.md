@@ -109,6 +109,8 @@ no key to paste. The backend is already hosted and shared by every install.
 * 📈 **Progress while you watch** — since October 2026, Twitch only counts drops
   when your own account loads the stream. During a live with drops, the app does
   that with small requests, without downloading the video a second time.
+* 🔔 **Notifications** — told when a drop is ready to claim, or when the app
+  has claimed it for you (Settings → Drops → Notify me).
 * Needs the Twitch web session, like channel points. Game accounts must be
   linked: Twitch no longer grants rewards without it.
 

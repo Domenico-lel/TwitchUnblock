@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Réglages → Drops : réglages, drop en cours, campagnes et réclamation.
@@ -29,6 +30,8 @@ struct DropsPanel: View {
                 toggleRow(store.t("drops_progress"), store.t("drops_progress_sub"), $store.dropsProgress)
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("drops_autoclaim"), store.t("drops_autoclaim_sub"), $store.autoClaimDrops)
+                Divider().background(Color.tBorder)
+                toggleRow(store.t("drops_notify"), store.t("drops_notify_sub"), $store.dropsNotify)
             }
             .tCard()
 
@@ -70,10 +73,20 @@ struct DropsPanel: View {
         .onChange(of: store.autoClaimDrops) { on in
             logger.settingChanged("Drops : réclamation auto", value: on ? "activée" : "désactivée")
         }
+        .onChange(of: store.dropsNotify) { on in
+            logger.settingChanged("Drops : notifications", value: on ? "activées" : "désactivées")
+            if on { askNotificationPermission() }
+        }
         .onDisappear { drops.notice = nil }
     }
 
+    /// iOS ne demande qu'une fois : sans effet si l'autorisation est déjà réglée.
+    private func askNotificationPermission() {
+        Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+    }
+
     private func reload() async {
+        if store.dropsNotify, webToken != nil { askNotificationPermission() }
         guard let token = webToken else { return }
         await drops.refresh(token: token, autoClaim: store.autoClaimDrops)
         // Après l'inventaire : un seul jeton d'intégrité pour les deux.

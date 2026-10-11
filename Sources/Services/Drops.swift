@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Drops Twitch : progression, réclamation, et de quoi les faire avancer.
@@ -169,11 +170,20 @@ final class DropsService: ObservableObject {
             session = nil
         }
 
-        guard autoClaim else { return }
+        guard autoClaim else {
+            // Sans réclamation auto : prévenir qu'un drop attend.
+            for c in campaigns where !c.needsAccountLink {
+                for d in c.drops where d.canClaim { notify(d, claimed: false) }
+            }
+            return
+        }
         var claimedSome = false
         for c in campaigns where !c.needsAccountLink {
             for d in c.drops where d.canClaim {
-                if await claim(d, token: token) { claimedSome = true }
+                if await claim(d, token: token) {
+                    claimedSome = true
+                    notify(d, claimed: true)
+                }
             }
         }
         // Une réclamation se vérifie dans l'inventaire (Twitch peut répondre
@@ -251,6 +261,27 @@ final class DropsService: ObservableObject {
         if let i = integrity, i.expiry > Date().addingTimeInterval(60) { return i }
         integrity = await TwitchWebGQL.shared.mintIntegrity(token: token)
         return integrity
+    }
+
+    // MARK: Notifications
+    private static let notifiedKey = "drops_notified"
+
+    /// Notification locale (réglage « Me prévenir », actif par défaut), une
+    /// seule fois par drop et par état : prêt à réclamer, ou réclamé tout seul.
+    private func notify(_ drop: TimedDrop, claimed: Bool) {
+        guard UserDefaults.standard.object(forKey: "cfg_drops_notify") as? Bool ?? true else { return }
+        let mark = "\(drop.id)-\(claimed ? "claimed" : "ready")"
+        var seen = UserDefaults.standard.stringArray(forKey: Self.notifiedKey) ?? []
+        guard !seen.contains(mark) else { return }
+        seen.append(mark)
+        UserDefaults.standard.set(Array(seen.suffix(300)), forKey: Self.notifiedKey)
+        let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+        let content = UNMutableNotificationContent()
+        content.title = translate(claimed ? "drops_notif_claimed" : "drops_notif_ready", lang)
+        content.body = drop.name
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "drop-\(mark)", content: content, trigger: nil))
     }
 
     private enum ClaimResult { case ok, integrity, failed(String) }
