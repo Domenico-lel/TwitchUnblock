@@ -220,7 +220,12 @@ final class VodDownloads: ObservableObject {
             items = list
         }
         try? FileManager.default.removeItem(at: Self.exportsDirectory)
+        // Pas seulement d'après les changements d'état de la scène : créé
+        // app déjà à l'écran, le premier peut lui avoir échappé.
+        foreground = UIApplication.shared.applicationState == .active
         VodDownloader.shared.activate()
+        // Et la reprise des téléchargements en cours avec lui.
+        if foreground { Task { self.sceneActive() } }
     }
 
     private func save() {
@@ -256,6 +261,8 @@ final class VodDownloads: ObservableObject {
 
     func resume(_ id: String) {
         guard let current = item(id), current.state != .done else { return }
+        // Demandé depuis l'app (bouton) : elle est à l'écran, c'est elle qui télécharge.
+        if UIApplication.shared.applicationState == .active { foreground = true }
         update(id) {
             $0.state = .downloading
             $0.reason = nil
@@ -764,7 +771,7 @@ enum VodFetcher {
             if Task.isCancelled { return .cancelled }
             // Déjà là (livré par iOS entre-temps) : rien à refaire.
             for existing in [name, VodDownloader.counterpart(name)] {
-                if let size = size(folder.appendingPathComponent(existing)) { return .saved(existing, size) }
+                if let size = fileSize(folder.appendingPathComponent(existing)) { return .saved(existing, size) }
             }
             do {
                 let (tmp, response) = try await session.download(for: URLRequest(url: url))
@@ -780,7 +787,7 @@ enum VodFetcher {
                         guard fm.fileExists(atPath: folder.path) else { return .cancelled }
                         return isOutOfSpace(error) ? .fatal(VodDownloadFailure.space) : .refused("storage")
                     }
-                    return .saved(name, size(dest) ?? 0)
+                    return .saved(name, fileSize(dest) ?? 0)
                 }
                 try? fm.removeItem(at: tmp)
                 // Son d'origine effacé du CDN : la version muette.
@@ -810,7 +817,7 @@ enum VodFetcher {
         }
     }
 
-    private static func size(_ url: URL) -> Int64? {
+    private static func fileSize(_ url: URL) -> Int64? {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
               let n = attrs[.size] as? NSNumber else { return nil }
         return n.int64Value
