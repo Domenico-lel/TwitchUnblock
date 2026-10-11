@@ -15,6 +15,61 @@ let kDeepLinkScheme  = "twitchunblock://"
 /// « Fallback Worker »).
 let kAPIFallbackURLs: [String] = ["https://test2-fallback.vxcraftmanpetit.workers.dev"]
 
+/// Worker à utiliser. Réglages experts : celui de l'utilisateur (déployé
+/// depuis le dépôt du site, sur Cloudflare ou avec Docker), essayé en premier
+/// pour la lecture — si les Workers officiels tombent, ou si le projet
+/// disparaît, l'app continue de lire. Et, s'il le demande, pour tout le reste
+/// aussi : sauvegarde (avec son jeton Twitch), retours, annonces, comptage,
+/// notifications ntfy.
+enum APIConfig {
+    static let customKey = "cfg_custom_worker"
+    static let allKey = "cfg_custom_worker_all"
+
+    /// Adresse du Worker personnel (sans « / » final) ; nil sinon.
+    static var custom: String? {
+        guard let s = UserDefaults.standard.string(forKey: customKey), !s.isEmpty else { return nil }
+        return s
+    }
+
+    /// Lecture (lives, VODs, playlists) : le Worker personnel d'abord, puis
+    /// le principal et ses secours.
+    static var lookupBases: [String] {
+        var out: [String] = custom.map { [$0] } ?? []
+        for base in [kAPIURL] + kAPIFallbackURLs where !out.contains(base) { out.append(base) }
+        return out
+    }
+
+    /// Tout le reste : le principal, ou le Worker personnel si « tout passer
+    /// par lui » est activé.
+    static var base: String {
+        if UserDefaults.standard.bool(forKey: allKey), let c = custom { return c }
+        return kAPIURL
+    }
+
+    /// Adresse nettoyée (« https:// » ajouté, « / » et « /api » finaux ôtés) ;
+    /// nil si elle n'en est pas une.
+    static func normalize(_ raw: String) -> String? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if !s.lowercased().hasPrefix("http://") && !s.lowercased().hasPrefix("https://") { s = "https://" + s }
+        while s.hasSuffix("/") { s.removeLast() }
+        if s.lowercased().hasSuffix("/api") { s.removeLast(4) }
+        guard let url = URL(string: s), let host = url.host, !host.isEmpty, url.query == nil else { return nil }
+        return s
+    }
+
+    /// Un Worker TwitchUnblock répond à un nom de chaîne vide par une erreur
+    /// JSON (400 « Nom invalide ») : c'est ce qu'on vérifie avant de s'en servir.
+    static func check(_ base: String) async -> Bool {
+        guard let url = URL(string: base + "/api/get-live?name=") else { return false }
+        let req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let code = (resp as? HTTPURLResponse)?.statusCode, code == 400 || code == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return json["error"] != nil || json["links"] != nil
+    }
+}
+
 /// Miroirs Luminous (source « sans pub »), essayés dans l'ordre : si l'un est
 /// indisponible on passe au suivant. as = Asie (historique),
 /// eu/eu2/eu3 = Europe (recommandés pour le mobile).
@@ -611,6 +666,17 @@ private let translations: [Lang: [String: String]] = [
         "adm_mark_seen": "Marquer comme vu",
         "adm_seen_needs_update": "« Vu » arrive avec la mise en production du site : le serveur ne le connaît pas encore.",
         "cat_lang_all": "Toutes les langues",
+        "expert": "Réglages experts",
+        "expert_worker": "Worker personnel",
+        "expert_worker_sub": "Si le Worker de TwitchUnblock tombe ou disparaît, l'app peut passer par le tien (déployé depuis le dépôt du site, sur Cloudflare ou avec Docker). Il sert d'abord pour les lives, les VODs et les playlists ; les Workers officiels restent en secours.",
+        "expert_worker_ph": "https://mon-worker.exemple.workers.dev",
+        "expert_check": "Vérifier et utiliser",
+        "expert_ok": "Worker vérifié : il sert maintenant en premier.",
+        "expert_bad": "Cette adresse ne répond pas comme un Worker TwitchUnblock.",
+        "expert_reset": "Revenir aux Workers officiels",
+        "expert_all": "Tout passer par ce Worker",
+        "expert_all_sub": "Aussi la sauvegarde de l'historique, les retours, les annonces, les notifications ntfy et le comptage. Ton jeton Twitch lui est alors envoyé (sauvegarde) : n'active ça que pour un Worker que tu héberges toi-même.",
+        "expert_using": "En service : {u}",
         "adm_empty": "Aucun retour dans cet état.",
         "adm_them": "La personne",
         "adm_reply_ph": "Répondre (visible par la personne)…",
@@ -1067,6 +1133,17 @@ private let translations: [Lang: [String: String]] = [
         "adm_mark_seen": "Mark as seen",
         "adm_seen_needs_update": "“Seen” comes with the next site release: the server doesn't know it yet.",
         "cat_lang_all": "All languages",
+        "expert": "Expert settings",
+        "expert_worker": "Personal Worker",
+        "expert_worker_sub": "If TwitchUnblock's Worker goes down or disappears, the app can use yours instead (deployed from the site's repository, on Cloudflare or with Docker). It's tried first for lives, VODs and playlists; the official Workers stay as a fallback.",
+        "expert_worker_ph": "https://my-worker.example.workers.dev",
+        "expert_check": "Check and use",
+        "expert_ok": "Worker checked: it's now tried first.",
+        "expert_bad": "This address doesn't answer like a TwitchUnblock Worker.",
+        "expert_reset": "Back to the official Workers",
+        "expert_all": "Send everything through this Worker",
+        "expert_all_sub": "Also history backups, feedback, announcements, ntfy notifications and the usage count. Your Twitch token is then sent to it (backups): only turn this on for a Worker you host yourself.",
+        "expert_using": "In use: {u}",
         "adm_empty": "No feedback with this status.",
         "adm_them": "The person",
         "adm_reply_ph": "Reply (the person will see it)…",
@@ -1523,6 +1600,17 @@ private let translations: [Lang: [String: String]] = [
         "adm_mark_seen": "Marcar como visto",
         "adm_seen_needs_update": "«Visto» llega con la próxima publicación del sitio: el servidor aún no lo conoce.",
         "cat_lang_all": "Todos los idiomas",
+        "expert": "Ajustes avanzados",
+        "expert_worker": "Worker personal",
+        "expert_worker_sub": "Si el Worker de TwitchUnblock cae o desaparece, la app puede usar el tuyo (desplegado desde el repositorio del sitio, en Cloudflare o con Docker). Se prueba primero para directos, VODs y listas; los Workers oficiales quedan de respaldo.",
+        "expert_worker_ph": "https://mi-worker.ejemplo.workers.dev",
+        "expert_check": "Comprobar y usar",
+        "expert_ok": "Worker comprobado: ahora se prueba primero.",
+        "expert_bad": "Esta dirección no responde como un Worker de TwitchUnblock.",
+        "expert_reset": "Volver a los Workers oficiales",
+        "expert_all": "Pasar todo por este Worker",
+        "expert_all_sub": "También las copias del historial, los comentarios, los anuncios, las notificaciones ntfy y el recuento. Tu token de Twitch se le envía entonces (copias): actívalo solo para un Worker que alojes tú mismo.",
+        "expert_using": "En uso: {u}",
         "adm_empty": "Ningún comentario en este estado.",
         "adm_them": "La persona",
         "adm_reply_ph": "Responder (la persona lo verá)…",

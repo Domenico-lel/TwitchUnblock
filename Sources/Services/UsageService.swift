@@ -140,7 +140,7 @@ final class UsageService: ObservableObject {
         if !force, let last = lastPing, Date().timeIntervalSince(last) < pingInterval {
             return
         }
-        guard let url = URL(string: "\(kAPIURL)/api/ping") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/ping") else { return }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -195,7 +195,7 @@ final class UsageService: ObservableObject {
 
     // MARK: – Lecture des compteurs
     func loadStats() async {
-        guard let url = URL(string: "\(kAPIURL)/api/stats") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/stats") else { return }
         loading = true
         lastError = nil
         defer { loading = false }
@@ -251,7 +251,7 @@ final class UsageService: ObservableObject {
     // MARK: – Retrait
     /// Efface cette installation côté serveur (quand on coupe le comptage).
     func forget() async {
-        guard let url = URL(string: "\(kAPIURL)/api/ping") else { return }
+        guard let url = URL(string: "\(APIConfig.base)/api/ping") else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")

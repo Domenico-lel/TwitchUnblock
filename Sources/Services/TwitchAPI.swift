@@ -172,7 +172,7 @@ private func nextUTCMidnight() -> Date {
 /// Une réponse d'erreur du Worker lui-même (404…) n'est pas une panne : un
 /// autre Worker répondrait la même chose, on s'arrête là.
 private func workerJSON(_ path: String) async -> [String: Any]? {
-    let bases = [kAPIURL] + kAPIFallbackURLs
+    let bases = APIConfig.lookupBases
     let health = WorkerHealth.shared
     let ordered = bases.filter { !health.isDown($0) } + bases.filter { health.isDown($0) }
     var unreachable: [String] = []
@@ -201,7 +201,7 @@ private func workerJSON(_ path: String) async -> [String: Any]? {
             continue
         }
         for b in unreachable { health.markDown(b, until: Date().addingTimeInterval(30 * 60)) }
-        if base != kAPIURL { logger.info("WORKER", "Réponse du Worker de secours", base) }
+        if base != bases.first { logger.info("WORKER", "Réponse d'un autre Worker", base) }
         guard code == 200 else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     }
@@ -235,7 +235,7 @@ private func proxiedPlaylistURL(_ url: String, base: String) -> String {
 /// aucun. Même tri que `workerJSON` : le quota du jour atteint (429) le met
 /// de côté jusqu'à minuit UTC.
 private func workingProxyBase(for url: String) async -> String? {
-    let bases = [kAPIURL] + kAPIFallbackURLs
+    let bases = APIConfig.lookupBases
     let health = WorkerHealth.shared
     let ordered = bases.filter { !health.isDown($0) } + bases.filter { health.isDown($0) }
     for base in ordered {

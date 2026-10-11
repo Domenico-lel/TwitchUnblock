@@ -22,6 +22,12 @@ struct SettingsView: View {
     @State private var ntfySynced      = !NtfyNotifier.isPending
     @State private var appIcon: AppIconChoice = .standard
     @State private var appIconError: String? = nil
+    // Réglages experts : Worker personnel.
+    @AppStorage(APIConfig.customKey) private var customWorker = ""
+    @AppStorage(APIConfig.allKey) private var customWorkerAll = false
+    @State private var workerInput = ""
+    @State private var workerChecking = false
+    @State private var workerOK: Bool? = nil
     @AppStorage("onboarding_done") private var onboardingDone = false
     @State private var showLogoutAlert = false
     @State private var showClearAlert  = false
@@ -487,6 +493,7 @@ struct SettingsView: View {
                     debugCard
                 case .other:
                     aboutCard
+                    expertCard
                 case .changelog:
                     ChangelogList()
                 }
@@ -496,6 +503,91 @@ struct SettingsView: View {
             .padding(.top, 12)
         }
         .background(Color.tDark)
+    }
+
+    // ── Réglages experts : Worker personnel ──────────────────────────────
+    @ViewBuilder private var expertCard: some View {
+        settingCard {
+            VStack(alignment: .leading, spacing: 12) {
+                label("server.rack", store.t("expert"))
+                Text(store.t("expert_worker")).font(.tCardTitle).foregroundColor(.tText)
+                Text(store.t("expert_worker_sub"))
+                    .font(.tMeta).foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextField(store.t("expert_worker_ph"), text: $workerInput)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .submitLabel(.done)
+                    .onSubmit { checkWorker() }
+                    .font(.tBody)
+                    .foregroundColor(.tText)
+                    .padding(10)
+                    .background(Color.tSurface)
+                    .cornerRadius(10)
+                HStack(spacing: 16) {
+                    Button { checkWorker() } label: {
+                        HStack(spacing: 6) {
+                            if workerChecking { ProgressView().scaleEffect(0.7) }
+                            Text(store.t("expert_check"))
+                        }
+                    }
+                    .disabled(workerChecking || workerInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if !customWorker.isEmpty {
+                        Button(store.t("expert_reset"), role: .destructive) { resetWorker() }
+                    }
+                }
+                .font(.tLabel)
+                .buttonStyle(.borderless)
+                if let ok = workerOK {
+                    Text(store.t(ok ? "expert_ok" : "expert_bad"))
+                        .font(.tMeta).foregroundColor(ok ? .tSuccess : .tDanger)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !customWorker.isEmpty {
+                    Text(store.t("expert_using").replacingOccurrences(of: "{u}", with: customWorker))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                }
+                if !customWorker.isEmpty {
+                    Toggle(isOn: $customWorkerAll) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(store.t("expert_all")).font(.tCardTitle).foregroundColor(.tText)
+                            Text(store.t("expert_all_sub"))
+                                .font(.tMeta).foregroundColor(.tMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .tint(.tPrimary)
+                    .onChange(of: customWorkerAll) { on in
+                        logger.settingChanged("Tout par le Worker personnel", value: on)
+                    }
+                }
+            }
+        }
+        .onAppear { if workerInput.isEmpty { workerInput = customWorker } }
+    }
+
+    /// Adresse vérifiée (c'est bien un Worker TwitchUnblock) avant d'être gardée.
+    private func checkWorker() {
+        guard let base = APIConfig.normalize(workerInput) else { workerOK = false; return }
+        workerChecking = true
+        workerOK = nil
+        Task {
+            let ok = await APIConfig.check(base)
+            workerChecking = false
+            workerOK = ok
+            guard ok else { return }
+            customWorker = base
+            workerInput = base
+            logger.settingChanged("Worker personnel", value: base)
+        }
+    }
+
+    private func resetWorker() {
+        customWorker = ""
+        customWorkerAll = false
+        workerInput = ""
+        workerOK = nil
+        logger.settingChanged("Worker personnel", value: "officiels")
     }
 
     @ViewBuilder private var langueCard: some View {

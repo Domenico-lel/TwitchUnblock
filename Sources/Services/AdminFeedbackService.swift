@@ -171,7 +171,7 @@ final class AdminFeedbackService: ObservableObject {
     }
 
     private func request(_ method: String, _ path: String, body: [String: Any]? = nil) async -> Data? {
-        guard let token, let url = URL(string: kAPIURL + path) else { return nil }
+        guard let token, let url = URL(string: APIConfig.base + path) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.cachePolicy = .reloadIgnoringLocalCacheData

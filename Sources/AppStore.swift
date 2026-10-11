@@ -665,7 +665,7 @@ final class AppStore: ObservableObject {
         lastPullAt = Date()
         // Le Worker exige le jeton Twitch du propriétaire de la sauvegarde.
         guard let token = twitchToken,
-              let url = URL(string: "\(kAPIURL)/api/sync/get?userId=\(userId)") else { return }
+              let url = URL(string: "\(APIConfig.base)/api/sync/get?userId=\(userId)") else { return }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         guard let (data, resp) = try? await URLSession.shared.data(for: request),
@@ -729,7 +729,7 @@ final class AppStore: ObservableObject {
               let body = try? JSONSerialization.data(
                   withJSONObject: ["userId": userId, "data": ["history": histJSON, "progress": progress]],
                   options: [.sortedKeys]),
-              let url = URL(string: "\(kAPIURL)/api/sync/post") else { return }
+              let url = URL(string: "\(APIConfig.base)/api/sync/post") else { return }
 
         syncDirty = false
         guard body != lastSyncedBody else { return }

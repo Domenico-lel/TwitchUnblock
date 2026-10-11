@@ -103,7 +103,7 @@ enum NtfyNotifier {
     /// Routes du Worker principal (base D1, pas de secours). Code HTTP, nil
     /// si le Worker n'a pas pu être joint.
     private static func post(_ path: String, _ body: [String: Any]) async -> Int? {
-        guard let url = URL(string: kAPIURL + path),
+        guard let url = URL(string: APIConfig.base + path),
               let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 20)
         req.httpMethod = "POST"

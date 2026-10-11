@@ -190,6 +190,14 @@ no key to paste. The backend is already hosted and shared by every install.
 
 ### The rest
 
+* 🧰 **Your own Worker** — Settings → Other → Expert settings: if the official
+  Workers go down (or the project disappears), give the address of your own
+  (deployed from the [website's repository](https://github.com/MXFia19/TwitchUnblock-Web),
+  on Cloudflare or with Docker). It's checked, then tried first for lives,
+  VODs and playlists; **Send everything through this Worker** also moves
+  history backups, feedback, announcements, ntfy notifications and the usage
+  count there (your Twitch token is then sent to it — only for a Worker you
+  host yourself).
 * 🌍 **Four languages** — English (default), French, Spanish and Russian. The
   Russian translation was made with AI: the app says so next to the language
   picker, with a button to report a mistake.
