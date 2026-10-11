@@ -23,6 +23,10 @@ final class AppStore: ObservableObject {
         didSet {
             if let id = twitchUserId { UserDefaults.standard.set(id, forKey: "twitch_user_id") }
             else { UserDefaults.standard.removeObject(forKey: "twitch_user_id") }
+            // Compte de l'app connu ou changé : la session web doit être la sienne.
+            if let id = twitchUserId, id != oldValue, twitchWebToken != nil {
+                Task { @MainActor [weak self] in await self?.validateWebSession() }
+            }
         }
     }
 
@@ -40,18 +44,62 @@ final class AppStore: ObservableObject {
     /// quelqu'un qui ne s'en est jamais servi.
     @Published var webSessionExpired = false
 
-    /// Vérifie la session web et l'efface si Twitch la refuse. Une panne
-    /// réseau ne l'efface pas : couper la session sur un wifi capricieux
-    /// serait pire que de la laisser mourir en silence.
+    /// Pseudo du compte d'une session web refusée parce qu'elle n'était pas au
+    /// compte de l'app (nil sinon). Les points, drops et prédictions seraient
+    /// partis sur un autre compte que les suivis et le chat.
+    @Published var webSessionMismatch: String? = nil
+
+    /// Vérifie la session web : effacée si Twitch la refuse, ou si elle est à
+    /// un autre compte que celui de l'app. Une panne réseau ne l'efface pas :
+    /// couper la session sur un wifi capricieux serait pire que de la laisser
+    /// mourir en silence.
     @MainActor
     func validateWebSession() async {
         guard let token = twitchWebToken, !token.isEmpty else { return }
-        if await isWebSessionValid(token: token) {
-            webSessionExpired = false
-        } else {
+        switch await webSessionIdentity(token: token) {
+        case .unknown:
+            break
+        case .invalid:
             twitchWebToken = nil
             webSessionExpired = true
+        case .valid(let id, let login):
+            webSessionExpired = false
+            if let mine = twitchUserId, !mine.isEmpty, id != mine {
+                await refuseWebSession(of: login)
+            }
         }
+    }
+
+    /// Session web obtenue par la connexion twitch.tv (accueil, réglages,
+    /// points). Refusée si elle n'est pas au compte de l'app.
+    /// - Returns: false si refusée.
+    @MainActor
+    @discardableResult
+    func adoptWebToken(_ token: String, login webLogin: String?) async -> Bool {
+        if let mine = twitchLogin?.lowercased(), !mine.isEmpty,
+           let web = webLogin?.lowercased(), !web.isEmpty, web != mine {
+            await refuseWebSession(of: webLogin ?? web)
+            return false
+        }
+        if twitchLogin == nil, let l = webLogin { twitchLogin = l }
+        webSessionMismatch = nil
+        webSessionExpired = false
+        twitchWebToken = token
+        // Pseudo absent du cookie : vérifié par identifiant.
+        if webLogin == nil { await validateWebSession() }
+        return twitchWebToken != nil
+    }
+
+    /// Session web d'un autre compte : effacée (jeton et cookies twitch.tv),
+    /// pour que la prochaine connexion demande le bon compte.
+    @MainActor
+    private func refuseWebSession(of login: String) async {
+        logger.warn("AUTH/WEB", "Session web d'un autre compte refusée",
+                    "@\(login) ≠ @\(twitchLogin ?? "?") (compte de l'app)")
+        webSessionMismatch = login
+        twitchWebToken = nil
+        DropsHeartbeat.shared.stop()
+        await TwitchWebSession.clear()
     }
 
     /// Photo de profil du compte connecté, affichée dans l'en-tête.
@@ -487,6 +535,7 @@ final class AppStore: ObservableObject {
     func logout() {
         twitchToken    = nil
         twitchWebToken = nil
+        webSessionMismatch = nil
         Task { await TwitchWebSession.clear() }
         twitchUserId   = nil
         twitchLogin    = nil   // ← nettoyage complet

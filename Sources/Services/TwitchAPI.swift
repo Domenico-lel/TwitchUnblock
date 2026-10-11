@@ -950,11 +950,18 @@ func sortQualities(_ keys: [String]) -> [String] {
 /// de passe, révocation. Sans vérification, on s'en aperçoit seulement quand
 /// les points de chaîne cessent silencieusement de répondre.
 ///
-/// Renvoie `false` uniquement quand Twitch dit explicitement que le jeton ne
-/// vaut rien : une panne réseau laisse la session en place, la couper sur un
-/// wifi capricieux serait pire que le mal.
-func isWebSessionValid(token: String) async -> Bool {
-    guard !token.isEmpty, let url = URL(string: "https://gql.twitch.tv/gql") else { return false }
+/// `.invalid` uniquement quand Twitch dit explicitement que le jeton ne vaut
+/// rien : une panne réseau (`.unknown`) laisse la session en place, la couper
+/// sur un wifi capricieux serait pire que le mal. `.valid` donne le compte de
+/// la session, comparé à celui de l'app (AppStore.validateWebSession).
+enum WebSessionCheck {
+    case valid(id: String, login: String)
+    case invalid
+    case unknown
+}
+
+func webSessionIdentity(token: String) async -> WebSessionCheck {
+    guard !token.isEmpty, let url = URL(string: "https://gql.twitch.tv/gql") else { return .invalid }
 
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
@@ -966,25 +973,26 @@ func isWebSessionValid(token: String) async -> Bool {
 
     guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
         logger.debug("AUTH/WEB", "Vérification impossible", "réseau — session conservée")
-        return true
+        return .unknown
     }
     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
     if code == 401 || code == 403 {
         logger.warn("AUTH/WEB", "Session web expirée", "HTTP \(code)")
-        return false
+        return .invalid
     }
     guard code == 200,
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let payload = json["data"] as? [String: Any] else {
-        return true   // réponse inattendue : on ne tranche pas
+        return .unknown   // réponse inattendue : on ne tranche pas
     }
     // `currentUser` à null = jeton rejeté, même avec un HTTP 200.
-    if payload["currentUser"] is NSNull || payload["currentUser"] == nil {
+    guard let user = payload["currentUser"] as? [String: Any] else {
         logger.warn("AUTH/WEB", "Session web expirée", "currentUser vide")
-        return false
+        return .invalid
     }
-    logger.debug("AUTH/WEB", "Session web valide", nil)
-    return true
+    guard let id = user["id"] as? String else { return .unknown }
+    logger.debug("AUTH/WEB", "Session web valide", "@\(user["login"] as? String ?? "?")")
+    return .valid(id: id, login: user["login"] as? String ?? "")
 }
 
 // MARK: – Photo de profil d'une chaîne

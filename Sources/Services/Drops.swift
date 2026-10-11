@@ -43,7 +43,10 @@ struct DropCampaign: Identifiable {
     let name: String
     let gameName: String
     let boxArtURL: String
+    let startAt: Date?
     let endAt: Date?
+    /// Pas encore commencée (status UPCOMING).
+    let isUpcoming: Bool
     let accountLinkURL: String?
     /// Compte de jeu à lier : sans liaison, Twitch ne donne plus la récompense
     /// (depuis le 2026-10-08). Les badges et emotes Twitch n'en ont pas besoin.
@@ -115,6 +118,12 @@ final class DropsService: ObservableObject {
     @Published private(set) var loaded = false
     @Published private(set) var failed = false
     @Published private(set) var claiming: Set<String> = []
+    /// Toutes les campagnes ouvertes (tableau de bord des drops) ; l'inventaire
+    /// ne donne que celles où l'on a déjà commencé.
+    @Published private(set) var available: [DropCampaign] = []
+    @Published private(set) var availableLoading = false
+    @Published private(set) var availableLoaded = false
+    @Published private(set) var availableFailed = false
     /// Résultat de la dernière réclamation (affiché en haut de l'écran Drops).
     @Published var notice: (text: String, ok: Bool)? = nil
 
@@ -125,7 +134,7 @@ final class DropsService: ObservableObject {
 
     private static let inventoryQuery = """
     query { currentUser { inventory { dropCampaignsInProgress {
-      id name endAt accountLinkURL
+      id name status startAt endAt accountLinkURL
       self { isAccountConnected }
       game { displayName boxArtURL(width: 144, height: 192) }
       timeBasedDrops {
@@ -170,6 +179,54 @@ final class DropsService: ObservableObject {
         // Une réclamation se vérifie dans l'inventaire (Twitch peut répondre
         // « éligible » sans rien donner à un compte non lié).
         if claimedSome { await refresh(token: token, autoClaim: false) }
+    }
+
+    // Même champ que la page des drops de twitch.tv (ViewerDropsDashboard),
+    // protégé par le jeton d'intégrité.
+    private static let dashboardQuery = """
+    query { currentUser { dropCampaigns {
+      id name status startAt endAt accountLinkURL
+      self { isAccountConnected }
+      game { displayName boxArtURL(width: 144, height: 192) }
+      timeBasedDrops { id name requiredMinutesWatched benefitEdges { benefit { name imageAssetURL } } }
+    } } }
+    """
+
+    /// Campagnes ouvertes ou à venir, de tous les jeux. Sans jeton d'intégrité
+    /// d'abord ; avec si Twitch en demande un (WebView éphémère, ~5 s).
+    func refreshAvailable(token: String) async {
+        guard !availableLoading else { return }
+        availableLoading = true
+        defer { availableLoading = false }
+        let body: [String: Any] = ["query": Self.dashboardQuery]
+        var json = await webGQL(body, token: token)
+        if gqlErrors(json).lowercased().contains("integrity"),
+           let it = await validIntegrity(token: token) {
+            json = await webGQL(body, token: token, integrity: it)
+            if gqlErrors(json).lowercased().contains("integrity") {
+                // Jeton refusé : un neuf, une seule fois.
+                integrity = nil
+                if let fresh = await validIntegrity(token: token) {
+                    json = await webGQL(body, token: token, integrity: fresh)
+                }
+            }
+        }
+        guard let user = (json?["data"] as? [String: Any])?["currentUser"] as? [String: Any],
+              let list = user["dropCampaigns"] as? [[String: Any]] else {
+            logger.warn("DROPS", "Campagnes ouvertes indisponibles", gqlErrors(json))
+            availableFailed = true
+            return
+        }
+        availableFailed = false
+        availableLoaded = true
+        available = list.compactMap(Self.campaign)
+            .filter { $0.endAt.map { $0 > Date() } ?? true }
+            .sorted {
+                // En cours d'abord, puis par jeu.
+                if $0.isUpcoming != $1.isUpcoming { return !$0.isUpcoming }
+                return $0.gameName.localizedCaseInsensitiveCompare($1.gameName) == .orderedAscending
+            }
+        logger.debug("DROPS", "\(available.count) campagne(s) ouverte(s)", nil)
     }
 
     /// Drop crédité en ce moment sur la chaîne regardée.
@@ -268,7 +325,9 @@ final class DropsService: ObservableObject {
             name: c["name"] as? String ?? "",
             gameName: game?["displayName"] as? String ?? "",
             boxArtURL: game?["boxArtURL"] as? String ?? "",
+            startAt: isoDate(c["startAt"] as? String),
             endAt: isoDate(c["endAt"] as? String),
+            isUpcoming: (c["status"] as? String) == "UPCOMING",
             accountLinkURL: link,
             needsAccountLink: !connected && !(link ?? "").contains("twitch.tv"),
             drops: drops)

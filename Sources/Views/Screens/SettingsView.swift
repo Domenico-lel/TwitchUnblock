@@ -99,11 +99,14 @@ struct SettingsView: View {
         .sheet(isPresented: $showWebLogin) {
             TwitchWebLoginSheet(
                 clearSession: webLoginClear,
+                expectedLogin: store.twitchLogin,
                 onComplete: { webToken, webLogin in
                     showWebLogin = false
-                    if store.twitchLogin == nil, let l = webLogin { store.twitchLogin = l }
-                    store.twitchWebToken = webToken
-                    logger.success("AUTH/WEB", "Session web connectée depuis les réglages", nil)
+                    Task {
+                        if await store.adoptWebToken(webToken, login: webLogin) {
+                            logger.success("AUTH/WEB", "Session web connectée depuis les réglages", nil)
+                        }
+                    }
                 },
                 onCancel: { showWebLogin = false }
             )
@@ -1038,6 +1041,27 @@ struct SettingsView: View {
     /// Bandeau de session web expirée. Affiché seulement après un refus franc
     /// de Twitch : une session jamais utilisée n'a rien à signaler.
     @ViewBuilder private var webSessionCard: some View {
+        if let other = store.webSessionMismatch {
+            settingCard {
+                VStack(alignment: .leading, spacing: TSpace.md) {
+                    HStack(spacing: TSpace.sm) {
+                        Image(systemName: "person.crop.circle.badge.exclamationmark")
+                            .foregroundColor(.tWarning)
+                        Text(store.t("web_mismatch"))
+                            .font(.tCardTitle).foregroundColor(.tText)
+                    }
+                    Text(store.t("web_mismatch_sub")
+                            .replacingOccurrences(of: "{w}", with: other)
+                            .replacingOccurrences(of: "{a}", with: store.twitchLogin ?? "?"))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    TPrimaryButton(title: store.t("web_reconnect")) {
+                        store.webSessionMismatch = nil
+                        startWebLogin()
+                    }
+                }
+            }
+        }
         if store.webSessionExpired {
             settingCard {
                 VStack(alignment: .leading, spacing: TSpace.md) {

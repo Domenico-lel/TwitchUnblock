@@ -12,6 +12,8 @@ struct DropsPanel: View {
     @EnvironmentObject private var store: AppStore
     @ObservedObject private var drops = DropsService.shared
     @Environment(\.openURL) private var openURL
+    /// Campagnes ouvertes dépliées (récompenses affichées).
+    @State private var expanded: Set<String> = []
 
     private var webToken: String? {
         guard let t = store.twitchWebToken, !t.isEmpty else { return nil }
@@ -37,9 +39,15 @@ struct DropsPanel: View {
                 }
                 if let s = drops.session { sessionCard(s) }
                 campaignsList(token: token)
+                availableList
             } else {
                 VStack(alignment: .leading, spacing: TSpace.md) {
-                    Text(store.t("drops_login"))
+                    // Session web d'un autre compte : refusée, à reconnecter.
+                    Text(store.webSessionMismatch.map {
+                            store.t("web_mismatch_sub")
+                                .replacingOccurrences(of: "{w}", with: $0)
+                                .replacingOccurrences(of: "{a}", with: store.twitchLogin ?? "?")
+                         } ?? store.t("drops_login"))
                         .font(.tMeta).foregroundColor(.tMuted)
                         .fixedSize(horizontal: false, vertical: true)
                     TPrimaryButton(title: store.t("web_banner_btn")) { onLogin() }
@@ -62,6 +70,113 @@ struct DropsPanel: View {
     private func reload() async {
         guard let token = webToken else { return }
         await drops.refresh(token: token, autoClaim: store.autoClaimDrops)
+        // Après l'inventaire : un seul jeton d'intégrité pour les deux.
+        await drops.refreshAvailable(token: token)
+    }
+
+    // MARK: Campagnes ouvertes (tous les jeux)
+    @ViewBuilder private var availableList: some View {
+        let started = Set(drops.campaigns.map(\.id))
+        let open = drops.available.filter { !started.contains($0.id) }
+        HStack {
+            Text(store.t("drops_available"))
+                .font(.tSection).foregroundColor(.tText)
+            Spacer()
+            if drops.availableLoading { ProgressView().tint(.tPrimary) }
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
+
+        if open.isEmpty {
+            Text(drops.availableFailed ? store.t("drops_error")
+                 : (drops.availableLoaded ? store.t("drops_available_empty") : store.t("loading")))
+                .font(.tMeta).foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .tCard()
+        } else {
+            Text(store.t("drops_available_sub"))
+                .font(.tMeta).foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+            LazyVStack(spacing: 8) {
+                ForEach(open) { c in availableRow(c) }
+            }
+        }
+    }
+
+    private func availableRow(_ c: DropCampaign) -> some View {
+        let isOpen = expanded.contains(c.id)
+        return VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if isOpen { expanded.remove(c.id) } else { expanded.insert(c.id) }
+                }
+            } label: {
+                HStack(spacing: TSpace.md) {
+                    AsyncImage(url: URL(string: c.boxArtURL)) { img in
+                        img.resizable().aspectRatio(3/4, contentMode: .fill)
+                    } placeholder: {
+                        Rectangle().fill(Color.tSurface)
+                    }
+                    .frame(width: 30, height: 40)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.gameName)
+                            .font(.tCardTitle).foregroundColor(.tText)
+                            .lineLimit(1)
+                        Text(c.name)
+                            .font(.tMeta).foregroundColor(.tMuted)
+                            .lineLimit(1)
+                        Text(c.isUpcoming
+                             ? store.t("drops_starts").replacingOccurrences(of: "{d}", with: c.startAt.map(relative) ?? "—")
+                             : store.t("drops_ends").replacingOccurrences(of: "{d}", with: c.endAt.map(relative) ?? "—"))
+                            .font(.tMeta).foregroundColor(c.isUpcoming ? .tWarning : .tMuted)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: isOpen ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.tMuted)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isOpen {
+                if c.needsAccountLink, let link = c.accountLinkURL, let url = URL(string: link) {
+                    HStack(alignment: .top, spacing: TSpace.sm) {
+                        Image(systemName: "link")
+                            .font(.system(size: 13, weight: .semibold)).foregroundColor(.tWarning)
+                        Text(store.t("drops_link"))
+                            .font(.tMeta).foregroundColor(.tMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        Button(store.t("drops_link_btn")) { openURL(url) }
+                            .font(.tMeta.weight(.semibold))
+                            .foregroundColor(.tPrimary)
+                            .buttonStyle(.plain)
+                    }
+                }
+                ForEach(c.drops) { d in
+                    HStack(spacing: TSpace.md) {
+                        AsyncImage(url: URL(string: d.imageURL ?? "")) { img in
+                            img.resizable().scaledToFit()
+                        } placeholder: {
+                            RoundedRectangle(cornerRadius: 8).fill(Color.tSurface)
+                        }
+                        .frame(width: 36, height: 36)
+                        Text(d.name)
+                            .font(.tMeta).foregroundColor(.tText)
+                            .lineLimit(2)
+                        Spacer(minLength: 8)
+                        Text(store.t("drops_minutes_req").replacingOccurrences(of: "{t}", with: "\(d.requiredMinutes)"))
+                            .font(.tMeta).foregroundColor(.tMuted)
+                    }
+                }
+            }
+        }
+        .tCard()
     }
 
     // MARK: Drop en cours
