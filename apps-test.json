@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.25",
+          "buildVersion": "249",
+          "date": "2026-10-11",
+          "localizedDescription": "- Choose the live source (Luminous Asia, Luminous Europe, Albania proxy or official Twitch) in Settings → Player or from the player's ⋯ menu, which also shows the source in use.\n- Stream tags (language, DropsEnabled…) under live streams, like on Twitch.\n- Category search puts the exact match first (VALORANT for “valorant”) and shows sharp box art.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-249/TwitchUnblock.ipa",
+          "size": 2312787,
+          "commit": "908bf2d18ab440597317af35a53b6a4129666600"
+        },
+        {
           "version": "1.2.24",
           "buildVersion": "248",
           "date": "2026-10-10",
@@ -268,10 +277,10 @@
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.24",
-      "versionDate": "2026-10-10",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-248/TwitchUnblock.ipa",
-      "size": 2297831
+      "version": "1.2.25",
+      "versionDate": "2026-10-11",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-249/TwitchUnblock.ipa",
+      "size": 2312787
     }
   ],
   "news": []
