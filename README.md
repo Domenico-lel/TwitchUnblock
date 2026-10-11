@@ -198,6 +198,11 @@ no key to paste. The backend is already hosted and shared by every install.
   history backups, feedback, announcements, ntfy notifications and the usage
   count there (your Twitch token is then sent to it — only for a Worker you
   host yourself).
+* 🔒 **Chat restrictions said upfront** — above the message box, the room's
+  modes (followers only and for how long, subscribers only, emotes only, slow
+  mode, verified account…); the channel's chat rules to accept before your
+  first message, like on Twitch; and when Twitch refuses a message, it's
+  removed and the reason shown in your language instead of looking sent.
 * 🌍 **Four languages** — English (default), French, Spanish and Russian. The
   Russian translation was made with AI: the app says so next to the language
   picker, with a button to report a mistake.
