@@ -360,13 +360,12 @@ func getLive(channelName: String) async -> LiveData {
 
     var links: QualityLinks = [:]
 
-    // Source choisie (Réglages → Lecteur, ou menu du lecteur) : essayée en
-    // premier ; si elle ne répond pas, les autres suivent dans l'ordre
-    // automatique, pour que le direct se lance quand même.
-    let sourcePref = UserDefaults.standard.string(forKey: "liveSource") ?? "auto"
-    logger.info("LIVE", "Source préférée : \(sourcePref.uppercased())")
+    // Ordre des sources (Réglages → Lecteur, ou menu du lecteur) : essayées
+    // l'une après l'autre, pour que le direct se lance quand même.
+    let steps = liveSourceSteps()
+    logger.info("LIVE", "Ordre des sources : \(steps.joined(separator: " → ").uppercased())")
     var usedSource: String? = nil
-    for src in liveSourceOrder(preferred: sourcePref) where links.isEmpty {
+    for src in steps where links.isEmpty {
         switch src {
         case "as":     links = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login)
         case "al":     links = await ttvlolLiveLinks(login: login)
@@ -387,13 +386,17 @@ func getLive(channelName: String) async -> LiveData {
 }
 
 // MARK: – Sources du direct
-/// Ordre des sources du direct : la préférée d'abord (réglage « Source du
-/// direct »), puis l'ordre automatique — Luminous Asie, proxy albanais,
-/// Luminous Europe, Twitch officiel (avec ses pubs), le Worker en dernier.
-func liveSourceOrder(preferred: String) -> [String] {
-    let auto = ["as", "al", "eu", "twitch", "worker"]
-    guard auto.contains(preferred) else { return auto }
-    return [preferred] + auto.filter { $0 != preferred }
+/// Ordre des sources du direct : celui des réglages (« liveSourceOrder »),
+/// sinon la source préférée d'avant (« liveSource », celle que garde l'app
+/// Apple TV) en tête de l'ordre automatique — Luminous Asie, proxy albanais,
+/// Luminous Europe, Twitch officiel (avec ses pubs). Une source inconnue est
+/// ignorée, une oubliée ajoutée à la fin ; le Worker toujours en dernier.
+func liveSourceSteps() -> [String] {
+    let ud = UserDefaults.standard
+    let saved = ud.stringArray(forKey: "liveSourceOrder") ?? [ud.string(forKey: "liveSource") ?? "auto"]
+    var order: [String] = []
+    for id in saved where kLiveSources.contains(id) && !order.contains(id) { order.append(id) }
+    return order + kLiveSources.filter { !order.contains($0) } + ["worker"]
 }
 
 /// Miroirs Luminous (sans pub), essayés dans l'ordre ; vide si aucun ne répond.

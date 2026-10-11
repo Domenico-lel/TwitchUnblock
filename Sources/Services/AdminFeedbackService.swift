@@ -23,10 +23,12 @@ struct AdminFeedbackItem: Decodable, Identifiable, Hashable {
     let lastFrom: String
     let count: Int
     let photos: Int
+    /// Dernière fois que tu l'as vu (« Vu », réponse ou nouvel état).
+    let seenAt: Double?
 
     var id: String { key }
-    /// La personne a répondu en dernier : à toi de jouer.
-    var awaiting: Bool { lastFrom == "u" && count > 1 }
+    /// La personne a répondu en dernier, et rien depuis : à toi de jouer.
+    var awaiting: Bool { lastFrom == "u" && count > 1 && updatedAt > (seenAt ?? 0) }
     var date: Date { Date(timeIntervalSince1970: at / 1000) }
     var updatedDate: Date { Date(timeIntervalSince1970: updatedAt / 1000) }
 
@@ -115,6 +117,12 @@ final class AdminFeedbackService: ObservableObject {
 
     func setStatus(_ key: String, _ status: String) async -> Bool {
         await post(["status": ["key": key, "status": status]])
+    }
+
+    /// Vu : un retour nouveau passe à « Vu » (la personne le voit) ; ce
+    /// qu'elle a écrit jusque-là n'est plus « à répondre ».
+    func markSeen(_ key: String) async -> Bool {
+        await post(["seen": ["key": key]])
     }
 
     /// Supprime le retour et ses photos.

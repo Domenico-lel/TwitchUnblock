@@ -37,11 +37,13 @@ no key to paste. The backend is already hosted and shared by every install.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps.
 * ⚙️ **Quality selector** — every resolution the channel broadcasts, Source
   included.
-* 🛡 **Ad-free lives, from the source you pick** — lives come from ad-free
-  sources (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous Europe),
-  tried in that order. Pick one in Settings → Player or from the player's ⋯
-  menu, which also shows the source in use; official Twitch (with ads) is there
-  too. If the chosen source doesn't answer, the others take over.
+* 🛡 **Ad-free lives, in the source order you pick** — lives come from ad-free
+  sources (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous Europe)
+  or official Twitch (with ads), tried one after the other until one answers.
+  Reorder them in Settings → Player; picking a source from the player's ⋯
+  menu (which also shows the source in use) moves it to the top. Channels that
+  stream with multiple encodes (Enhanced Broadcasting) keep each quality's own
+  name on every source.
 * ⏪ **Rewind a live stream (DVR)** — when the channel archives its broadcasts,
   the progress bar covers the *whole* stream, not just the rewindable window.
   Scrub past that window and the recording takes over at that exact moment.
@@ -173,7 +175,10 @@ no key to paste. The backend is already hosted and shared by every install.
   and tinted versions, and “Contrast” stays the sharpest with iOS 26's clear
   and tinted icons. Drawn by `assets/icons/make_icons.py`; the alternate ones
   ship as separate PNG files (added by `buildipa.sh`), which is what works
-  for apps installed with Feather.
+  for apps installed with Feather. If the app was signed with a certificate's
+  generic identifier (`TEAMID.*`, what Feather does unless **Merge
+  Entitlements** is on), iOS refuses to change the icon: the app reads its own
+  signature and says so.
 * 🫧 **Liquid Glass** — optional on iOS 26: a floating tab bar and glass buttons
   over the picture.
 
@@ -184,7 +189,7 @@ no key to paste. The backend is already hosted and shared by every install.
   picker, with a button to report a mistake.
 * 🐞 **Bug reports & ideas** — a form in the header, in Settings and in the
   player menu, screenshots included. **My reports** shows where each one stands
-  (received, accepted, in progress, done, declined) and the developer's reply,
+  (received, seen, accepted, in progress, done, declined) and the developer's reply,
   and lets you answer back; a badge flags new replies, and open conversations
   refresh on their own.
 * 👥 **Switch account** — sign in with another Twitch account from Settings.

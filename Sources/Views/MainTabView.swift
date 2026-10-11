@@ -316,9 +316,9 @@ struct MainTabView: View {
                 liveSource: menuLiveSource,
                 onSelectSource: { id in
                     showPlayerMenu = false
-                    guard id != store.liveSource else { return }
-                    logger.settingChanged("Source du direct", value: id)
-                    store.liveSource = id
+                    guard id != store.liveSourceOrder.first else { return }
+                    logger.settingChanged("Source du direct en tête", value: id)
+                    store.preferLiveSource(id)
                     reloadCurrent()
                 },
                 onDownload: downloadAction,

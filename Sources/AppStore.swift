@@ -170,10 +170,21 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(immersivePlayer, forKey: "cfg_immersive") }
     }
 
-    /// Source du direct préférée : « auto », « as », « al », « eu » ou
-    /// « twitch ». Essayée en premier par getLive, qui lit la même clé.
-    @Published var liveSource: String = "auto" {
-        didSet { UserDefaults.standard.set(liveSource, forKey: "liveSource") }
+    /// Ordre des sources du direct (« as », « al », « eu », « twitch ») :
+    /// getLive les essaie l'une après l'autre (liveSourceSteps, même clé).
+    @Published var liveSourceOrder: [String] = kLiveSources {
+        didSet { UserDefaults.standard.set(liveSourceOrder, forKey: "liveSourceOrder") }
+    }
+
+    /// Monte (−1) ou descend (+1) une source d'un cran.
+    func moveLiveSource(_ id: String, by delta: Int) {
+        guard let i = liveSourceOrder.firstIndex(of: id), liveSourceOrder.indices.contains(i + delta) else { return }
+        liveSourceOrder.swapAt(i, i + delta)
+    }
+
+    /// En tête de l'ordre (choisie dans le menu du lecteur).
+    func preferLiveSource(_ id: String) {
+        liveSourceOrder = [id] + liveSourceOrder.filter { $0 != id }
     }
 
     /// Audio spatial (AirPods) : « auto » = choix d'iOS (Centre de contrôle),
@@ -464,11 +475,10 @@ final class AppStore: ObservableObject {
         lowLatency         = ud.object(forKey: "cfg_low_latency") as? Bool ?? true
         multiLiveChat      = ud.object(forKey: "cfg_multi_chat") as? Bool ?? true
         immersivePlayer    = ud.object(forKey: "cfg_immersive")   as? Bool ?? true
-        // Anciennes valeurs (« luminous », « cloudflare ») : retour en
-        // automatique, réécrit aussi pour getLive, qui lit la même clé.
-        let savedSource    = ud.string(forKey: "liveSource") ?? "auto"
-        liveSource         = kLiveSourceChoices.contains(savedSource) ? savedSource : "auto"
-        if savedSource != liveSource { ud.set(liveSource, forKey: "liveSource") }
+        // Ordre des sources ; avant lui, une seule source préférée
+        // (« liveSource »), mise en tête. Réécrit pour getLive.
+        liveSourceOrder    = liveSourceSteps().filter { $0 != "worker" }
+        ud.set(liveSourceOrder, forKey: "liveSourceOrder")
         spatialAudio       = ud.string(forKey: SpatialAudio.key) == "off" ? "off" : "auto"
         dropsProgress      = ud.object(forKey: "cfg_drops_progress")  as? Bool ?? true
         autoClaimDrops     = ud.object(forKey: "cfg_drops_autoclaim") as? Bool ?? true

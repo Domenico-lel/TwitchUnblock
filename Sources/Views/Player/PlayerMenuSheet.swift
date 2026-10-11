@@ -92,8 +92,9 @@ struct PlayerMenuSheet: View {
 
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: TSpace.sm) {
-                                ForEach(kLiveSourceChoices, id: \.self) { id in
-                                    TChip(title: store.t("src_\(id)"), isOn: id == store.liveSource) {
+                                // Dans l'ordre des réglages ; en choisir une la met en tête.
+                                ForEach(store.liveSourceOrder, id: \.self) { id in
+                                    TChip(title: store.t("src_\(id)"), isOn: id == store.liveSourceOrder.first) {
                                         onSelectSource(id)
                                     }
                                 }

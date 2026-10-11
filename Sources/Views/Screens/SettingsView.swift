@@ -650,6 +650,13 @@ struct SettingsView: View {
                     .font(.tMeta).foregroundColor(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Signée avec l'identifiant générique d'un certificat (Feather sans
+            // « Merge Entitlements ») : iOS refuse le changement d'icône.
+            if SigningInfo.signedForOtherIdentifier, let id = SigningInfo.applicationIdentifier {
+                Text(store.t("app_icon_wildcard").replacingOccurrences(of: "{id}", with: id))
+                    .font(.tMeta).foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(store.t("app_icon_sub"))
                 .font(.tMeta).foregroundColor(.tMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -984,42 +991,73 @@ struct SettingsView: View {
         }
     }
 
-    /// Source du direct : la préférée est essayée en premier (voir getLive).
+    /// Ordre des sources du direct : getLive les essaie l'une après l'autre.
     @ViewBuilder private var liveSourceRow: some View {
-        HStack(alignment: .center, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.t("live_source"))
+                Text(store.t("live_source_order"))
                     .font(.tCardTitle)
                     .foregroundColor(.tText)
-                Text(store.t("live_source_sub"))
+                Text(store.t("live_source_order_sub"))
                     .font(.tMeta)
                     .foregroundColor(.tMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 8)
-            Menu {
-                ForEach(kLiveSourceChoices, id: \.self) { id in
-                    Button {
-                        logger.settingChanged("Source du direct", value: id)
-                        store.liveSource = id
-                    } label: {
-                        if store.liveSource == id { Label(store.t("src_\(id)"), systemImage: "checkmark") }
-                        else { Text(store.t("src_\(id)")) }
+            ForEach(Array(store.liveSourceOrder.enumerated()), id: \.element) { index, id in
+                HStack(spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.tBadge)
+                        .foregroundColor(.tPrimary)
+                        .frame(width: 22, height: 22)
+                        .background(Color.tPrimary.opacity(0.15))
+                        .clipShape(Circle())
+                    Text(store.t("src_\(id)"))
+                        .font(.tCardTitle)
+                        .foregroundColor(.tText)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    sourceArrow("chevron.up", label: "src_up", enabled: index > 0) {
+                        store.moveLiveSource(id, by: -1)
+                    }
+                    sourceArrow("chevron.down", label: "src_down", enabled: index < store.liveSourceOrder.count - 1) {
+                        store.moveLiveSource(id, by: 1)
                     }
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(store.t("src_\(store.liveSource)"))
-                        .font(.tCardTitle)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundColor(.tPrimary)
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Color.tPrimary.opacity(0.12))
+                .padding(.vertical, 3)
+                .padding(.leading, 10)
+                .padding(.trailing, 4)
+                .background(Color.tSurface)
                 .cornerRadius(10)
             }
+            if store.liveSourceOrder != kLiveSources {
+                Button(store.t("src_reset")) {
+                    withAnimation { store.liveSourceOrder = kLiveSources }
+                }
+                .font(.tLabel)
+                .foregroundColor(.tPrimary)
+                .buttonStyle(.plain)
+            }
         }
+        .onChange(of: store.liveSourceOrder) { order in
+            logger.settingChanged("Ordre des sources", value: order.joined(separator: ","))
+        }
+    }
+
+    private func sourceArrow(_ icon: String, label: String, enabled: Bool,
+                             action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.2)) { action() }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(enabled ? .tPrimary : .tMuted.opacity(0.4))
+                .frame(width: 34, height: 34)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(store.t(label))
     }
 
     @ViewBuilder private var veilleCard: some View {

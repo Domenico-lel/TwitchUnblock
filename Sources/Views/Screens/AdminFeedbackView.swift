@@ -7,7 +7,7 @@ import SwiftUI
 //  AdminFeedbackService.
 // ═══════════════════════════════════════════════════════════════════════════
 
-private let feedbackStatuses = ["new", "accepted", "progress", "done", "refused"]
+private let feedbackStatuses = ["new", "seen", "accepted", "progress", "done", "refused"]
 
 // MARK: – Liste
 struct AdminFeedbackList: View {
@@ -40,6 +40,16 @@ struct AdminFeedbackList: View {
                         row(f)
                     }
                     .buttonStyle(.plain)
+                    // Appui long : « Vu », sans ouvrir la discussion.
+                    .contextMenu {
+                        if f.status == "new" || f.awaiting {
+                            Button {
+                                Task { _ = await admin.markSeen(f.key) }
+                            } label: {
+                                Label(store.t("adm_mark_seen"), systemImage: "eye")
+                            }
+                        }
+                    }
                 }
             }
             .padding(TSpace.lg)
@@ -207,6 +217,16 @@ struct AdminFeedbackThread: View {
                         FeedbackKindTag(kind: item.kind)
                         FeedbackStatusPill(status: item.status)
                     }
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                if let item, item.status == "new" || item.awaiting {
+                    Button {
+                        Task { if !(await admin.markSeen(key)) { failed = true } }
+                    } label: {
+                        Image(systemName: "eye")
+                    }
+                    .accessibilityLabel(store.t("adm_mark_seen"))
                 }
             }
             ToolbarItem(placement: .primaryAction) {

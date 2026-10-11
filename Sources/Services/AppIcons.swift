@@ -53,7 +53,7 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
                     return
                 }
                 let ns = error as NSError
-                logger.warn("ICON", "Icône refusée par iOS", "\(name ?? "par défaut") — \(ns.domain) \(ns.code) \(ns.localizedDescription)")
+                logger.warn("ICON", "Icône refusée par iOS", "\(name ?? "par défaut") — \(ns.domain) \(ns.code) \(ns.localizedDescription) — signée « \(SigningInfo.applicationIdentifier ?? "?") »")
                 // « Ressource temporairement indisponible » : iOS occupé, un
                 // second essai un peu plus tard passe d'habitude.
                 if retry, ns.domain == NSPOSIXErrorDomain, ns.code == 35 {
