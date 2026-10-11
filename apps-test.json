@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.42",
+          "buildVersion": "267",
+          "date": "2026-10-11",
+          "localizedDescription": "- ntfy : le réglage reste activé quand le serveur n'est pas prêt",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-267/TwitchUnblock.ipa",
+          "size": 2842732,
+          "commit": "f35ce49eeb1ab0f978a2b6624bb43103bf1e9852"
+        },
+        {
           "version": "1.2.41",
           "buildVersion": "266",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-231/TwitchUnblock.ipa",
           "size": 1888489,
           "commit": "6ff7e129a953f063955493717d2d8f8b4fd95916"
-        },
-        {
-          "version": "1.2.11",
-          "buildVersion": "230",
-          "date": "2026-10-06",
-          "localizedDescription": "- New \"Deleted\" tab on a channel page: recover recently deleted VODs while Twitch still serves their segments.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-230/TwitchUnblock.ipa",
-          "size": 1842921,
-          "commit": "54e947072d512b5d9f95950c3feda637b304e3d4"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.41",
+      "version": "1.2.42",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-266/TwitchUnblock.ipa",
-      "size": 2841757
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-267/TwitchUnblock.ipa",
+      "size": 2842732
     }
   ],
   "news": []
