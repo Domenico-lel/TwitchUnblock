@@ -20,6 +20,7 @@ struct SettingsView: View {
     @State private var ntfyResult: String? = nil
     @State private var ntfyCopied      = false
     @State private var appIcon: AppIconChoice = .standard
+    @State private var appIconError: String? = nil
     @AppStorage("onboarding_done") private var onboardingDone = false
     @State private var showLogoutAlert = false
     @State private var showClearAlert  = false
@@ -612,10 +613,17 @@ struct SettingsView: View {
                     ForEach(AppIconChoice.allCases) { choice in
                         let on = appIcon == choice
                         Button {
-                            Task {
-                                guard await choice.apply() else { return }
-                                appIcon = choice
-                                logger.settingChanged("Icône de l'app", value: choice.rawValue)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            appIconError = nil
+                            choice.apply { error in
+                                guard let error else {
+                                    appIcon = choice
+                                    logger.settingChanged("Icône de l'app", value: choice.rawValue)
+                                    return
+                                }
+                                appIconError = error == AppIconChoice.unsupported
+                                    ? store.t("app_icon_unsupported")
+                                    : store.t("app_icon_failed").replacingOccurrences(of: "{e}", with: error)
                             }
                         } label: {
                             VStack(spacing: 6) {
@@ -635,6 +643,11 @@ struct SettingsView: View {
                     }
                 }
                 .padding(.vertical, 3)
+            }
+            if let appIconError {
+                Text(appIconError)
+                    .font(.tMeta).foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text(store.t("app_icon_sub"))
                 .font(.tMeta).foregroundColor(.tMuted)
