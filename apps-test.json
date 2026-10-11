@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.32",
+          "buildVersion": "257",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops: a notification when a drop is ready to claim, or when the app has claimed it for you (Settings → Drops → Notify me).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-257/TwitchUnblock.ipa",
+          "size": 2449430,
+          "commit": "6937a6cf54b07f00aad8b9f169f3fbdfdbefe397"
+        },
+        {
           "version": "1.2.31",
           "buildVersion": "256",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-219/TwitchUnblock.ipa",
           "size": 1678957,
           "commit": "c6dfb9a0877af1190fe4b92a9a440d5df8c3b1bb"
-        },
-        {
-          "version": "1.1.11",
-          "buildVersion": "217",
-          "date": "2026-10-04",
-          "localizedDescription": "- Low latency mode now keeps you close to live (gently speeds up when behind)\n- Channel pages open in a sheet without switching to the Search tab\n- Expanded pinned message now stays above the chat\n- Fixed Top streams not loading without a Twitch account",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-217/TwitchUnblock.ipa",
-          "size": 1663751,
-          "commit": "853726b00bc3a5743abb77c5a90e5bf2680eba92"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.31",
+      "version": "1.2.32",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-256/TwitchUnblock.ipa",
-      "size": 2446765
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-257/TwitchUnblock.ipa",
+      "size": 2449430
     }
   ],
   "news": []
