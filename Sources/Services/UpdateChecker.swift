@@ -57,8 +57,8 @@ final class UpdateChecker: ObservableObject {
     }
     static var sourceURL: String {
         isTestBuild
-            ? "https://raw.githubusercontent.com/MXFia19/TwitchUnblock/test-17d298/apps-test.json"
-            : "https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json"
+            ? "https://raw.githubusercontent.com/Domenico-lel/TwitchUnblock/test-17d298/apps-test.json"
+            : "https://raw.githubusercontent.com/Domenico-lel/TwitchUnblock/master/apps.json"
     }
     private let lastCheckKey = "update_last_check"
     private let dismissedKey = "update_dismissed_build"

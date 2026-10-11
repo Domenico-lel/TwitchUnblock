@@ -63,7 +63,8 @@ jobs:
             CHANNEL=test;   TAG_NAME="test-${{ github.run_number }}";    SOURCE=apps-test.json
           fi
           BUILD_DATE=$(date -u +%Y-%m-%d)
-          DOWNLOAD_URL="https://github.com/MXFia19/TwitchUnblock/releases/download/$TAG_NAME/TwitchUnblock.ipa"
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/$TAG_NAME/TwitchUnblock.ipa"
+          echo "build_number=$((10000 + ${{ github.run_number }}))" >> $GITHUB_OUTPUT
 
           echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
           echo "source=$SOURCE" >> $GITHUB_OUTPUT
@@ -163,7 +164,7 @@ jobs:
           # Même version pour l'app et son extension (iOS l'exige).
           for P in "$APP_PLIST" "$EXT_PLIST"; do
             plutil -replace CFBundleShortVersionString -string "${{ steps.vars.outputs.version }}" "$P"
-            plutil -replace CFBundleVersion -string "${{ github.run_number }}" "$P"
+            plutil -replace CFBundleVersion -string "${{ steps.vars.outputs.build_number }}" "$P"
           done
           plutil -replace CFBundleIconName -string "AppIcon" "$APP_PLIST"
 
@@ -253,7 +254,7 @@ jobs:
         env:
           SOURCE: ${{ steps.vars.outputs.source }}
           VERSION: ${{ steps.vars.outputs.version }}
-          BUILD: ${{ github.run_number }}
+          BUILD: ${{ steps.vars.outputs.build_number }}
           DATE: ${{ steps.vars.outputs.date }}
           URL: ${{ steps.vars.outputs.download_url }}
         run: |
