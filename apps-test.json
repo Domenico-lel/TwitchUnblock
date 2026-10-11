@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.38",
+          "buildVersion": "263",
+          "date": "2026-10-11",
+          "localizedDescription": "- Instant live notifications, even with the app closed, through the free ntfy app (Settings → Features in testing): add the topic shown there in ntfy, and tapping a notification opens the stream.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-263/TwitchUnblock.ipa",
+          "size": 2674453,
+          "commit": "8abcbb07d9f80b8e6f8de0fde0c610cf3b17bcc3"
+        },
+        {
           "version": "1.2.37",
           "buildVersion": "262",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-226/TwitchUnblock.ipa",
           "size": 1809743,
           "commit": "59d5e502f7d9c1641c911996a1e116a2937ace76"
-        },
-        {
-          "version": "1.2.7",
-          "buildVersion": "225",
-          "date": "2026-10-05",
-          "localizedDescription": "- Ready to switch VODs and lives to a backup server when the main one reaches its daily limit.\n- Seek bar: while dragging, a bubble shows the exact time you are seeking to (and the chapter on VODs).\n- Pinch with two fingers to zoom into the video, then drag to move around; pinch out to reset.\n- Lock screen and Control Center: title, channel and picture, with play/pause and ±10 s controls. Audio keeps playing when the phone is locked.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-225/TwitchUnblock.ipa",
-          "size": 1733170,
-          "commit": "ee34401ebbdb21db777c00cbee38f1af22d3f799"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.37",
+      "version": "1.2.38",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-262/TwitchUnblock.ipa",
-      "size": 2655098
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-263/TwitchUnblock.ipa",
+      "size": 2674453
     }
   ],
   "news": []
