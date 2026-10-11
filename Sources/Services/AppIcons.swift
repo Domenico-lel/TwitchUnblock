@@ -3,10 +3,11 @@ import UIKit
 // ═══════════════════════════════════════════════════════════════════════════
 //  Icônes au choix (Réglages → Apparence → Icône de l'app).
 //
-//  Dessins dans assets/icons (make_icons.py) ; la CI en fait les catalogues
-//  « AppIcon-<nom> », chacun avec ses versions sombre et teintée (iOS 18+,
-//  dont iOS 26 tire aussi les icônes transparentes), et les aperçus
-//  « IconPreview-<nom> » de ce réglage.
+//  Dessins dans assets/icons (make_icons.py). Les icônes au choix sont des
+//  fichiers PNG séparés (CFBundleIconFiles), ajoutés à l'app par buildipa.sh,
+//  comme Feather pour les siennes : déclarées seulement par le catalogue
+//  d'icônes, iOS refusait de les poser sur une app installée par Feather
+//  (OSStatus -54). Aperçus « IconPreview-<nom> » faits par la CI.
 // ═══════════════════════════════════════════════════════════════════════════
 enum AppIconChoice: String, CaseIterable, Identifiable {
     case standard = "Default"

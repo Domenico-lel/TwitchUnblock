@@ -39,8 +39,6 @@ targets:
         PRODUCT_NAME: TwitchUnblock
         INFOPLIST_FILE: Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        # Icônes au choix (catalogues créés par la CI depuis assets/icons).
-        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIcon-Purple AppIcon-Night AppIcon-Light AppIcon-Contrast AppIcon-Neon"
         SWIFT_VERSION: 5.9
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: ""

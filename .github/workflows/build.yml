@@ -75,7 +75,7 @@ jobs:
 
       - name: Create App Icon Folder
         run: |
-          echo "--- Icônes iOS : par défaut et au choix (assets/icons) ---"
+          echo "--- Icône iOS par défaut et aperçus des icônes au choix ---"
           CAT=Sources/Assets.xcassets
           # Une icône : normale, sombre et teintée (iOS 18+ ; iOS 26 tire aussi
           # ses icônes transparentes de la version teintée). $1 : catalogue,
@@ -113,8 +113,8 @@ jobs:
           }
           make_icon AppIcon assets/icon.png AppIcon
           make_preview Default
+          # Icônes au choix : fichiers séparés, ajoutés à l'app par buildipa.sh.
           for name in Purple Night Light Contrast Neon; do
-            make_icon "AppIcon-$name" "assets/icons/$name.png" "$name"
             make_preview "$name"
           done
 

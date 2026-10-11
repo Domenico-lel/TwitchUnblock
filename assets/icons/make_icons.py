@@ -8,8 +8,10 @@ teintées d'iOS 26, qui ne gardent que la luminosité, il reste lisible.
 
 Pour chaque icône : `<nom>.png` (normale), `<nom>-dark.png` (iOS 18+ en mode
 sombre : fond transparent, iOS pose le sien), `<nom>-tinted.png` (gris pur,
-pour les icônes teintées et transparentes), et un aperçu 180 px pour le
-réglage. La CI (build.yml) en fait les catalogues d'icônes.
+pour les icônes teintées et transparentes), un aperçu 180 px pour le réglage
+et, pour les icônes au choix, leurs fichiers séparés (loose/). La CI
+(build.yml) fait le catalogue de l'icône par défaut et des aperçus ;
+buildipa.sh ajoute les icônes au choix à l'app.
 
     pip install pillow
     python assets/icons/make_icons.py
@@ -164,6 +166,19 @@ def preview(img, name):
     img.convert('RGB').resize((180, 180), Image.LANCZOS).save(os.path.join(OUT, 'previews', name), optimize=True)
 
 
+# Icônes au choix en fichiers séparés (CFBundleIconFiles, comme Feather) :
+# déclarées seulement par le catalogue, iOS refusait de les poser sur une
+# app installée par Feather (OSStatus -54). buildipa.sh les copie dans l'app.
+LOOSE = {'@2x.png': 120, '@3x.png': 180, '@2x~ipad.png': 152}
+
+
+def loose(img, name):
+    os.makedirs(os.path.join(OUT, 'loose'), exist_ok=True)
+    for suffix, px in LOOSE.items():
+        img.convert('RGB').resize((px, px), Image.LANCZOS).save(
+            os.path.join(OUT, 'loose', f'AppIcon-{name}{suffix}'), optimize=True)
+
+
 if __name__ == '__main__':
     tinted = tinted_variant()
     # Icône par défaut : son dessin reste assets/icon.png ; seules ses
@@ -174,17 +189,18 @@ if __name__ == '__main__':
     default = Image.open(os.path.join(OUT, '..', 'icon.png')).convert('RGBA')
     preview(Image.alpha_composite(Image.new('RGBA', default.size, (0, 0, 0, 255)), default), 'Default.png')
 
+    # Icônes au choix : en fichiers séparés, sans versions sombre ni teintée
+    # (seul le catalogue les porte) ; leurs dessins jouent déjà le contraste.
     styles = {
-        'Purple':   (icon_purple,   (191, 148, 255)),
-        'Night':    (icon_night,    (191, 148, 255)),
-        'Light':    (icon_light,    (191, 148, 255)),
-        'Contrast': (icon_contrast, (255, 255, 255)),
-        'Neon':     (icon_neon,     (232, 140, 255)),
+        'Purple':   icon_purple,
+        'Night':    icon_night,
+        'Light':    icon_light,
+        'Contrast': icon_contrast,
+        'Neon':     icon_neon,
     }
-    for name, (draw, dark) in styles.items():
+    for name, draw in styles.items():
         img = draw()
         save(img, f'{name}.png')
-        save(dark_variant(dark), f'{name}-dark.png')
-        save(tinted, f'{name}-tinted.png')
         preview(img, f'{name}.png')
+        loose(img, name)
     print('icônes écrites dans', OUT)
