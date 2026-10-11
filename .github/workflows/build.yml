@@ -19,6 +19,7 @@ on:
       - 'VERSION'
       - 'buildipa.sh'
       - 'assets/icon.png'
+      - 'assets/icons/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
 
@@ -51,7 +52,7 @@ jobs:
           SINCE=$(git log -1 --format=%H -- VERSION)
           if [ -n "$SINCE" ]; then
             # Seuls les commits qui touchent l'app comptent (pas les README…).
-            PATCH=$(git rev-list --count "$SINCE"..HEAD -- Sources Shared Widgets Info.plist project.yml buildipa.sh assets/icon.png)
+            PATCH=$(git rev-list --count "$SINCE"..HEAD -- Sources Shared Widgets Info.plist project.yml buildipa.sh assets/icon.png assets/icons)
           else
             PATCH=${{ github.run_number }}
           fi
@@ -74,25 +75,48 @@ jobs:
 
       - name: Create App Icon Folder
         run: |
-          echo "--- Création de l'icône iOS ---"
-          mkdir -p Sources/Assets.xcassets/AppIcon.appiconset
-          curl -sL https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/assets/icon.png -o Sources/Assets.xcassets/AppIcon.appiconset/icon.png
-          cat <<EOF > Sources/Assets.xcassets/AppIcon.appiconset/Contents.json
+          echo "--- Icônes iOS : par défaut et au choix (assets/icons) ---"
+          CAT=Sources/Assets.xcassets
+          # Une icône : normale, sombre et teintée (iOS 18+ ; iOS 26 tire aussi
+          # ses icônes transparentes de la version teintée). $1 : catalogue,
+          # $2 : image normale, $3 : préfixe des variantes dans assets/icons.
+          make_icon() {
+          dir="$CAT/$1.appiconset"
+          mkdir -p "$dir"
+          cp "$2" "$dir/icon.png"
+          cp "assets/icons/$3-dark.png" "$dir/icon-dark.png"
+          cp "assets/icons/$3-tinted.png" "$dir/icon-tinted.png"
+          cat <<EOF > "$dir/Contents.json"
           {
             "images" : [
-              {
-                "filename" : "icon.png",
-                "idiom" : "universal",
-                "platform" : "ios",
-                "size" : "1024x1024"
-              }
+              { "filename" : "icon.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" },
+              { "appearances" : [ { "appearance" : "luminosity", "value" : "dark" } ],
+                "filename" : "icon-dark.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" },
+              { "appearances" : [ { "appearance" : "luminosity", "value" : "tinted" } ],
+                "filename" : "icon-tinted.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
             ],
-            "info" : {
-              "author" : "xcode",
-              "version" : 1
-            }
+            "info" : { "author" : "xcode", "version" : 1 }
           }
           EOF
+          }
+          # Aperçu pour Réglages → Apparence → Icône de l'app.
+          make_preview() {
+          dir="$CAT/IconPreview-$1.imageset"
+          mkdir -p "$dir"
+          cp "assets/icons/previews/$1.png" "$dir/preview.png"
+          cat <<EOF > "$dir/Contents.json"
+          {
+            "images" : [ { "filename" : "preview.png", "idiom" : "universal" } ],
+            "info" : { "author" : "xcode", "version" : 1 }
+          }
+          EOF
+          }
+          make_icon AppIcon assets/icon.png AppIcon
+          make_preview Default
+          for name in Purple Night Light Contrast Neon; do
+            make_icon "AppIcon-$name" "assets/icons/$name.png" "$name"
+            make_preview "$name"
+          done
 
       - name: Inject XcodeGen Settings
         run: |
@@ -194,7 +218,7 @@ jobs:
               return subprocess.run(['git', 'merge-base', '--is-ancestor', c, 'HEAD'], capture_output=True).returncode == 0
           args = ['git', 'log', '--no-merges', '--format=%H%x1f%s%x1f%b%x1e']
           args += [f'{prev}..HEAD'] if prev and is_ancestor(prev) else ['-n', '8']
-          args += ['--', 'Sources', 'Shared', 'Widgets', 'Info.plist', 'project.yml', 'buildipa.sh', 'assets/icon.png']
+          args += ['--', 'Sources', 'Shared', 'Widgets', 'Info.plist', 'project.yml', 'buildipa.sh', 'assets/icon.png', 'assets/icons']
           out = subprocess.run(args, capture_output=True, text=True).stdout
           lines = []
           for rec in out.split('\x1e'):

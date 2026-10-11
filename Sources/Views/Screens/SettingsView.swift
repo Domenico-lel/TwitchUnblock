@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var ntfyOn          = NtfyNotifier.isEnabled
     @State private var ntfyResult: String? = nil
     @State private var ntfyCopied      = false
+    @State private var appIcon: AppIconChoice = .standard
     @AppStorage("onboarding_done") private var onboardingDone = false
     @State private var showLogoutAlert = false
     @State private var showClearAlert  = false
@@ -582,6 +583,8 @@ struct SettingsView: View {
                     }
                 }
                 Divider().background(Color.tBorder)
+                appIconRow
+                Divider().background(Color.tBorder)
                 if Theme.glassSupported {
                     toggleRow(store.t("liquid_glass"), store.t("liquid_glass_sub"),
                               $store.liquidGlass, log: "Verre liquide")
@@ -596,6 +599,48 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// Icône de l'app : « Contraste » reste nette en icônes transparentes ou
+    /// teintées (iOS 26), toutes ont leurs versions sombre et teintée.
+    @ViewBuilder private var appIconRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(store.t("app_icon"))
+                .font(.tCardTitle).foregroundColor(.tText)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(AppIconChoice.allCases) { choice in
+                        let on = appIcon == choice
+                        Button {
+                            Task {
+                                guard await choice.apply() else { return }
+                                appIcon = choice
+                                logger.settingChanged("Icône de l'app", value: choice.rawValue)
+                            }
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(choice.previewName)
+                                    .resizable()
+                                    .frame(width: 58, height: 58)
+                                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                        .stroke(on ? Color.tPrimary : Color.tBorder, lineWidth: on ? 3 : 1))
+                                Text(store.t(choice.labelKey))
+                                    .font(.tMeta)
+                                    .foregroundColor(on ? .tText : .tMuted)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(store.t(choice.labelKey))
+                    }
+                }
+                .padding(.vertical, 3)
+            }
+            Text(store.t("app_icon_sub"))
+                .font(.tMeta).foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .onAppear { appIcon = AppIconChoice.current }
     }
 
     /// Langue des streamers dans « Top des lives » (appareil par défaut).

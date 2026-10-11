@@ -166,6 +166,10 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 🎨 **Themes** — 7 accent colours and 3 backgrounds (dark, OLED black, slate),
   in Settings → General → Appearance.
+* 🖼️ **App icons** — six to pick from in Settings → General → Appearance
+  (Classic, Purple, Night, Light, Contrast, Neon), each with dark and tinted
+  versions; “Contrast” stays the sharpest with iOS 26's clear and tinted
+  icons. Drawn by `assets/icons/make_icons.py`.
 * 🫧 **Liquid Glass** — optional on iOS 26: a floating tab bar and glass buttons
   over the picture.
 
