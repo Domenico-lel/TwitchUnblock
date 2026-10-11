@@ -80,7 +80,9 @@ no key to paste. The backend is already hosted and shared by every install.
   long-press a live card (or use the player's ⋯ menu) to add it — a “+” then
   shows on every card — and tap **Watch** in the bar at the bottom. Tap a
   stream to hear it, open any of them with its chat, add a channel by name.
-  Side by side in landscape, stacked in portrait.
+  Side by side in landscape, stacked in portrait. On iPad (or a large iPhone
+  in landscape), the chat of the stream you hear shows on the right — a
+  button in the mosaic and Settings → Player turn it on or off.
 
 ### Chat
 

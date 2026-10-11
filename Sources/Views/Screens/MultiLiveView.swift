@@ -12,6 +12,8 @@ struct MultiLiveView: View {
 
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
+    /// Large (iPad, grand iPhone en paysage) : place pour le chat.
+    @Environment(\.horizontalSizeClass) private var widthClass
     @ObservedObject private var multi = MultiLive.shared
     @StateObject private var session = MultiLiveSession()
     @State private var showAdd = false
@@ -21,8 +23,16 @@ struct MultiLiveView: View {
         VStack(spacing: 0) {
             header
             GeometryReader { geo in
-                layout(portrait: geo.size.height > geo.size.width)
-                    .padding(4)
+                let chatWidth = chatModel == nil ? 0 : min(360, geo.size.width * 0.32)
+                HStack(spacing: 0) {
+                    layout(portrait: geo.size.height > geo.size.width - chatWidth)
+                        .padding(4)
+                    if let model = chatModel {
+                        Rectangle().fill(Color.tBorder).frame(width: 1)
+                        MultiLiveChatPane(model: model)
+                            .frame(width: chatWidth - 1)
+                    }
+                }
             }
         }
         .background(Color.black.ignoresSafeArea())
@@ -59,6 +69,12 @@ struct MultiLiveView: View {
                 Text(store.t("multi_hint")).font(.tMeta).foregroundColor(.tMuted).lineLimit(1)
             }
             Spacer(minLength: TSpace.sm)
+            if widthClass == .regular {
+                TIconButton(icon: store.multiLiveChat ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right",
+                            tint: store.multiLiveChat ? .tPurple : .tMuted) {
+                    store.multiLiveChat.toggle()
+                }
+            }
             if !multi.isFull {
                 TIconButton(icon: "plus") { showAdd = true }
             }
@@ -67,6 +83,12 @@ struct MultiLiveView: View {
         .padding(.horizontal, TSpace.lg)
         .padding(.vertical, TSpace.sm)
         .background(Color.tDark)
+    }
+
+    /// Le direct qui a le son, si son chat a la place de s'afficher.
+    private var chatModel: MultiTileModel? {
+        guard store.multiLiveChat, widthClass == .regular, let login = session.audible else { return nil }
+        return session.tiles[login]
     }
 
     /// Côte à côte en largeur (le premier en grand à trois, 2 × 2 à quatre),
@@ -100,6 +122,21 @@ struct MultiLiveView: View {
         } else {
             Color.black
         }
+    }
+}
+
+// MARK: – Chat du direct qui a le son
+private struct MultiLiveChatPane: View {
+    @ObservedObject var model: MultiTileModel
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        ChatView(channelName: model.login, channelId: model.channelId,
+                 token: store.twitchToken, login: store.twitchLogin,
+                 chatOnly: .constant(false),
+                 style: store.chatStyle(chrome: true, translucent: false))
+            // Autre direct, ou identifiant arrivé : chat reconstruit à neuf.
+            .id("\(model.login)-\(model.channelId ?? "")")
     }
 }
 

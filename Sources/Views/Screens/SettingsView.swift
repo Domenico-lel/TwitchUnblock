@@ -889,6 +889,9 @@ struct SettingsView: View {
                 toggleRow(store.t("restore_muted"), store.t("restore_muted_sub"),
                           $store.restoreMutedAudio, log: "Rétablir le son des passages coupés")
                 Divider().background(Color.tBorder)
+                toggleRow(store.t("multi_chat"), store.t("multi_chat_sub"),
+                          $store.multiLiveChat, log: "Chat dans le multi-live")
+                Divider().background(Color.tBorder)
                 spatialAudioRow
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),

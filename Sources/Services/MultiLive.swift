@@ -89,6 +89,8 @@ final class MultiTileModel: ObservableObject {
     let login: String
     let player = AVPlayer()
     @Published private(set) var phase: Phase = .loading
+    /// Identifiant Twitch de la chaîne (emotes et badges de son chat).
+    @Published private(set) var channelId: String?
 
     private var task: Task<Void, Never>?
     private var observers: [NSKeyValueObservation] = []
@@ -110,6 +112,7 @@ final class MultiTileModel: ObservableObject {
         task = Task { [weak self] in
             let data = await getLive(channelName: login)
             guard let self, !Task.isCancelled else { return }
+            if let id = data.userId { self.channelId = id }
             guard let links = data.links, !links.isEmpty,
                   let url = MultiLive.pick(links, count: count) else {
                 let gone = data.error == "offline" || data.error == "Streamer introuvable"

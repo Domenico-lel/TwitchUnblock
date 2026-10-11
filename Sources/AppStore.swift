@@ -157,6 +157,12 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(lowLatency, forKey: "cfg_low_latency") }
     }
 
+    /// Multi-live : le chat du direct qui a le son, à droite de la mosaïque
+    /// (écran assez large : iPad, grand iPhone en paysage).
+    @Published var multiLiveChat: Bool = true {
+        didSet { UserDefaults.standard.set(multiLiveChat, forKey: "cfg_multi_chat") }
+    }
+
     /// Lecteur immersif : commandes par-dessus l'image, comme sur Twitch.
     /// Désactivé = lecteur natif Apple (PiP et plein écran système).
     /// Activé par défaut : c'est le lecteur de l'app, le natif est le repli.
@@ -456,6 +462,7 @@ final class AppStore: ObservableObject {
         // Actif par défaut depuis la 1.2.21 (direct à quelques secondes au lieu
         // d'une vingtaine) ; qui l'a coupé à la main le garde coupé.
         lowLatency         = ud.object(forKey: "cfg_low_latency") as? Bool ?? true
+        multiLiveChat      = ud.object(forKey: "cfg_multi_chat") as? Bool ?? true
         immersivePlayer    = ud.object(forKey: "cfg_immersive")   as? Bool ?? true
         // Anciennes valeurs (« luminous », « cloudflare ») : retour en
         // automatique, réécrit aussi pour getLive, qui lit la même clé.
