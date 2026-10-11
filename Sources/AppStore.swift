@@ -116,6 +116,12 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(immersivePlayer, forKey: "cfg_immersive") }
     }
 
+    /// Source du direct préférée : « auto », « as », « al », « eu » ou
+    /// « twitch ». Essayée en premier par getLive, qui lit la même clé.
+    @Published var liveSource: String = "auto" {
+        didSet { UserDefaults.standard.set(liveSource, forKey: "liveSource") }
+    }
+
     /// Recadrer la vidéo pour remplir l'écran, au lieu de laisser des bandes
     /// noires. Coupe le haut et le bas : du 16:9 dans un écran de téléphone en
     /// paysage (≈2.16) ne peut pas à la fois tout montrer et tout remplir.
@@ -376,6 +382,11 @@ final class AppStore: ObservableObject {
         // d'une vingtaine) ; qui l'a coupé à la main le garde coupé.
         lowLatency         = ud.object(forKey: "cfg_low_latency") as? Bool ?? true
         immersivePlayer    = ud.object(forKey: "cfg_immersive")   as? Bool ?? true
+        // Anciennes valeurs (« luminous », « cloudflare ») : retour en
+        // automatique, réécrit aussi pour getLive, qui lit la même clé.
+        let savedSource    = ud.string(forKey: "liveSource") ?? "auto"
+        liveSource         = kLiveSourceChoices.contains(savedSource) ? savedSource : "auto"
+        if savedSource != liveSource { ud.set(liveSource, forKey: "liveSource") }
         fillScreen         = ud.object(forKey: "cfg_fill_screen") as? Bool ?? false
         landscapeChat      = LandscapeChat(rawValue: ud.string(forKey: "cfg_landscape_chat") ?? "")
                              ?? .column

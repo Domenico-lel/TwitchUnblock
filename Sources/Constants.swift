@@ -30,6 +30,9 @@ let kLuminousHosts = [
 /// n'importe quelle adresse et annoncent leurs segments d'avance.
 let kTTVLOLHosts = ["twitch-al.nadeko.net"]
 
+/// Sources du direct proposées dans les réglages et le menu du lecteur.
+let kLiveSourceChoices = ["auto", "as", "al", "eu", "twitch"]
+
 /// Récupération de VODs supprimées : distributions CloudFront où Twitch range
 /// les VODs (les plus fréquentes d'abord), plus des hôtes historiques. Le
 /// dossier d'une VOD vaut SHA1("login_streamID_epoch")[:20]_login_streamID_epoch
@@ -435,6 +438,14 @@ private let translations: [Lang: [String: String]] = [
         "vod_unmuted": "Son d'origine rétabli sur les passages coupés",
         "restore_muted": "Rétablir le son des passages coupés",
         "restore_muted_sub": "Twitch coupe le son des passages avec de la musique protégée. Un jour ou deux après le live, l'original est encore disponible : l'app le remet quand elle peut. Sans effet sur AirPlay.",
+        "live_source": "Source du direct",
+        "live_source_sub": "Luminous et le proxy albanais sont sans pub. La source choisie est essayée en premier ; si elle ne répond pas, les autres prennent le relais.",
+        "src_auto": "Automatique",
+        "src_as": "Luminous Asie",
+        "src_al": "Proxy Albanie (TTV.LOL)",
+        "src_eu": "Luminous Europe",
+        "src_twitch": "Twitch officiel (pubs)",
+        "src_worker": "Serveur TwitchUnblock",
         "appearance": "Apparence",
         "accent_color": "Couleur d'accent",
         "background_theme": "Fond",
@@ -758,6 +769,14 @@ private let translations: [Lang: [String: String]] = [
         "vod_unmuted": "Original sound restored on muted parts",
         "restore_muted": "Restore muted sound",
         "restore_muted_sub": "Twitch mutes parts with copyrighted music. For a day or two after the stream the original is still available: the app puts it back when it can. No effect over AirPlay.",
+        "live_source": "Live source",
+        "live_source_sub": "Luminous and the Albanian proxy are ad-free. The chosen source is tried first; if it doesn't answer, the others take over.",
+        "src_auto": "Automatic",
+        "src_as": "Luminous Asia",
+        "src_al": "Albania proxy (TTV.LOL)",
+        "src_eu": "Luminous Europe",
+        "src_twitch": "Official Twitch (ads)",
+        "src_worker": "TwitchUnblock server",
         "appearance": "Appearance",
         "accent_color": "Accent color",
         "background_theme": "Background",
@@ -1081,6 +1100,14 @@ private let translations: [Lang: [String: String]] = [
         "vod_unmuted": "Sonido original restaurado en las partes silenciadas",
         "restore_muted": "Restaurar el sonido silenciado",
         "restore_muted_sub": "Twitch silencia las partes con música protegida. Uno o dos días después del directo, el original aún está disponible: la app lo restaura cuando puede. Sin efecto por AirPlay.",
+        "live_source": "Fuente del directo",
+        "live_source_sub": "Luminous y el proxy de Albania no tienen anuncios. La fuente elegida se prueba primero; si no responde, las demás toman el relevo.",
+        "src_auto": "Automática",
+        "src_as": "Luminous Asia",
+        "src_al": "Proxy de Albania (TTV.LOL)",
+        "src_eu": "Luminous Europa",
+        "src_twitch": "Twitch oficial (anuncios)",
+        "src_worker": "Servidor de TwitchUnblock",
         "appearance": "Apariencia",
         "accent_color": "Color de acento",
         "background_theme": "Fondo",

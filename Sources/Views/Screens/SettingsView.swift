@@ -870,6 +870,8 @@ struct SettingsView: View {
                 toggleRow(store.t("low_latency"), store.t("low_latency_sub"),
                           $store.lowLatency, log: "Mode faible latence")
                 Divider().background(Color.tBorder)
+                liveSourceRow
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("fill_screen"), store.t("fill_screen_sub"),
                           $store.fillScreen, log: "Remplir l'écran")
                 Divider().background(Color.tBorder)
@@ -878,6 +880,44 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
                           $store.showLatency, log: "Afficher la latence")
+            }
+        }
+    }
+
+    /// Source du direct : la préférée est essayée en premier (voir getLive).
+    @ViewBuilder private var liveSourceRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("live_source"))
+                    .font(.tCardTitle)
+                    .foregroundColor(.tText)
+                Text(store.t("live_source_sub"))
+                    .font(.tMeta)
+                    .foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(kLiveSourceChoices, id: \.self) { id in
+                    Button {
+                        logger.settingChanged("Source du direct", value: id)
+                        store.liveSource = id
+                    } label: {
+                        if store.liveSource == id { Label(store.t("src_\(id)"), systemImage: "checkmark") }
+                        else { Text(store.t("src_\(id)")) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(store.t("src_\(store.liveSource)"))
+                        .font(.tCardTitle)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundColor(.tPrimary)
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(Color.tPrimary.opacity(0.12))
+                .cornerRadius(10)
             }
         }
     }
