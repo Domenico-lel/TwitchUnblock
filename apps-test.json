@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.36",
+          "buildVersion": "261",
+          "date": "2026-10-11",
+          "localizedDescription": "- Downloads keep going in the background, even with the app closed; the chat can be kept and replayed offline (emotes included); a finished download can be exported as a single file (Files, AirDrop, VLC).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-261/TwitchUnblock.ipa",
+          "size": 2648332,
+          "commit": "028e8169a58b91f9fd62389dbae8740a43db3274"
+        },
+        {
           "version": "1.2.35",
           "buildVersion": "260",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-224/TwitchUnblock.ipa",
           "size": 1707923,
           "commit": "ef44a116eaa26a6046bb7518d7fbce687a6a75d8"
-        },
-        {
-          "version": "1.2.4",
-          "buildVersion": "223",
-          "date": "2026-10-04",
-          "localizedDescription": "- More subscriber-only or hidden VODs now play: the fallback finds the video even when Twitch no longer provides its usual preview.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-223/TwitchUnblock.ipa",
-          "size": 1708891,
-          "commit": "8d337bbbb1692840b0ca64c49efeda9efed6c69e"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.35",
+      "version": "1.2.36",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-260/TwitchUnblock.ipa",
-      "size": 2598048
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-261/TwitchUnblock.ipa",
+      "size": 2648332
     }
   ],
   "news": []
