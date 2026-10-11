@@ -18,6 +18,13 @@ struct TwitchUnblockApp: App {
                 .task { await AnnouncementService.shared.refresh(force: true) }
                 // Réponses aux retours envoyés depuis l'app (pastille).
                 .task { await FeedbackStore.shared.refresh(force: true) }
+                // Notification ntfy touchée : twitchunblock://live/<chaîne>.
+                .onOpenURL { url in
+                    guard url.scheme == "twitchunblock", url.host == "live",
+                          let login = url.pathComponents.dropFirst().first, !login.isEmpty else { return }
+                    NotificationCenter.default.post(name: .openLiveChannel, object: nil,
+                                                    userInfo: ["login": login.lowercased()])
+                }
                 .onChange(of: scenePhase) { phase in
                     switch phase {
                     case .background:
@@ -39,6 +46,8 @@ struct TwitchUnblockApp: App {
                         Task { await LiveNotifier.check(notify: false) }
                         Task { await AnnouncementService.shared.refresh() }
                         Task { await FeedbackStore.shared.refresh() }
+                        // ntfy : chaînes suivies changées (ou une fois par jour).
+                        Task { await NtfyNotifier.sync(lang: store.lang) }
                         // Téléchargements : ce qui manque est redemandé (app
                         // fermée en la balayant…), les chats inachevés repris.
                         VodDownloads.shared.reconcile()

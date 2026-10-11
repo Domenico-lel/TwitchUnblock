@@ -119,7 +119,8 @@ enum LiveNotifier {
         guard reached else { return false }
         let known = Set(ud.stringArray(forKey: knownKey) ?? [])
         let now = Set(streams.map { $0.userLogin.lowercased() })
-        if notify {
+        // ntfy actif : c'est lui qui prévient (sans doublon, et plus vite).
+        if notify && !NtfyNotifier.isEnabled {
             let lang = Lang(rawValue: ud.string(forKey: "lang") ?? "en") ?? .en
             for s in streams where !known.contains(s.userLogin.lowercased()) {
                 let content = UNMutableNotificationContent()

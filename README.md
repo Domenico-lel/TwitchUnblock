@@ -155,7 +155,12 @@ no key to paste. The backend is already hosted and shared by every install.
 * ⬆️ **Update check** — the app tells you when a new version is out on the
   source, with a shortcut to Feather / SideStore / AltStore.
 * 🔔 **Live notifications** — be told when a followed channel goes live
-  (checked in the background, as often as iOS allows).
+  (checked in the background, as often as iOS allows). For instant ones, even
+  with the app closed, turn on **ntfy** (Settings → Features in testing): the
+  app creates a secret topic, you add it in the free
+  [ntfy](https://apps.apple.com/app/ntfy/id1625396347) app, and the backend
+  posts there within a minute or two of a stream starting — tapping it opens
+  the stream in TwitchUnblock.
 
 ### Look & feel
 
