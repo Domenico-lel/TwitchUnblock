@@ -257,9 +257,10 @@ unsigned `tv-test-N` pre-release:
 
 * Followed channels (sign in with a code or a QR code on twitch.tv/activate),
   top streams, categories, search, a channel's VODs.
-* tvOS's native player, with Quality, and for lives Source and **Chat** in its
-  bar: the live chat (read-only, no account needed, Twitch emotes included)
-  sits on the right of the picture.
+* tvOS's native player, with Quality, **Chat** and, for lives, Source in its
+  bar: the chat (read-only, no account needed) sits on the right of the
+  picture — live, or a VOD's chat replayed in sync — with Twitch, BTTV, FFZ
+  and 7TV emotes.
 * Cards that grow when focused stay above their neighbours; the app has its
   own layered icon and Top Shelf banners (`TV/make_tv_icons.py`, drawn from
   the iPhone app's logo).

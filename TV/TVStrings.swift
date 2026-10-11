@@ -35,6 +35,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_audio": "Audio seul",
         "tv_chat": "Chat",
         "tv_chat_waiting": "Connexion au chat…",
+        "tv_chat_loading": "Chargement du chat…",
     ],
     .en: [
         "tv_following": "Following",
@@ -68,6 +69,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_audio": "Audio only",
         "tv_chat": "Chat",
         "tv_chat_waiting": "Connecting to chat…",
+        "tv_chat_loading": "Loading chat…",
     ],
     .es: [
         "tv_following": "Seguidos",
@@ -101,6 +103,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_audio": "Solo audio",
         "tv_chat": "Chat",
         "tv_chat_waiting": "Conectando al chat…",
+        "tv_chat_loading": "Cargando el chat…",
     ],
     .ru: [
         "tv_following": "Подписки",
@@ -134,6 +137,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_audio": "Только звук",
         "tv_chat": "Чат",
         "tv_chat_waiting": "Подключение к чату…",
+        "tv_chat_loading": "Загрузка чата…",
     ],
 ]
 

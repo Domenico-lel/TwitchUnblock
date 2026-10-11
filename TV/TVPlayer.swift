@@ -5,8 +5,8 @@ import AVFoundation
 // ═══════════════════════════════════════════════════════════════════════════
 //  Lecteur de l'app Apple TV : le lecteur natif de tvOS (barre de lecture,
 //  glissés de la télécommande, panneau d'infos), avec en plus dans sa barre
-//  Qualité, et pour un direct Source et Chat (le chat posé sur l'image, voir
-//  TVChat). Mêmes liens que l'iPhone :
+//  Qualité, Chat (le chat posé sur l'image, direct ou VOD, voir TVChat) et
+//  pour un direct Source. Mêmes liens que l'iPhone :
 //  sources sans pub pour les lives, passages coupés rétablis sur les VODs
 //  récentes quand c'est possible.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -35,8 +35,16 @@ struct TVPlayerScreen: View {
             }
         }
         .task {
-            if case .live(let login, _) = item { chat.start(login) }
+            switch item {
+            case .live(let login, _): chat.start(login)
+            case .vod(let id, _):     chat.startVod(id)
+            }
             await model.load(item, session: session)
+        }
+        // VOD : le chat suit la lecture (commentaires rejoués à leur instant).
+        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
+            guard case .vod = item, let time = model.player?.currentTime().seconds else { return }
+            chat.update(offset: time)
         }
         .onDisappear {
             model.stop()
@@ -190,7 +198,8 @@ struct TVPlayerController: UIViewControllerRepresentable {
         vc.transportBarCustomMenuItems = menus()
         // Chat dans le calque du lecteur : sur l'image, sous les commandes,
         // sans jamais prendre le focus.
-        let host = UIHostingController(rootView: TVChatOverlay(model: chat, waiting: session.t("tv_chat_waiting")))
+        let host = UIHostingController(rootView: TVChatOverlay(
+            model: chat, waitingText: session.t(model.isLive ? "tv_chat_waiting" : "tv_chat_loading")))
         host.view.backgroundColor = .clear
         host.view.isUserInteractionEnabled = false
         if let overlay = vc.contentOverlayView {
@@ -212,7 +221,7 @@ struct TVPlayerController: UIViewControllerRepresentable {
     }
 
     private func showChat(_ context: Context) {
-        context.coordinator.chatHost?.view.isHidden = !(model.isLive && session.tvChat)
+        context.coordinator.chatHost?.view.isHidden = !session.tvChat
     }
 
     /// Menus de la barre de lecture : Qualité, et Source pour un direct.
@@ -240,14 +249,14 @@ struct TVPlayerController: UIViewControllerRepresentable {
             items.append(UIMenu(title: session.t("live_source"),
                                 image: UIImage(systemName: "antenna.radiowaves.left.and.right"),
                                 children: sources))
-            // Chat affiché ou masqué (gardé pour les prochains directs).
-            items.append(UIAction(title: session.t("tv_chat"),
-                                  image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
-                                                                            : "bubble.left.and.bubble.right"),
-                                  state: session.tvChat ? .on : .off) { _ in
-                Task { @MainActor in session.tvChat.toggle() }
-            })
         }
+        // Chat affiché ou masqué (gardé pour les prochaines lectures).
+        items.append(UIAction(title: session.t("tv_chat"),
+                              image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
+                                                                        : "bubble.left.and.bubble.right"),
+                              state: session.tvChat ? .on : .off) { _ in
+            Task { @MainActor in session.tvChat.toggle() }
+        })
         return items
     }
 
