@@ -336,9 +336,19 @@ final class DropsService: ObservableObject {
 
 // MARK: – Progression pendant un live
 @MainActor
-final class DropsHeartbeat {
+final class DropsHeartbeat: ObservableObject {
     static let shared = DropsHeartbeat()
     private init() {}
+
+    /// Où en est la progression, pour la page Drops (pseudo de la chaîne).
+    enum Status: Equatable {
+        case idle
+        case checking(String)
+        case noDrops(String)
+        case active(String)
+        case failing(String)
+    }
+    @Published private(set) var status: Status = .idle
 
     /// Chaîne dont le flux est « regardé » pour les drops (nil : à l'arrêt).
     private(set) var channelId: String? = nil
@@ -349,6 +359,7 @@ final class DropsHeartbeat {
     func start(login: String, token: String) {
         stop()
         let login = login.lowercased()
+        status = .checking(login)
         task = Task { [weak self] in await self?.run(login: login, token: token) }
     }
 
@@ -357,6 +368,7 @@ final class DropsHeartbeat {
         task = nil
         channelId = nil
         seen.removeAll()
+        status = .idle
     }
 
     private enum Poll { case ok, expired, offline }
@@ -371,17 +383,25 @@ final class DropsHeartbeat {
             // drops peuvent commencer en cours de live).
             if channelId == nil, Date().timeIntervalSince(lastCheck) > 600 {
                 lastCheck = Date()
-                if let id = await Self.dropsChannelId(login) {
+                let found = await Self.dropsChannelId(login)
+                guard !Task.isCancelled else { return }   // arrêté entre-temps
+                if let id = found {
                     channelId = id
+                    status = .active(login)
                     logger.success("DROPS", "Drops sur \(login)", "progression : HEAD des segments toutes les 10 s")
                 } else {
+                    status = .noDrops(login)
                     logger.debug("DROPS", "Pas de drops sur \(login)", nil)
                 }
             }
             if channelId != nil {
                 if variant == nil {
                     variant = await Self.lowestVariant(login: login, token: token)
+                    guard !Task.isCancelled else { return }
                     failures = variant == nil ? failures + 1 : 0
+                    // Plusieurs échecs de suite : jeton anonyme ou session web
+                    // expirée, à signaler sur la page Drops.
+                    status = failures > 2 ? .failing(login) : .active(login)
                 }
                 if let v = variant {
                     switch await poll(v) {
@@ -390,6 +410,7 @@ final class DropsHeartbeat {
                     case .offline:
                         logger.info("DROPS", "Live terminé", login)
                         channelId = nil
+                        status = .idle
                         return
                     }
                 }

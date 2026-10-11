@@ -11,6 +11,9 @@ struct DropsPanel: View {
 
     @EnvironmentObject private var store: AppStore
     @ObservedObject private var drops = DropsService.shared
+    @ObservedObject private var heartbeat = DropsHeartbeat.shared
+    /// Mode d'emploi déplié (replié une fois lu, et ça reste).
+    @AppStorage("drops_help_open") private var helpOpen = true
     @Environment(\.openURL) private var openURL
     /// Campagnes ouvertes dépliées (récompenses affichées).
     @State private var expanded: Set<String> = []
@@ -28,6 +31,9 @@ struct DropsPanel: View {
                 toggleRow(store.t("drops_autoclaim"), store.t("drops_autoclaim_sub"), $store.autoClaimDrops)
             }
             .tCard()
+
+            if webToken != nil { statusCard }
+            helpCard
 
             if let token = webToken {
                 if let notice = drops.notice {
@@ -172,6 +178,74 @@ struct DropsPanel: View {
                         Spacer(minLength: 8)
                         Text(store.t("drops_minutes_req").replacingOccurrences(of: "{t}", with: "\(d.requiredMinutes)"))
                             .font(.tMeta).foregroundColor(.tMuted)
+                    }
+                }
+            }
+        }
+        .tCard()
+    }
+
+    // MARK: État en direct
+    /// Ce que fait la progression maintenant : pas de live, chaîne sans
+    /// drops, progression active, ou bloquée.
+    private var statusCard: some View {
+        let (icon, color, text) = statusInfo
+        return HStack(spacing: TSpace.md) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold)).foregroundColor(color)
+                .frame(width: 22)
+            Text(text)
+                .font(.tMeta).foregroundColor(.tText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .tCard()
+    }
+
+    private var statusInfo: (String, Color, String) {
+        if !store.dropsProgress { return ("pause.circle.fill", .tMuted, store.t("drops_status_off")) }
+        func line(_ key: String, _ login: String) -> String {
+            store.t(key).replacingOccurrences(of: "{c}", with: login)
+        }
+        switch heartbeat.status {
+        case .idle:            return ("tv", .tMuted, store.t("drops_status_idle"))
+        case .checking(let l): return ("hourglass", .tMuted, line("drops_status_checking", l))
+        case .noDrops(let l):  return ("xmark.circle", .tWarning, line("drops_status_none", l))
+        case .active(let l):   return ("checkmark.circle.fill", .tSuccess, line("drops_status_active", l))
+        case .failing(let l):  return ("exclamationmark.triangle.fill", .tLive, line("drops_status_failing", l))
+        }
+    }
+
+    // MARK: Mode d'emploi
+    private var helpCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { helpOpen.toggle() }
+            } label: {
+                HStack(spacing: TSpace.sm) {
+                    Image(systemName: "questionmark.circle.fill")
+                        .font(.system(size: 16)).foregroundColor(.tPrimary)
+                    Text(store.t("drops_help_title"))
+                        .font(.tCardTitle).foregroundColor(.tText)
+                    Spacer()
+                    Image(systemName: helpOpen ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.tMuted)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if helpOpen {
+                ForEach(1...5, id: \.self) { step in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text("\(step)")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(Color.tPrimary))
+                        Text(store.t("drops_help_\(step)"))
+                            .font(.tMeta).foregroundColor(.tMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
