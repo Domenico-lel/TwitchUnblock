@@ -241,6 +241,26 @@ with Sideloadly, AltStore, or TrollStore if your device supports it.
 
 ---
 
+## 📺 Apple TV (test)
+
+A first Apple TV app lives in `TV/` (target `TwitchUnblockTV`, tvOS 16+),
+built on its own by `.github/workflows/build-tvos.yml` and published as an
+unsigned `tv-test-N` pre-release:
+
+* Followed channels (sign in with a code or a QR code on twitch.tv/activate),
+  top streams, categories, search, a channel's VODs.
+* tvOS's native player, with Quality, and for lives Source and **Chat** in its
+  bar: the live chat (read-only, no account needed, Twitch emotes included)
+  sits on the right of the picture.
+* Cards that grow when focused stay above their neighbours; the app has its
+  own layered icon and Top Shelf banners (`TV/make_tv_icons.py`, drawn from
+  the iPhone app's logo).
+
+Installing it needs a Mac with Xcode and the Apple TV paired with it
+(AltStore, SideStore and Feather don't handle tvOS).
+
+---
+
 ## 🌐 Web version
 
 **No install? Use it in your browser: https://twitchunblock.vercel.app**

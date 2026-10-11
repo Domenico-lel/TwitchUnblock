@@ -24,6 +24,10 @@ final class TVSession: ObservableObject {
     @Published var liveSource: String {
         didSet { UserDefaults.standard.set(liveSource, forKey: "liveSource") }
     }
+    /// Chat des directs affiché sur l'image (bouton « Chat » du lecteur).
+    @Published var tvChat: Bool {
+        didSet { UserDefaults.standard.set(tvChat, forKey: "tv_chat") }
+    }
 
     private static let scopes = "user:read:follows"
     private static let tokenKey = "tv_token"
@@ -39,6 +43,7 @@ final class TVSession: ObservableObject {
         }
         let source = ud.string(forKey: "liveSource") ?? "auto"
         liveSource = kLiveSourceChoices.contains(source) ? source : "auto"
+        tvChat = ud.object(forKey: "tv_chat") as? Bool ?? true
         token = Keychain.loadToken(Self.tokenKey)
     }
 

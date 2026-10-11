@@ -33,6 +33,8 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_error_live": "Impossible de lancer ce live.",
         "tv_error_vod": "Cette VOD est introuvable.",
         "tv_audio": "Audio seul",
+        "tv_chat": "Chat",
+        "tv_chat_waiting": "Connexion au chat…",
     ],
     .en: [
         "tv_following": "Following",
@@ -64,6 +66,8 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_error_live": "Couldn't start this live.",
         "tv_error_vod": "This VOD couldn't be found.",
         "tv_audio": "Audio only",
+        "tv_chat": "Chat",
+        "tv_chat_waiting": "Connecting to chat…",
     ],
     .es: [
         "tv_following": "Seguidos",
@@ -95,6 +99,8 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_error_live": "No se pudo iniciar este directo.",
         "tv_error_vod": "No se encontró este VOD.",
         "tv_audio": "Solo audio",
+        "tv_chat": "Chat",
+        "tv_chat_waiting": "Conectando al chat…",
     ],
     .ru: [
         "tv_following": "Подписки",
@@ -126,6 +132,8 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_error_live": "Не удалось запустить трансляцию.",
         "tv_error_vod": "Это видео не найдено.",
         "tv_audio": "Только звук",
+        "tv_chat": "Чат",
+        "tv_chat_waiting": "Подключение к чату…",
     ],
 ]
 

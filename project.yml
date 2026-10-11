@@ -64,6 +64,7 @@ targets:
       - path: TV
         excludes:
           - Info.plist
+          - make_tv_icons.py
       - path: Sources/Constants.swift
       - path: Sources/Theme.swift
       - path: Sources/Models.swift
@@ -82,6 +83,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mxfia19.TwitchUnblockTV
         PRODUCT_NAME: TwitchUnblockTV
+        # Icône en calques et images « Top Shelf » (TV/make_tv_icons.py).
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
         INFOPLIST_FILE: TV/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.1"

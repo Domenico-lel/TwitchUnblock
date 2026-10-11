@@ -141,7 +141,7 @@ struct TVCategoriesTab: View {
                             NavigationLink(value: c) {
                                 TVCategoryCard(category: c)
                             }
-                            .buttonStyle(.card)
+                            .tvCard()
                         }
                     }
                     .padding(.horizontal, 64)
@@ -165,12 +165,7 @@ struct TVCategoryCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            AsyncImage(url: URL(string: sharpBoxArt(category.boxArtURL))) { img in
-                img.resizable().aspectRatio(3/4, contentMode: .fill)
-            } placeholder: {
-                Rectangle().fill(Color.white.opacity(0.08)).aspectRatio(3/4, contentMode: .fill)
-            }
-            .clipped()
+            TVThumbnail(url: sharpBoxArt(category.boxArtURL), ratio: 3 / 4)
             VStack(alignment: .leading, spacing: 4) {
                 Text(category.name).font(.headline).lineLimit(1)
                 if let v = category.viewers {
@@ -299,7 +294,7 @@ struct TVChannelView: View {
                             } label: {
                                 TVVodCard(video: v)
                             }
-                            .buttonStyle(.card)
+                            .tvCard()
                         }
                     }
                 }
@@ -453,7 +448,7 @@ struct TVStreamGrid: View {
                 } label: {
                     TVStreamCard(stream: s)
                 }
-                .buttonStyle(.card)
+                .tvCard()
             }
         }
         .padding(.horizontal, 64)
@@ -474,12 +469,7 @@ struct TVStreamCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
-                AsyncImage(url: URL(string: thumb)) { img in
-                    img.resizable().aspectRatio(16/9, contentMode: .fill)
-                } placeholder: {
-                    Rectangle().fill(Color.white.opacity(0.08)).aspectRatio(16/9, contentMode: .fill)
-                }
-                .clipped()
+                TVThumbnail(url: thumb, ratio: 16 / 9)
 
                 HStack(spacing: 8) {
                     Text(session.t("tv_live"))
@@ -524,12 +514,7 @@ struct TVVodCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .bottomTrailing) {
-                AsyncImage(url: URL(string: thumb)) { img in
-                    img.resizable().aspectRatio(16/9, contentMode: .fill)
-                } placeholder: {
-                    Rectangle().fill(Color.white.opacity(0.08)).aspectRatio(16/9, contentMode: .fill)
-                }
-                .clipped()
+                TVThumbnail(url: thumb, ratio: 16 / 9)
 
                 Text(formatDuration(video.lengthSeconds))
                     .font(.caption2.weight(.semibold))
@@ -546,6 +531,45 @@ struct TVVodCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
+
+/// Image d'une carte dans une boîte au format fixe, qu'elle remplit et où
+/// elle est rognée. Sans boîte, une miniature en « remplir » reprenait sa
+/// taille d'origine (640 points) au chargement ou au focus, et débordait sur
+/// la carte voisine.
+struct TVThumbnail: View {
+    let url: String
+    let ratio: CGFloat
+
+    var body: some View {
+        Color.white.opacity(0.08)
+            .aspectRatio(ratio, contentMode: .fit)
+            .overlay(
+                AsyncImage(url: URL(string: url)) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Color.clear
+                }
+            )
+            .clipped()
+    }
+}
+
+/// Carte à la télécommande (style « card » de tvOS) : celle qui a le focus
+/// grandit et passe devant ses voisines, au lieu de glisser dessous.
+private struct TVCardFocus: ViewModifier {
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .buttonStyle(.card)
+            .focused($focused)
+            .zIndex(focused ? 1 : 0)
+    }
+}
+
+extension View {
+    func tvCard() -> some View { modifier(TVCardFocus()) }
 }
 
 struct TVAvatar: View {

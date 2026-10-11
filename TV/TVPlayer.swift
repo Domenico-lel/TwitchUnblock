@@ -4,8 +4,9 @@ import AVFoundation
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Lecteur de l'app Apple TV : le lecteur natif de tvOS (barre de lecture,
-//  glissés de la télécommande, panneau d'infos), avec deux menus en plus dans
-//  sa barre — Qualité, et Source pour un direct. Mêmes liens que l'iPhone :
+//  glissés de la télécommande, panneau d'infos), avec en plus dans sa barre
+//  Qualité, et pour un direct Source et Chat (le chat posé sur l'image, voir
+//  TVChat). Mêmes liens que l'iPhone :
 //  sources sans pub pour les lives, passages coupés rétablis sur les VODs
 //  récentes quand c'est possible.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -15,12 +16,13 @@ struct TVPlayerScreen: View {
     @EnvironmentObject private var session: TVSession
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = TVPlayerModel()
+    @StateObject private var chat = TVChatModel()
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let player = model.player {
-                TVPlayerController(player: player, model: model, session: session)
+                TVPlayerController(player: player, model: model, session: session, chat: chat)
                     .ignoresSafeArea()
             } else if let error = model.error {
                 VStack(spacing: 40) {
@@ -32,8 +34,14 @@ struct TVPlayerScreen: View {
                 ProgressView()
             }
         }
-        .task { await model.load(item, session: session) }
-        .onDisappear { model.stop() }
+        .task {
+            if case .live(let login, _) = item { chat.start(login) }
+            await model.load(item, session: session)
+        }
+        .onDisappear {
+            model.stop()
+            chat.stop()
+        }
         .onExitCommand { dismiss() }
     }
 }
@@ -168,17 +176,43 @@ struct TVPlayerController: UIViewControllerRepresentable {
     let player: AVPlayer
     @ObservedObject var model: TVPlayerModel
     @ObservedObject var session: TVSession
+    let chat: TVChatModel
+
+    final class Coordinator {
+        var chatHost: UIHostingController<TVChatOverlay>?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
         vc.player = player
         vc.transportBarCustomMenuItems = menus()
+        // Chat dans le calque du lecteur : sur l'image, sous les commandes,
+        // sans jamais prendre le focus.
+        let host = UIHostingController(rootView: TVChatOverlay(model: chat, waiting: session.t("tv_chat_waiting")))
+        host.view.backgroundColor = .clear
+        host.view.isUserInteractionEnabled = false
+        if let overlay = vc.contentOverlayView {
+            vc.addChild(host)
+            host.view.frame = overlay.bounds
+            host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlay.addSubview(host.view)
+            host.didMove(toParent: vc)
+        }
+        context.coordinator.chatHost = host
+        showChat(context)
         return vc
     }
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
         if vc.player !== player { vc.player = player }
         vc.transportBarCustomMenuItems = menus()
+        showChat(context)
+    }
+
+    private func showChat(_ context: Context) {
+        context.coordinator.chatHost?.view.isHidden = !(model.isLive && session.tvChat)
     }
 
     /// Menus de la barre de lecture : Qualité, et Source pour un direct.
@@ -206,6 +240,13 @@ struct TVPlayerController: UIViewControllerRepresentable {
             items.append(UIMenu(title: session.t("live_source"),
                                 image: UIImage(systemName: "antenna.radiowaves.left.and.right"),
                                 children: sources))
+            // Chat affiché ou masqué (gardé pour les prochains directs).
+            items.append(UIAction(title: session.t("tv_chat"),
+                                  image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
+                                                                            : "bubble.left.and.bubble.right"),
+                                  state: session.tvChat ? .on : .off) { _ in
+                Task { @MainActor in session.tvChat.toggle() }
+            })
         }
         return items
     }
