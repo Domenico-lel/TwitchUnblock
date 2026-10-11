@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.33",
+          "buildVersion": "258",
+          "date": "2026-10-11",
+          "localizedDescription": "- Download a whole VOD or just a part of it (from one time to another) to watch offline, from the player's ⋯ menu. Parts muted for copyrighted music keep their original sound while Twitch still has it. Your downloads are in the My VODs tab.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-258/TwitchUnblock.ipa",
+          "size": 2542788,
+          "commit": "9284438af8a98715ec531b42ae0d832573ca963c"
+        },
+        {
           "version": "1.2.32",
           "buildVersion": "257",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-220/TwitchUnblock.ipa",
           "size": 1707540,
           "commit": "9ca6b8d1976ebb867481aad344ffd0e7f9dbbcfe"
-        },
-        {
-          "version": "1.2.1",
-          "buildVersion": "219",
-          "date": "2026-10-04",
-          "localizedDescription": "- Channel playlists: new Playlists tab on the channel page, with \"Play all\" to chain the videos.\n- Highlights (playlist videos) now play even when Twitch refuses the playback token.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-219/TwitchUnblock.ipa",
-          "size": 1678957,
-          "commit": "c6dfb9a0877af1190fe4b92a9a440d5df8c3b1bb"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.32",
+      "version": "1.2.33",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-257/TwitchUnblock.ipa",
-      "size": 2449430
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-258/TwitchUnblock.ipa",
+      "size": 2542788
     }
   ],
   "news": []
