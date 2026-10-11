@@ -169,7 +169,10 @@ no key to paste. The backend is already hosted and shared by every install.
   app creates a secret topic, you add it in the free
   [ntfy](https://apps.apple.com/app/ntfy/id1625396347) app, and the backend
   posts there within a minute or two of a stream starting — tapping it opens
-  the stream in TwitchUnblock.
+  the stream in TwitchUnblock. ntfy.sh counts free messages per address and
+  turns away the backend's shared Cloudflare addresses, so they leave from the
+  project's own server (the video relay); **Test** tells you when ntfy.sh is
+  refusing messages for now (sending limit reached).
 
 ### Look & feel
 

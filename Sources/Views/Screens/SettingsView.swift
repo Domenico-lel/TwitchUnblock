@@ -1553,8 +1553,8 @@ struct SettingsView: View {
                 Button {
                     ntfyResult = nil
                     Task {
-                        let ok = await NtfyNotifier.sendTest(lang: store.lang)
-                        await MainActor.run { ntfyResult = store.t(ok ? "ntfy_test_sent" : "ntfy_failed") }
+                        let result = await NtfyNotifier.sendTest(lang: store.lang)
+                        await MainActor.run { ntfyResult = store.t(result.textKey) }
                     }
                 } label: {
                     ntfyPill(store.t("notif_test"), icon: "bell.badge.fill")

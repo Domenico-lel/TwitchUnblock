@@ -96,20 +96,43 @@ enum NtfyNotifier {
         return true
     }
 
-    static func sendTest(lang: Lang) async -> Bool {
-        await post("/api/push/test", ["ntfy": topic, "lang": lang.rawValue]) == 200
+    enum TestResult {
+        case sent, limited, failed
+
+        /// Texte affiché sous le bouton.
+        var textKey: String {
+            switch self {
+            case .sent: return "ntfy_test_sent"
+            case .limited: return "ntfy_limited"
+            case .failed: return "ntfy_failed"
+            }
+        }
     }
 
-    /// Routes du Worker principal (base D1, pas de secours). Code HTTP, nil
-    /// si le Worker n'a pas pu être joint.
+    /// Notification de test. `limited` : le Worker a répondu, mais ntfy.sh
+    /// refuse les messages pour l'instant (limite d'envoi atteinte).
+    static func sendTest(lang: Lang) async -> TestResult {
+        guard let (code, data) = await send("/api/push/test", ["ntfy": topic, "lang": lang.rawValue]) else { return .failed }
+        if code == 200 { return .sent }
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        return json?["limit"] as? Bool == true ? .limited : .failed
+    }
+
     private static func post(_ path: String, _ body: [String: Any]) async -> Int? {
+        await send(path, body)?.code
+    }
+
+    /// Routes du Worker principal (base D1, pas de secours). Code HTTP et
+    /// corps, nil si le Worker n'a pas pu être joint.
+    private static func send(_ path: String, _ body: [String: Any]) async -> (code: Int, data: Data)? {
         guard let url = URL(string: APIConfig.base + path),
-              let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+              let payload = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 20)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = data
-        guard let (_, resp) = try? await URLSession.shared.data(for: req) else { return nil }
-        return (resp as? HTTPURLResponse)?.statusCode
+        req.httpBody = payload
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              let http = resp as? HTTPURLResponse else { return nil }
+        return (http.statusCode, data)
     }
 }
