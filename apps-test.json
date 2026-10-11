@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.39",
+          "buildVersion": "264",
+          "date": "2026-10-11",
+          "localizedDescription": "- Pick an app icon in Settings → General → Appearance: Classic, Purple, Night, Light, Contrast or Neon, each with dark and tinted versions — “Contrast” stays sharp with iOS 26's clear icons.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-264/TwitchUnblock.ipa",
+          "size": 3448728,
+          "commit": "3c5ebbec3724b599665c8838b8dd4de2626ca927"
+        },
+        {
           "version": "1.2.38",
           "buildVersion": "263",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-227/TwitchUnblock.ipa",
           "size": 1809263,
           "commit": "268b0ecc3ea8984bff2fba158d7730809dff7e80"
-        },
-        {
-          "version": "1.2.8",
-          "buildVersion": "226",
-          "date": "2026-10-05",
-          "localizedDescription": "- Live Activity: the stream you are watching on the lock screen and in the Dynamic Island, with viewers and uptime, or the VOD's progress.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-226/TwitchUnblock.ipa",
-          "size": 1809743,
-          "commit": "59d5e502f7d9c1641c911996a1e116a2937ace76"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.38",
+      "version": "1.2.39",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-263/TwitchUnblock.ipa",
-      "size": 2674453
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-264/TwitchUnblock.ipa",
+      "size": 3448728
     }
   ],
   "news": []
