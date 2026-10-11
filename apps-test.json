@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.26",
+          "buildVersion": "250",
+          "date": "2026-10-11",
+          "localizedDescription": "- Spatial audio (AirPods): new setting in Settings → Player to turn it off in the app, head tracking included. “Fixed” is still picked in Control Center.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-250/TwitchUnblock.ipa",
+          "size": 2319397,
+          "commit": "4c6ea9b0e3c8d3a0922acae89967591d030f4f5d"
+        },
+        {
           "version": "1.2.25",
           "buildVersion": "249",
           "date": "2026-10-11",
@@ -277,10 +286,10 @@
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.25",
+      "version": "1.2.26",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-249/TwitchUnblock.ipa",
-      "size": 2312787
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-250/TwitchUnblock.ipa",
+      "size": 2319397
     }
   ],
   "news": []
