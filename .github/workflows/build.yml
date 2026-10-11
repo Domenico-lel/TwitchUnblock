@@ -232,7 +232,8 @@ jobs:
               for item in (custom or [subject.strip()]):
                   if item and item not in lines:
                       lines.append(item)
-          notes = '\n'.join(f'- {l}' for l in lines[:15]) or '- Améliorations et corrections'
+          # 20 lignes au plus : assez pour une version majeure (1.3.0 en a 17).
+          notes = '\n'.join(f'- {l}' for l in lines[:20]) or '- Améliorations et corrections'
           open('changelog.md', 'w').write(notes + '\n')
           print(notes)
           PY
