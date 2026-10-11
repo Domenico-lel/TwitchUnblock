@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.47",
+          "buildVersion": "271",
+          "date": "2026-10-11",
+          "localizedDescription": "- Lives: double-tap no longer skips ahead; in landscape it shows or hides the chat, and a red Live button with the delay brings you back to the edge after a pause.\n- Categories: filter the lives by language (all, or a single one).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-271/TwitchUnblock.ipa",
+          "size": 2894237,
+          "commit": "5c61522f21db22dfb59c4da6bd3bf8678a600545"
+        },
+        {
           "version": "1.2.46",
           "buildVersion": "270",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-236/TwitchUnblock.ipa",
           "size": 2017903,
           "commit": "fcf736da47aa23dde6b91449b90550371142f930"
-        },
-        {
-          "version": "1.2.15",
-          "buildVersion": "235",
-          "date": "2026-10-07",
-          "localizedDescription": "- New \"Report a bug or suggest an idea\" form in Settings\n- Swiping the player down recovers if interrupted, adapts to the screen size and respects Reduce Motion\n- Without an account, the app explains why lists stop at 100",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-235/TwitchUnblock.ipa",
-          "size": 2009715,
-          "commit": "89676cd22c1a6cc7caa97a522d91f2d63c65de5a"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.46",
+      "version": "1.2.47",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-270/TwitchUnblock.ipa",
-      "size": 2880302
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-271/TwitchUnblock.ipa",
+      "size": 2894237
     }
   ],
   "news": []
