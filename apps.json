@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.29",
+          "buildVersion": "254",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops page: a step-by-step guide to earn drops, and a live status showing whether the stream you're watching makes your drops progress.\n- Drops: the Drops page now also lists every open campaign (all games) with its rewards.\n- The Twitch web session must be the app's account: another account is refused at sign-in (and disconnected if found later), so points, drops and predictions never go to the wrong account.\n- Drops: new Settings → Drops page with your campaigns' progress, a Claim button and automatic claiming.\n- Drops now progress while you watch a live with drops (Twitch only counts them when your account loads the stream; the app does it with small requests, no extra video download).\n- Spatial audio (AirPods): new setting in Settings → Player to turn it off in the app, head tracking included. “Fixed” is still picked in Control Center.\n- Choose the live source (Luminous Asia, Luminous Europe, Albania proxy or official Twitch) in Settings → Player or from the player's ⋯ menu, which also shows the source in use.\n- Stream tags (language, DropsEnabled…) under live streams, like on Twitch.\n- Category search puts the exact match first (VALORANT for “valorant”) and shows sharp box art.\n- Another ad-free source for live streams (an Albanian proxy) when Luminous is unavailable.\n- Live quality names stay correct when the app falls back to another ad-free mirror.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-254/TwitchUnblock.ipa",
+          "size": 2443181,
+          "commit": "3e800621394f73115361034f4c93c916ad03b68e"
+        },
+        {
           "version": "1.2.21",
           "buildVersion": "244",
           "date": "2026-10-10",
@@ -123,10 +132,10 @@
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.21",
-      "versionDate": "2026-10-10",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-244/TwitchUnblock.ipa",
-      "size": 2205851
+      "version": "1.2.29",
+      "versionDate": "2026-10-11",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-254/TwitchUnblock.ipa",
+      "size": 2443181
     }
   ],
   "news": []
