@@ -19,6 +19,7 @@ struct SettingsView: View {
     @State private var ntfyOn          = NtfyNotifier.isEnabled
     @State private var ntfyResult: String? = nil
     @State private var ntfyCopied      = false
+    @State private var ntfySynced      = !NtfyNotifier.isPending
     @State private var appIcon: AppIconChoice = .standard
     @State private var appIconError: String? = nil
     @AppStorage("onboarding_done") private var onboardingDone = false
@@ -1366,10 +1367,12 @@ struct SettingsView: View {
                               ntfyResult = nil
                               Task {
                                   if on {
+                                      // Reste activé même si le serveur ne répond pas
+                                      // encore : nouvel essai à chaque retour dans l'app.
                                       let ok = await NtfyNotifier.enable(lang: store.lang)
                                       await MainActor.run {
-                                          ntfyOn = ok
-                                          if !ok { ntfyResult = store.t("ntfy_failed") }
+                                          ntfySynced = ok
+                                          if !ok { ntfyResult = ntfyPendingText }
                                       }
                                   } else {
                                       await NtfyNotifier.disable()
@@ -1379,6 +1382,11 @@ struct SettingsView: View {
                 if ntfyOn { ntfyTools }
             }
         }
+    }
+
+    /// Activé, mais pas encore accepté par le serveur : pourquoi, et la suite.
+    private var ntfyPendingText: String {
+        store.t(NtfyNotifier.serverNotReady ? "ntfy_not_ready" : "ntfy_pending")
     }
 
     /// ntfy : le sujet à ajouter dans l'app ntfy, l'installer, tester.
@@ -1427,9 +1435,14 @@ struct SettingsView: View {
                 Text(ntfyResult).font(.tMeta).foregroundColor(.tMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text(store.t("ntfy_status").replacingOccurrences(
-                of: "{n}", with: "\(UserDefaults.standard.integer(forKey: NtfyNotifier.countKey))"))
-                .font(.tMeta).foregroundColor(.tMuted)
+            if ntfySynced {
+                Text(store.t("ntfy_status").replacingOccurrences(
+                    of: "{n}", with: "\(UserDefaults.standard.integer(forKey: NtfyNotifier.countKey))"))
+                    .font(.tMeta).foregroundColor(.tMuted)
+            } else if ntfyResult == nil {
+                Text(ntfyPendingText).font(.tMeta).foregroundColor(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(store.t("ntfy_privacy"))
                 .font(.tMeta).foregroundColor(.tMuted)
                 .fixedSize(horizontal: false, vertical: true)
