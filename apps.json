@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.2",
+          "buildVersion": "10002",
+          "date": "2026-10-11",
+          "localizedDescription": "- Keep onboarding language choices readable on smaller iPhones\n- Add complete Italian interface and personal build updates",
+          "downloadURL": "https://github.com/Domenico-lel/TwitchUnblock/releases/download/nightly-2/TwitchUnblock.ipa",
+          "size": 2950111,
+          "commit": "b3badcc6bf7ff63f009494fc150326ca4f01ee20"
+        },
+        {
           "version": "1.3.0",
           "buildVersion": "278",
           "date": "2026-10-11",
@@ -141,10 +150,10 @@
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.0",
+      "version": "1.3.2",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-278/TwitchUnblock.ipa",
-      "size": 2932347
+      "downloadURL": "https://github.com/Domenico-lel/TwitchUnblock/releases/download/nightly-2/TwitchUnblock.ipa",
+      "size": 2950111
     }
   ],
   "news": []
