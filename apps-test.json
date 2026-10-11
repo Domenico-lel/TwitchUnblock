@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.41",
+          "buildVersion": "266",
+          "date": "2026-10-11",
+          "localizedDescription": "- Icônes au choix en fichiers séparés, comme Feather",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-266/TwitchUnblock.ipa",
+          "size": 2841757,
+          "commit": "3e3b6f8587d6b2eeb443cbb757cf5c0b3cd01873"
+        },
+        {
           "version": "1.2.40",
           "buildVersion": "265",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-230/TwitchUnblock.ipa",
           "size": 1842921,
           "commit": "54e947072d512b5d9f95950c3feda637b304e3d4"
-        },
-        {
-          "version": "1.2.10",
-          "buildVersion": "229",
-          "date": "2026-10-06",
-          "localizedDescription": "- Améliorations et corrections",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-229/TwitchUnblock.ipa",
-          "size": 1809924,
-          "commit": "076fbda9e093ba023d290d2f4bd570c50fa328ee"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.40",
+      "version": "1.2.41",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-265/TwitchUnblock.ipa",
-      "size": 3451957
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-266/TwitchUnblock.ipa",
+      "size": 2841757
     }
   ],
   "news": []
