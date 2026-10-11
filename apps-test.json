@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.46",
+          "buildVersion": "270",
+          "date": "2026-10-11",
+          "localizedDescription": "- Pick the order of the live sources in Settings → Player: if one doesn't answer, the next one takes over; picking a source from the player menu moves it to the top.\n- My reports: a new “Seen” status once your message has been read.\n- Fixed a black screen in “Source” on Luminous Europe for channels that stream with multiple encodes (each quality now keeps its own name).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-270/TwitchUnblock.ipa",
+          "size": 2880302,
+          "commit": "21b7a5e4cba231b3ceb80e492aa848493edaf642"
+        },
+        {
           "version": "1.2.44",
           "buildVersion": "269",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-235/TwitchUnblock.ipa",
           "size": 2009715,
           "commit": "89676cd22c1a6cc7caa97a522d91f2d63c65de5a"
-        },
-        {
-          "version": "1.2.14",
-          "buildVersion": "234",
-          "date": "2026-10-07",
-          "localizedDescription": "- Predictions: you can now place bets (tap an outcome, pick an amount, Predict)\n- Swiping the player down is now smooth and slides it away like the Twitch app\n- Channel page: new \"About\" tab with the description, social links and panels\n- Clips: 100 at once instead of 30, and \"Load more\" when logged in\n- Links in bot command replies are now tappable\n- Tapping a streamer's name on a stream card opens their channel\n- Settings: option to hide recent streamers\n- Pasting a Twitch link (twitch.tv/xqc) in Search opens the channel",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-234/TwitchUnblock.ipa",
-          "size": 1977408,
-          "commit": "48f131039bd25a83235a56384d73d257c3b809d6"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.44",
+      "version": "1.2.46",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-269/TwitchUnblock.ipa",
-      "size": 2864582
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-270/TwitchUnblock.ipa",
+      "size": 2880302
     }
   ],
   "news": []
