@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.29",
+          "buildVersion": "253",
+          "date": "2026-10-11",
+          "localizedDescription": "- Drops page: a step-by-step guide to earn drops, and a live status showing whether the stream you're watching makes your drops progress.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-253/TwitchUnblock.ipa",
+          "size": 2443205,
+          "commit": "a91256f8e9a279eea5f715cf58cfd6672ce2d1a2"
+        },
+        {
           "version": "1.2.28",
           "buildVersion": "252",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-213/TwitchUnblock.ipa",
           "size": 1617010,
           "commit": "3fc67be384d7c198a75beeb15d547b9cef1228ac"
-        },
-        {
-          "version": "1.1.8",
-          "buildVersion": "212",
-          "date": "2026-10-04",
-          "localizedDescription": "- New “Features in testing” tab in Settings\n- Expanding a pinned message no longer stops chat auto-scroll\n- Home can show channels as a list (like Twitch) or a grid\n- Follow channels without a Twitch account (saved on this device)\n- Home works without logging in: top streams and your device follows\n- Bot commands: browse Nightbot, StreamElements, Fossabot and Moobot commands from the chat menu",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-212/TwitchUnblock.ipa",
-          "size": 1596749,
-          "commit": "6af8c32ee84e0a9791e801f048658942b1348296"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.28",
+      "version": "1.2.29",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-252/TwitchUnblock.ipa",
-      "size": 2430534
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-253/TwitchUnblock.ipa",
+      "size": 2443205
     }
   ],
   "news": []
