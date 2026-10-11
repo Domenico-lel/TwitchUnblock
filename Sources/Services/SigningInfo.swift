@@ -8,9 +8,12 @@ import Foundation
 //  droits (entitlements) du profil de provisionnement : avec le profil
 //  générique d'un certificat acheté, l'app est signée « ÉQUIPE.* » au lieu
 //  de « ÉQUIPE.<son identifiant> ». iOS refuse alors de lui changer son
-//  icône (OSStatus -54, refus d'autorisation de LaunchServices) — Feather
-//  corrige l'étoile avec son option « Merge Entitlements ». On le détecte
-//  pour le dire, plutôt que de laisser un code d'erreur.
+//  icône (OSStatus -54, refus d'autorisation de LaunchServices). Feather 2.9
+//  et KSign 1.6 n'ont pas encore de quoi corriger l'étoile (fichier
+//  d'entitlements réservé à leurs versions nightly) ; l'option « Merge
+//  Entitlements » de Feather, ajoutée le 26/09/2026, arrive avec sa
+//  prochaine version. On le détecte pour le dire, plutôt que de laisser un
+//  code d'erreur.
 // ═══════════════════════════════════════════════════════════════════════════
 enum SigningInfo {
     /// « ABCDE12345.com.mxfia19.TwitchUnblock », « ABCDE12345.* »… ; nil si

@@ -181,9 +181,10 @@ no key to paste. The backend is already hosted and shared by every install.
   and tinted icons. Drawn by `assets/icons/make_icons.py`; the alternate ones
   ship as separate PNG files (added by `buildipa.sh`), which is what works
   for apps installed with Feather. If the app was signed with a certificate's
-  generic identifier (`TEAMID.*`, what Feather does unless **Merge
-  Entitlements** is on), iOS refuses to change the icon: the app reads its own
-  signature and says so.
+  generic identifier (`TEAMID.*`, what Feather 2.9 and KSign 1.6 do with the
+  generic profile of a purchased certificate), iOS refuses to change the icon:
+  the app reads its own signature and says so. Feather's next version adds a
+  **Merge Entitlements** option that fixes the signature.
 * 🫧 **Liquid Glass** — optional on iOS 26: a floating tab bar and glass buttons
   over the picture.
 
