@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.31",
+          "buildVersion": "256",
+          "date": "2026-10-11",
+          "localizedDescription": "- Usage stats (if enabled) now also include the app language, iPhone or iPad, the iOS version and anonymous play counters (which source served a live, failures) — never the channels.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-256/TwitchUnblock.ipa",
+          "size": 2446765,
+          "commit": "ad3cb9d208e1d036c9cd84142d1c778654fa19b4"
+        },
+        {
           "version": "1.2.30",
           "buildVersion": "255",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-217/TwitchUnblock.ipa",
           "size": 1663751,
           "commit": "853726b00bc3a5743abb77c5a90e5bf2680eba92"
-        },
-        {
-          "version": "1.1.10",
-          "buildVersion": "215",
-          "date": "2026-10-04",
-          "localizedDescription": "- Streams tab split into Followed and Top tabs\n- Followed now also lists offline channels, tap one to open its page\n- Tap the streamer name in the player to open their channel page\n- Categories: Followed and All tabs, with a Follow button on each category",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-215/TwitchUnblock.ipa",
-          "size": 1654861,
-          "commit": "4434f7125ee66785899ebd8657182fda443dc593"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.30",
+      "version": "1.2.31",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-255/TwitchUnblock.ipa",
-      "size": 2443205
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-256/TwitchUnblock.ipa",
+      "size": 2446765
     }
   ],
   "news": []
