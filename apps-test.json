@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.2.52",
+          "buildVersion": "276",
+          "date": "2026-10-11",
+          "localizedDescription": "- Chat: the room's modes (followers only and for how long, subscribers only, slow mode…) show above the message box, the channel's chat rules are shown to accept before your first message, and a message Twitch refuses is removed with the reason.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-276/TwitchUnblock.ipa",
+          "size": 2932362,
+          "commit": "a2fd4eb5d764bc3052d16283183d5dc7b1254df3"
+        },
+        {
           "version": "1.2.51",
           "buildVersion": "275",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-243/TwitchUnblock.ipa",
           "size": 2205875,
           "commit": "faa1c56c9a8151ab153defc450b2b5dd5859b5fb"
-        },
-        {
-          "version": "1.2.20",
-          "buildVersion": "241",
-          "date": "2026-10-10",
-          "localizedDescription": "- Liquid Glass: buttons in the player (and the way back to home) work again while watching a stream.\n- My reports: replies and status changes now show up on their own, no need to refresh.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-241/TwitchUnblock.ipa",
-          "size": 2200820,
-          "commit": "a63155a675daf193424f85330706ae490ea9e547"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.2.51",
+      "version": "1.2.52",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-275/TwitchUnblock.ipa",
-      "size": 2911295
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-276/TwitchUnblock.ipa",
+      "size": 2932362
     }
   ],
   "news": []
