@@ -1116,6 +1116,8 @@ struct MainTabView: View {
                 async let markersTask = getVodMarkers(vodId: id)
                 let data = await getM3U8(vodId: id)
                 let markers = await markersTask
+                // Santé des lectures (/stats) : compteur seulement, sans la VOD.
+                await MainActor.run { UsageService.shared.count(data.links.isEmpty ? "vod_fail" : "vod") }
                 if let err = data.error, data.links.isEmpty {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }
@@ -1156,6 +1158,13 @@ struct MainTabView: View {
 
             case .live(let channel):
                 let data = await getLive(channelName: channel)
+                // Santé du direct (/stats) : la source qui a servi, ou un échec
+                // — jamais la chaîne. Hors ligne n'est pas un échec.
+                if let links = data.links, !links.isEmpty {
+                    await MainActor.run { UsageService.shared.count("live_\(data.source ?? "unknown")") }
+                } else if data.error != "offline" {
+                    await MainActor.run { UsageService.shared.count("live_fail") }
+                }
                 if let err = data.error, err != "offline" {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }

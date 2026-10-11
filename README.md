@@ -167,6 +167,8 @@ no key to paste. The backend is already hosted and shared by every install.
   points, drops and predictions never go to the wrong account.
 * 📊 **Usage count** — logged in, your Twitch account (counted once across the
   app and the website); logged out, a random install ID. Plus the app version,
+  the app language, iPhone or iPad, the iOS version and how many lives and
+  VODs were started (which source served a live, failures — counters only),
   at most once an hour. No channels watched, no IP address. Switching it off
   erases it server-side. Public numbers: [/stats](https://twitchunblock.vercel.app/stats). See
   [`Sources/Services/UsageService.swift`](Sources/Services/UsageService.swift).
