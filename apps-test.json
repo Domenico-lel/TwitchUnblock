@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.1",
+          "buildVersion": "279",
+          "date": "2026-10-11",
+          "localizedDescription": "- Live notifications through ntfy: fixed on the server side (ntfy.sh was turning the server away), and the Test button now tells you when ntfy.sh is refusing messages for now instead of saying the server can't be reached.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-279/TwitchUnblock.ipa",
+          "size": 2932808,
+          "commit": "65a50f2c1cc81d12ff323dc32b8a13a53ef52746"
+        },
+        {
           "version": "1.3.0",
           "buildVersion": "277",
           "date": "2026-10-11",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-247/TwitchUnblock.ipa",
           "size": 2291621,
           "commit": "b550df227599f265e506983e9fe18dc9cbee5fcc"
-        },
-        {
-          "version": "1.2.22",
-          "buildVersion": "245",
-          "date": "2026-10-10",
-          "localizedDescription": "- Live quality names stay correct when the app falls back to another ad-free mirror.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-245/TwitchUnblock.ipa",
-          "size": 2206098,
-          "commit": "4394291ce9078a17006e345e2241eeb1b30445a0"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.0",
+      "version": "1.3.1",
       "versionDate": "2026-10-11",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-277/TwitchUnblock.ipa",
-      "size": 2932361
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-279/TwitchUnblock.ipa",
+      "size": 2932808
     }
   ],
   "news": []
