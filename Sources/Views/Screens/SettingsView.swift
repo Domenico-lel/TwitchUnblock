@@ -878,8 +878,32 @@ struct SettingsView: View {
                 toggleRow(store.t("restore_muted"), store.t("restore_muted_sub"),
                           $store.restoreMutedAudio, log: "Rétablir le son des passages coupés")
                 Divider().background(Color.tBorder)
+                spatialAudioRow
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
                           $store.showLatency, log: "Afficher la latence")
+            }
+        }
+    }
+
+    /// Audio spatial (AirPods) : seul choix qu'iOS laisse aux apps (voir SpatialAudio).
+    @ViewBuilder private var spatialAudioRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(store.t("spatial_audio"))
+                .font(.tCardTitle)
+                .foregroundColor(.tText)
+            Text(store.t("spatial_audio_sub"))
+                .font(.tMeta)
+                .foregroundColor(.tMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            Picker("", selection: $store.spatialAudio) {
+                Text(store.t("spatial_auto")).tag("auto")
+                Text(store.t("spatial_off")).tag("off")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .onChange(of: store.spatialAudio) { value in
+                logger.settingChanged("Audio spatial", value: value)
             }
         }
     }

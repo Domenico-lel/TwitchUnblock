@@ -122,6 +122,17 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(liveSource, forKey: "liveSource") }
     }
 
+    /// Audio spatial (AirPods) : « auto » = choix d'iOS (Centre de contrôle),
+    /// « off » = jamais spatialisé dans l'app (voir SpatialAudio).
+    @Published var spatialAudio: String = "auto" {
+        didSet {
+            UserDefaults.standard.set(spatialAudio, forKey: SpatialAudio.key)
+            if spatialAudio != oldValue {
+                NotificationCenter.default.post(name: .tuSpatialAudioChanged, object: nil)
+            }
+        }
+    }
+
     /// Recadrer la vidéo pour remplir l'écran, au lieu de laisser des bandes
     /// noires. Coupe le haut et le bas : du 16:9 dans un écran de téléphone en
     /// paysage (≈2.16) ne peut pas à la fois tout montrer et tout remplir.
@@ -387,6 +398,7 @@ final class AppStore: ObservableObject {
         let savedSource    = ud.string(forKey: "liveSource") ?? "auto"
         liveSource         = kLiveSourceChoices.contains(savedSource) ? savedSource : "auto"
         if savedSource != liveSource { ud.set(liveSource, forKey: "liveSource") }
+        spatialAudio       = ud.string(forKey: SpatialAudio.key) == "off" ? "off" : "auto"
         fillScreen         = ud.object(forKey: "cfg_fill_screen") as? Bool ?? false
         landscapeChat      = LandscapeChat(rawValue: ud.string(forKey: "cfg_landscape_chat") ?? "")
                              ?? .column

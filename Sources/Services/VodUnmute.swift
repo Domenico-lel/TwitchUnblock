@@ -58,18 +58,22 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     /// Élément de lecture : passe par le bon chargeur pour une adresse maison
     /// (`tuunmute://` : passages coupés ; `tulive://` : direct au plus près).
     static func playerItem(url: URL) -> AVPlayerItem {
+        let item: AVPlayerItem
         switch url.scheme {
         case scheme:
             let asset = AVURLAsset(url: url)
             asset.resourceLoader.setDelegate(shared, queue: shared.queue)
-            return AVPlayerItem(asset: asset)
+            item = AVPlayerItem(asset: asset)
         case LivePlaylistLoader.scheme:
             let asset = AVURLAsset(url: url)
             asset.resourceLoader.setDelegate(LivePlaylistLoader.shared, queue: LivePlaylistLoader.shared.queue)
-            return AVPlayerItem(asset: asset)
+            item = AVPlayerItem(asset: asset)
         default:
-            return AVPlayerItem(url: url)
+            item = AVPlayerItem(url: url)
         }
+        // Réglage « Audio spatial » : tous les lecteurs passent par ici.
+        SpatialAudio.apply(to: item)
+        return item
     }
 
     /// AirPlay en cours : on repasse sur la playlist du CDN, à la même position.
@@ -86,6 +90,7 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         logger.info("UNMUTE", "AirPlay : retour à la playlist d'origine", nil)
         let t = player.currentTime()
         let item = AVPlayerItem(url: plain)
+        SpatialAudio.apply(to: item)
         var obs: NSKeyValueObservation?
         obs = item.observe(\.status, options: [.new]) { item, _ in
             guard item.status == .readyToPlay else { return }
