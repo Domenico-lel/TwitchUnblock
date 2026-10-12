@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.5",
+          "buildVersion": "284",
+          "date": "2026-10-12",
+          "localizedDescription": "- When the developer replies to one of your reports (or changes its status), you get a notification, even with the app in the background; tap it to open My reports.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-284/TwitchUnblock.ipa",
+          "size": 3005349,
+          "commit": "3bfd0b8b28d565ca92942a2a570c0c193c44cdfa"
+        },
+        {
           "version": "1.3.4",
           "buildVersion": "282",
           "date": "2026-10-12",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-251/TwitchUnblock.ipa",
           "size": 2393455,
           "commit": "587645a1afc9ea013221b9b87ffdd64e9a0b357c"
-        },
-        {
-          "version": "1.2.26",
-          "buildVersion": "250",
-          "date": "2026-10-11",
-          "localizedDescription": "- Spatial audio (AirPods): new setting in Settings → Player to turn it off in the app, head tracking included. “Fixed” is still picked in Control Center.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-250/TwitchUnblock.ipa",
-          "size": 2319397,
-          "commit": "4c6ea9b0e3c8d3a0922acae89967591d030f4f5d"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.4",
+      "version": "1.3.5",
       "versionDate": "2026-10-12",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-282/TwitchUnblock.ipa",
-      "size": 2999926
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-284/TwitchUnblock.ipa",
+      "size": 3005349
     }
   ],
   "news": []
