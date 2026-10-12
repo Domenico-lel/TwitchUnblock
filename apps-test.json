@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.6",
+          "buildVersion": "285",
+          "date": "2026-10-12",
+          "localizedDescription": "- In landscape, Hide under the chat banners (pinned message, drops, polls, predictions, raid) folds them into one line of icons with the poll or prediction countdown; tap it to bring them back. The choice is remembered (Settings → Customize).",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-285/TwitchUnblock.ipa",
+          "size": 3022182,
+          "commit": "5b050083c8ad65de8dc13ba3bcf65cccfe04173f"
+        },
+        {
           "version": "1.3.5",
           "buildVersion": "284",
           "date": "2026-10-12",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-252/TwitchUnblock.ipa",
           "size": 2430534,
           "commit": "2d7de332f34ce1d3426bc359f4a63027cec35c43"
-        },
-        {
-          "version": "1.2.27",
-          "buildVersion": "251",
-          "date": "2026-10-11",
-          "localizedDescription": "- Drops: new Settings → Drops page with your campaigns' progress, a Claim button and automatic claiming.\n- Drops now progress while you watch a live with drops (Twitch only counts them when your account loads the stream; the app does it with small requests, no extra video download).",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-251/TwitchUnblock.ipa",
-          "size": 2393455,
-          "commit": "587645a1afc9ea013221b9b87ffdd64e9a0b357c"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.5",
+      "version": "1.3.6",
       "versionDate": "2026-10-12",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-284/TwitchUnblock.ipa",
-      "size": 3005349
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-285/TwitchUnblock.ipa",
+      "size": 3022182
     }
   ],
   "news": []
