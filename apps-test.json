@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.3",
+          "buildVersion": "281",
+          "date": "2026-10-12",
+          "localizedDescription": "- Pin your favourite streamers: long-press a followed channel (live or offline) and pick \"Pin to the top of Following\". Pinned channels show first, with a small pin next to their name.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-281/TwitchUnblock.ipa",
+          "size": 2948252,
+          "commit": "cfc094a5846d01b2391195407a087d4df9032d57"
+        },
+        {
           "version": "1.3.2",
           "buildVersion": "280",
           "date": "2026-10-12",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-249/TwitchUnblock.ipa",
           "size": 2312787,
           "commit": "908bf2d18ab440597317af35a53b6a4129666600"
-        },
-        {
-          "version": "1.2.24",
-          "buildVersion": "248",
-          "date": "2026-10-10",
-          "localizedDescription": "- Another ad-free source for live streams (an Albanian proxy) when Luminous is unavailable.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-248/TwitchUnblock.ipa",
-          "size": 2297831,
-          "commit": "31db60d909eb8f70af340519283f6419c4af89e8"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.2",
+      "version": "1.3.3",
       "versionDate": "2026-10-12",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-280/TwitchUnblock.ipa",
-      "size": 2934730
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-281/TwitchUnblock.ipa",
+      "size": 2948252
     }
   ],
   "news": []
