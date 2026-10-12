@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.8",
+          "buildVersion": "287",
+          "date": "2026-10-12",
+          "localizedDescription": "- Signalements : réponses relues toutes les minutes app ouverte",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-287/TwitchUnblock.ipa",
+          "size": 3046205,
+          "commit": "b7032f0476e1e6ba9e622bb6c5c0ad52bf9cb787"
+        },
+        {
           "version": "1.3.7",
           "buildVersion": "286",
           "date": "2026-10-12",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-255/TwitchUnblock.ipa",
           "size": 2443205,
           "commit": "b747f346277a8f2a7a882ee41efb7b2fd9a778a9"
-        },
-        {
-          "version": "1.2.29",
-          "buildVersion": "253",
-          "date": "2026-10-11",
-          "localizedDescription": "- Drops page: a step-by-step guide to earn drops, and a live status showing whether the stream you're watching makes your drops progress.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-253/TwitchUnblock.ipa",
-          "size": 2443205,
-          "commit": "a91256f8e9a279eea5f715cf58cfd6672ce2d1a2"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.7",
+      "version": "1.3.8",
       "versionDate": "2026-10-12",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-286/TwitchUnblock.ipa",
-      "size": 3044523
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-287/TwitchUnblock.ipa",
+      "size": 3046205
     }
   ],
   "news": []
