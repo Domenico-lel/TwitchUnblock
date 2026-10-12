@@ -116,7 +116,9 @@ no key to paste. The backend is already hosted and shared by every install.
   in this session, reply, mention, copy.
 * 📌 **Pinned messages** — compact banner with badges, emotes, who pinned it and
   a countdown; collapse it to a chip. Shown in landscape too, along with polls,
-  predictions and raids.
+  predictions and raids; there, **Hide** under them folds them all into one
+  line of icons (with the poll or prediction countdown) — tap it to bring them
+  back. The choice is remembered (Settings → Customize).
 * 🎁 **Drops card** — when the channel runs a drops campaign, a card at the top
   of the chat shows the reward, the watch time it takes, the end date and a
   link to the details, like in the Twitch app; dismissed, it stays away for

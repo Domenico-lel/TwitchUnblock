@@ -153,6 +153,124 @@ struct DropsNoticeCard: View {
     }
 }
 
+// MARK: – Bandeaux repliés (paysage)
+/// Un bandeau du salon, représenté par une icône quand ils sont repliés.
+enum ChatNoticeKind: Hashable {
+    case pinned, drops, poll, prediction, hype, raid
+
+    var icon: String {
+        switch self {
+        case .pinned:     return "pin.fill"
+        case .drops:      return "gift.fill"
+        case .poll:       return "chart.bar.fill"
+        case .prediction: return "sparkles"
+        case .hype:       return "flame.fill"
+        case .raid:       return "figure.run"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .pinned, .drops, .prediction: return .tPurple
+        case .poll, .raid:                 return .tPrimary
+        case .hype:                        return .tLive
+        }
+    }
+}
+
+/// Bandeaux repliés : une ligne d'icônes, avec le compte à rebours d'un
+/// sondage ou d'une prédiction encore ouverts. La toucher les déplie.
+struct CollapsedNoticesBar: View {
+    let kinds: [ChatNoticeKind]
+    var pollEnds: Date? = nil
+    var predictionEnds: Date? = nil
+    let onExpand: () -> Void
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        Button(action: onExpand) {
+            HStack(spacing: 10) {
+                ForEach(kinds, id: \.self) { kind in
+                    HStack(spacing: 3) {
+                        Image(systemName: kind.icon).font(.system(size: 11, weight: .semibold))
+                        // Une seule lecture de l'heure : entre deux, la fin
+                        // pourrait passer et l'intervalle s'inverser.
+                        let now = Date()
+                        if let end = ends(kind), end > now {
+                            Text(timerInterval: now...end, countsDown: true)
+                                .font(.system(size: 10, weight: .bold).monospacedDigit())
+                        }
+                    }
+                    .foregroundColor(kind.tint)
+                    .fixedSize()
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 26)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(Color.tCard)
+        .overlay(Divider().background(Color.tBorder), alignment: .bottom)
+        .accessibilityLabel(store.t("notices_show"))
+    }
+
+    private func ends(_ kind: ChatNoticeKind) -> Date? {
+        switch kind {
+        case .poll:       return pollEnds
+        case .prediction: return predictionEnds
+        default:          return nil
+        }
+    }
+}
+
+/// Sous les bandeaux dépliés, en paysage : « Masquer » les replie en une
+/// ligne. Une épingle réduite se rouvre ici, la barre de statut qui porte
+/// sa pastille n'étant pas affichée.
+struct NoticesHideStrip: View {
+    var showPinChip = false
+    let onReopenPin: () -> Void
+    let onHide: () -> Void
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if showPinChip {
+                Button(action: onReopenPin) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "pin.fill").font(.system(size: 9))
+                        Text(store.t("pinned_short")).font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundColor(.tPurple)
+                    .padding(.horizontal, 7).padding(.vertical, 3)
+                    .background(Color.tPurple.opacity(0.15)).cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+            }
+            Spacer(minLength: 4)
+            Button(action: onHide) {
+                HStack(spacing: 3) {
+                    Text(store.t("notices_hide")).font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
+                }
+                .foregroundColor(.tMuted)
+                .padding(.horizontal, 6)
+                .frame(height: 22)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+        }
+        .padding(.leading, 12).padding(.trailing, 6)
+        .background(Color.tCard)
+        .overlay(Divider().background(Color.tBorder), alignment: .bottom)
+    }
+}
+
 // MARK: – Fiche d'une emote ou d'un badge
 /// Ce qu'on touche dans un message : une emote ou un badge.
 enum ChatInfoItem: Identifiable {

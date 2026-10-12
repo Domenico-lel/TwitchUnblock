@@ -53,10 +53,12 @@ enum Backup {
             // Propres à l'app
             "ios_autoClaimChest": store.autoClaimChest,
             "ios_showPinned": store.showPinnedMessages,
+            "ios_showDropsNotice": store.showDropsNotice,
             "ios_showFollowButton": store.showFollowButton,
             "ios_showWatchStreak": store.showWatchStreak,
             "ios_showLiveEvents": store.showLiveEvents,
             "ios_enableRaids": store.enableRaids,
+            "ios_landNoticesHidden": store.landscapeNoticesHidden,
             "ios_autoPurgeCache": store.autoPurgeImageCache,
             "ios_lowLatency": store.lowLatency,
             "ios_immersivePlayer": store.immersivePlayer,
@@ -134,10 +136,12 @@ enum Backup {
 
         bool("ios_autoClaimChest") { store.autoClaimChest = $0 }
         bool("ios_showPinned") { store.showPinnedMessages = $0 }
+        bool("ios_showDropsNotice") { store.showDropsNotice = $0 }
         bool("ios_showFollowButton") { store.showFollowButton = $0 }
         bool("ios_showWatchStreak") { store.showWatchStreak = $0 }
         bool("ios_showLiveEvents") { store.showLiveEvents = $0 }
         bool("ios_enableRaids") { store.enableRaids = $0 }
+        bool("ios_landNoticesHidden") { store.landscapeNoticesHidden = $0 }
         bool("ios_autoPurgeCache") { store.autoPurgeImageCache = $0 }
         bool("ios_lowLatency") { store.lowLatency = $0 }
         bool("ios_immersivePlayer") { store.immersivePlayer = $0 }

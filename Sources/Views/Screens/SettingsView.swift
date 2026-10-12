@@ -848,6 +848,9 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_raids"),  store.t("cfg_raids_sub"),
                           $store.enableRaids,        log: "Système de raid")
+                Divider().background(Color.tBorder)
+                toggleRow(store.t("cfg_land_notices"), store.t("cfg_land_notices_sub"),
+                          $store.landscapeNoticesHidden, log: "Bandeaux repliés en paysage")
             }
         }
     }

@@ -44,7 +44,8 @@ enum LandscapeChat: String, CaseIterable {
 /// paysage et le calque posé sur l'image. Passer un seul objet évite de
 /// promener cinq drapeaux jusqu'aux lignes de message.
 struct ChatStyle: Equatable {
-    /// Barre d'état, épinglés, sondages, raids — tout le décor autour des messages.
+    /// Barre d'état au-dessus des messages. Sans elle (paysage), les bandeaux
+    /// (épinglé, sondages, raid…) restent, repliables : voir ChatView.noticesArea.
     var showsChrome = true
     /// Horodatage devant chaque message.
     var showsTimestamp = true

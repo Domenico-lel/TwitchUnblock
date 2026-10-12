@@ -232,6 +232,56 @@ struct ChatView: View {
         }
     }
 
+    /// Bandeaux présents, dans l'ordre d'affichage (épingle réduite comprise).
+    private var activeNotices: [ChatNoticeKind] {
+        var kinds: [ChatNoticeKind] = []
+        if store.showPinnedMessages, pubsub.pinned != nil { kinds.append(.pinned) }
+        if store.showDropsNotice, dropsNotice.campaign != nil { kinds.append(.drops) }
+        if store.showLiveEvents {
+            if events.poll != nil { kinds.append(.poll) }
+            if events.prediction != nil { kinds.append(.prediction) }
+            if events.hype != nil { kinds.append(.hype) }
+        }
+        if store.enableRaids, raidService.raid != nil { kinds.append(.raid) }
+        return kinds
+    }
+
+    /// Les bandeaux, et en paysage (sans barre de statut) de quoi les replier :
+    /// la colonne est étroite, un sondage et une prédiction la remplissaient.
+    /// Repliés, ils tiennent sur une ligne d'icônes qui les rouvre ; le choix
+    /// est retenu (Réglages → Personnaliser).
+    @ViewBuilder private var noticesArea: some View {
+        if style.showsChrome {
+            notices
+        } else if !activeNotices.isEmpty {
+            if store.landscapeNoticesHidden {
+                CollapsedNoticesBar(
+                    kinds: activeNotices,
+                    pollEnds: events.poll.flatMap { $0.isActive ? $0.endsAt : nil },
+                    predictionEnds: events.prediction.flatMap { $0.locked || $0.winnerId != nil ? nil : $0.closesAt }
+                ) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        dismissedPinId = nil
+                        store.landscapeNoticesHidden = false
+                    }
+                }
+                .transition(.opacity)
+            } else {
+                notices
+                NoticesHideStrip(
+                    // Sa pastille vit dans la barre de statut, absente ici.
+                    showPinChip: pubsub.pinned.map { $0.id == dismissedPinId } ?? false,
+                    onReopenPin: { withAnimation(.easeInOut(duration: 0.18)) { dismissedPinId = nil } },
+                    onHide: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            pinnedExpanded = false
+                            store.landscapeNoticesHidden = true
+                        }
+                    })
+            }
+        }
+    }
+
     var body: some View {
         content
             // Message épinglé déplié : par-dessus tout le chat, à la place exacte
@@ -265,7 +315,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
 
             if style.showsChrome { chrome }
-            notices
+            noticesArea
 
             // ── Zone principale ─────────────────────────────────────
             if showEmotePicker && canSendMessages {

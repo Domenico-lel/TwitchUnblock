@@ -149,6 +149,11 @@ final class AppStore: ObservableObject {
     @Published var enableRaids: Bool = true {
         didSet { UserDefaults.standard.set(enableRaids, forKey: "cfg_raids") }
     }
+    /// En paysage, bandeaux du chat (épinglé, drops, sondages, prédictions,
+    /// raid) repliés en une ligne d'icônes au-dessus des messages.
+    @Published var landscapeNoticesHidden: Bool = false {
+        didSet { UserDefaults.standard.set(landscapeNoticesHidden, forKey: "cfg_land_notices_hidden") }
+    }
     /// Vider le cache des emotes/badges en quittant le live (et l'app).
     @Published var autoPurgeImageCache: Bool = true {
         didSet { UserDefaults.standard.set(autoPurgeImageCache, forKey: "cfg_purge_cache") }
@@ -507,6 +512,7 @@ final class AppStore: ObservableObject {
         showWatchStreak    = ud.object(forKey: "cfg_streak") as? Bool ?? true
         showLiveEvents     = ud.object(forKey: "cfg_events") as? Bool ?? true
         enableRaids        = ud.object(forKey: "cfg_raids")  as? Bool ?? true
+        landscapeNoticesHidden = ud.bool(forKey: "cfg_land_notices_hidden")
         autoPurgeImageCache = ud.object(forKey: "cfg_purge_cache") as? Bool ?? true
         // Actif par défaut depuis la 1.2.21 (direct à quelques secondes au lieu
         // d'une vingtaine) ; qui l'a coupé à la main le garde coupé.
