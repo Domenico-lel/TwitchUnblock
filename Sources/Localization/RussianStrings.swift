@@ -634,6 +634,7 @@ let kRussianStrings: [String: String] = [
     "liquid_glass_unavailable": "Нужна iOS 26 или новее.",
     "fb_add_photos": "Добавить скриншоты",
     "fb_mine": "Мои обращения",
+    "fb_notif_reply": "Ответ на ваше обращение", "fb_notif_status": "Статус вашего обращения изменился",
     "fb_mine_empty": "Здесь появятся обращения, отправленные из приложения, вместе с ответами.",
     "fb_thanks_follow": "Спасибо! Ответ появится в разделе «Мои обращения».",
     "fb_reply_ph": "Ответить…",

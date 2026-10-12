@@ -66,6 +66,8 @@ struct MainTabView: View {
     /// Formulaire de retour, et ce qui se lisait quand on l'a ouvert depuis
     /// le lecteur (joint au message).
     @State private var showFeedback    = false
+    /// « Mes signalements », ouvert par la notification d'une réponse.
+    @State private var showMyFeedback  = false
     @State private var feedbackContext: String? = nil
     /// Qualité retenue par le lecteur immersif (vide = meilleure disponible).
     @State private var immersiveQuality = ""
@@ -464,6 +466,14 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openLiveChannel)) { note in
             if let login = note.userInfo?["login"] as? String, !login.isEmpty { playLive(login) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openMyFeedback)) { _ in
+            showMyFeedback = true
+        }
+        .sheet(isPresented: $showMyFeedback) {
+            NavigationStack { MyFeedbackList() }
+                .environmentObject(store)
+                .preferredColorScheme(.dark)
         }
         // Réglage rapide du minuteur depuis le lecteur.
         .sheet(isPresented: $showSleepSheet) {

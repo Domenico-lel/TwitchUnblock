@@ -30,9 +30,10 @@ enum LiveNotifier {
         }
     }
 
-    /// Programme le prochain réveil (sans effet si l'option est coupée).
+    /// Programme le prochain réveil : pour les lives suivis (option), ou pour
+    /// les réponses aux retours envoyés (FeedbackStore).
     static func schedule() {
-        guard isEnabled else { return }
+        guard isEnabled || UserDefaults.standard.bool(forKey: FeedbackStore.hasReportsKey) else { return }
         let req = BGAppRefreshTaskRequest(identifier: taskId)
         req.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
         do {
@@ -87,7 +88,9 @@ enum LiveNotifier {
     private static func handle(_ task: BGAppRefreshTask) {
         schedule()   // le suivant d'abord : un échec ne doit pas tout arrêter
         let work = Task {
-            let ok = await check(notify: true)
+            let ok = isEnabled ? await check(notify: true) : true
+            // Réponses aux retours envoyés : notifiées par FeedbackStore.
+            await FeedbackStore.shared.refresh(force: true)
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastRunKey)
             UserDefaults.standard.set(ok, forKey: lastOkKey)
             task.setTaskCompleted(success: ok)
@@ -141,4 +144,6 @@ enum LiveNotifier {
 extension Notification.Name {
     /// Ouvrir le direct d'une chaîne (touche d'une notification).
     static let openLiveChannel = Notification.Name("OpenLiveChannel")
+    /// Ouvrir « Mes signalements » (notification d'une réponse).
+    static let openMyFeedback = Notification.Name("OpenMyFeedback")
 }

@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UserNotifications
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Suivi des retours envoyés depuis l'app (« Mes signalements »).
@@ -73,7 +74,11 @@ final class FeedbackStore: ObservableObject {
         if let data = try? JSONEncoder().encode(Array(reports.prefix(50))) {
             UserDefaults.standard.set(data, forKey: key)
         }
+        // Des retours à suivre : iOS réveille aussi l'app pour leurs réponses
+        // (LiveNotifier), même sans les notifications de live.
+        UserDefaults.standard.set(!reports.isEmpty, forKey: Self.hasReportsKey)
     }
+    nonisolated static let hasReportsKey = "fb_has_reports"
 
     func add(id: String, token: String, kind: String, text: String) {
         let now = Date().timeIntervalSince1970 * 1000
@@ -106,12 +111,39 @@ final class FeedbackStore: ObservableObject {
               let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
         else { return }
         let byId = Dictionary(states.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let before = Dictionary(reports.map { ($0.id, $0.updatedAt) }, uniquingKeysWith: { a, _ in a })
         reports = reports.compactMap { r in
             guard let st = byId[r.id] else { return r }
             if st.gone == true { return nil }
             return apply(st, to: r)
         }
         save()
+        // Réponse (ou nouvel état) du développeur arrivée depuis la dernière
+        // lecture : notification, en bannière si l'app est ouverte.
+        let fresh = reports.filter { $0.unread && $0.updatedAt > (before[$0.id] ?? 0) }
+        if !fresh.isEmpty { notifyTeamUpdates(fresh) }
+    }
+
+    /// Une notification par retour mis à jour par le développeur ; la toucher
+    /// ouvre « Mes signalements » (AppDelegate). Identifiant = retour + date :
+    /// la même mise à jour n'est jamais annoncée deux fois.
+    private func notifyTeamUpdates(_ list: [MyFeedback]) {
+        let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+        for r in list.prefix(3) {
+            let content = UNMutableNotificationContent()
+            if let m = r.messages.last(where: { $0.fromTeam })?.m, !m.isEmpty {
+                content.title = translate("fb_notif_reply", lang)
+                content.body = m
+            } else {
+                content.title = translate("fb_notif_status", lang)
+                content.body = translate("fb_status_line", lang)
+                    .replacingOccurrences(of: "{s}", with: translate("fb_status_\(r.status)", lang))
+            }
+            content.sound = .default
+            content.userInfo = ["feedback": r.id]
+            UNUserNotificationCenter.current().add(UNNotificationRequest(
+                identifier: "fb-\(r.id)-\(Int(r.updatedAt))", content: content, trigger: nil))
+        }
     }
 
     private func apply(_ st: FeedbackState, to r: MyFeedback) -> MyFeedback {
