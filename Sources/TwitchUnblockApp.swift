@@ -9,6 +9,9 @@ struct TwitchUnblockApp: App {
     var body: some Scene {
         WindowGroup {
             MainTabView()
+                // Avis internes (réponses aux signalements, drops,
+                // téléchargements), par-dessus le lecteur compris.
+                .inAppNoticeHost()
                 .environmentObject(store)
                 .preferredColorScheme(.dark)
                 .task { await UsageService.shared.ping(enabled: store.shareUsage) }
@@ -39,6 +42,9 @@ struct TwitchUnblockApp: App {
                         // le Wi-Fi ou la charge pour s'y mettre).
                         VodDownloads.shared.sceneInactive()
                     case .active:
+                        // Avis arrivés en arrière-plan sans permission de
+                        // notifier : affichés maintenant, dans l'app.
+                        InAppNotices.shared.showPending()
                         // Le service ne laisse passer qu'un ping par heure :
                         // on compte des journées actives.
                         Task { await UsageService.shared.ping(enabled: store.shareUsage) }

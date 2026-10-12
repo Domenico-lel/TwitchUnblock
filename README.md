@@ -147,7 +147,8 @@ no key to paste. The backend is already hosted and shared by every install.
   when your own account loads the stream. During a live with drops, the app does
   that with small requests, without downloading the video a second time.
 * 🔔 **Notifications** — told when a drop is ready to claim, or when the app
-  has claimed it for you (Settings → Drops → Notify me).
+  has claimed it for you (Settings → Drops → Notify me). With the app open it's
+  a banner inside the app, even if notifications aren't allowed.
 * Needs the Twitch web session, like channel points. Game accounts must be
   linked: Twitch no longer grants rewards without it.
 
@@ -230,8 +231,10 @@ no key to paste. The backend is already hosted and shared by every install.
   player menu, screenshots included. **My reports** shows where each one stands
   (received, seen, accepted, in progress, done, declined) and the developer's reply,
   and lets you answer back; a badge flags new replies, and open conversations
-  refresh on their own. A reply (or a new status) also comes as a notification,
-  even with the app in the background; tap it to open **My reports**.
+  refresh on their own. A reply (or a new status) also shows up as a banner
+  inside the app — notifications allowed or not — and as a notification while
+  the app is in the background (without permission, the banner waits until you
+  come back); tap it to open **My reports**.
 * 👥 **Switch account** — sign in with another Twitch account from Settings.
   After logging out, the next sign-in asks which account to use instead of
   quietly reusing the previous one.

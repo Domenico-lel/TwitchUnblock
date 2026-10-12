@@ -336,12 +336,15 @@ struct MainTabView: View {
                 showMultiLive = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { playLive(login) }
             })
+            // Avis internes : une feuille cache le bandeau de la racine.
+            .inAppNoticeHost()
             .environmentObject(store)
         }
         // Télécharger un passage de la VOD en cours (menu ⋯ du lecteur).
         .sheet(isPresented: $showDownloadSheet) {
             if let ctx = downloadContext {
                 VodDownloadSheet(context: ctx)
+                    .inAppNoticeHost()
                     .environmentObject(store)
                     .presentationDetents([.large])
             }
@@ -349,10 +352,12 @@ struct MainTabView: View {
         // Réglages : ouverts depuis l'avatar de l'en-tête.
         .sheet(isPresented: $showSettings) {
             SettingsView()
+                .inAppNoticeHost()
         }
         // Signaler un bug ou proposer une idée (en-tête, menu du lecteur).
         .sheet(isPresented: $showFeedback) {
             FeedbackSheet(context: feedbackContext)
+                .inAppNoticeHost()
                 .environmentObject(store)
                 .presentationDetents([.large])
         }
@@ -449,6 +454,7 @@ struct MainTabView: View {
                        onRecovered: { rec in channelSheet = nil; playRecovered(rec) },
                        initialChannel: item.login,
                        onClose: { channelSheet = nil })
+                .inAppNoticeHost()
                 .environmentObject(store)
                 .presentationDragIndicator(.visible)
         }
@@ -472,6 +478,7 @@ struct MainTabView: View {
         }
         .sheet(isPresented: $showMyFeedback) {
             NavigationStack { MyFeedbackList() }
+                .inAppNoticeHost()
                 .environmentObject(store)
                 .preferredColorScheme(.dark)
         }

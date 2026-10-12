@@ -614,12 +614,9 @@ final class VodDownloads: ObservableObject {
         save()
         logger.success("DOWNLOAD", "Téléchargement terminé", d.title)
         let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
-        let content = UNMutableNotificationContent()
-        content.title = translate("dl_done_notif", lang)
-        content.body = d.title
-        content.sound = .default
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "download-\(id)", content: content, trigger: nil))
+        InAppNotices.shared.deliver(
+            InAppNotice(kind: .download, title: translate("dl_done_notif", lang), body: d.title),
+            id: "download-\(id)")
     }
 
     // MARK: Chat

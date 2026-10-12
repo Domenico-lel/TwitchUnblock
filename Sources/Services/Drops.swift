@@ -266,8 +266,9 @@ final class DropsService: ObservableObject {
     // MARK: Notifications
     private static let notifiedKey = "drops_notified"
 
-    /// Notification locale (réglage « Me prévenir », actif par défaut), une
-    /// seule fois par drop et par état : prêt à réclamer, ou réclamé tout seul.
+    /// Avis (réglage « Me prévenir », actif par défaut) : bandeau dans l'app,
+    /// ou notification (InAppNotices). Une seule fois par drop et par état :
+    /// prêt à réclamer, ou réclamé tout seul.
     private func notify(_ drop: TimedDrop, claimed: Bool) {
         guard UserDefaults.standard.object(forKey: "cfg_drops_notify") as? Bool ?? true else { return }
         let mark = "\(drop.id)-\(claimed ? "claimed" : "ready")"
@@ -276,12 +277,11 @@ final class DropsService: ObservableObject {
         seen.append(mark)
         UserDefaults.standard.set(Array(seen.suffix(300)), forKey: Self.notifiedKey)
         let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
-        let content = UNMutableNotificationContent()
-        content.title = translate(claimed ? "drops_notif_claimed" : "drops_notif_ready", lang)
-        content.body = drop.name
-        content.sound = .default
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "drop-\(mark)", content: content, trigger: nil))
+        InAppNotices.shared.deliver(
+            InAppNotice(kind: claimed ? .dropClaimed : .dropReady,
+                        title: translate(claimed ? "drops_notif_claimed" : "drops_notif_ready", lang),
+                        body: drop.name),
+            id: "drop-\(mark)")
     }
 
     private enum ClaimResult { case ok, integrity, failed(String) }
