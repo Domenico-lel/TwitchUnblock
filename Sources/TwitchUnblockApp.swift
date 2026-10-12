@@ -19,8 +19,12 @@ struct TwitchUnblockApp: App {
                 .task { await UpdateChecker.shared.checkIfDue(atLaunch: true) }
                 // Annonce du développeur en cours ?
                 .task { await AnnouncementService.shared.refresh(force: true) }
-                // Réponses aux retours envoyés depuis l'app (pastille).
-                .task { await FeedbackStore.shared.refresh(force: true) }
+                // Réponses aux retours envoyés depuis l'app (pastille, bandeau),
+                // puis relues toutes les minutes tant que l'app est ouverte.
+                .task {
+                    FeedbackStore.shared.startForegroundChecks()
+                    await FeedbackStore.shared.refresh(force: true)
+                }
                 // Notification ntfy touchée : twitchunblock://live/<chaîne>.
                 .onOpenURL { url in
                     guard url.scheme == "twitchunblock", url.host == "live",
@@ -35,6 +39,7 @@ struct TwitchUnblockApp: App {
                         // fermer l'app ensuite sans prévenir.
                         store.flushToCloud(force: true)
                         LiveNotifier.schedule()
+                        FeedbackStore.shared.stopForegroundChecks()
                         VodDownloads.shared.sceneInactive()
                     case .inactive:
                         // Téléchargements : ce qui manque passe à iOS, avant
@@ -58,6 +63,7 @@ struct TwitchUnblockApp: App {
                         Task { await LiveNotifier.check(notify: false) }
                         Task { await AnnouncementService.shared.refresh() }
                         Task { await FeedbackStore.shared.refresh() }
+                        FeedbackStore.shared.startForegroundChecks()
                         // ntfy : chaînes suivies changées (ou une fois par jour).
                         Task { await NtfyNotifier.sync(lang: store.lang) }
                         // Téléchargements : l'app reprend la main sur iOS,

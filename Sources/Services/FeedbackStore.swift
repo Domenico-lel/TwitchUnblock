@@ -62,6 +62,10 @@ final class FeedbackStore: ObservableObject {
 
     private let key = "my_feedback"
     private var checkedAt = Date.distantPast
+    /// « Mes signalements » à l'écran (liste ou discussion) : la réponse s'y
+    /// voit déjà, pas de bandeau par-dessus.
+    var inboxViewers = 0
+    private var foregroundChecks: Task<Void, Never>?
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: key),
@@ -101,10 +105,10 @@ final class FeedbackStore: ObservableObject {
         return c?.url
     }
 
-    /// État de toutes les discussions en une requête — au plus toutes les
-    /// 3 min sans `force`. Un retour effacé ou expiré quitte la liste.
-    func refresh(force: Bool = false) async {
-        guard !reports.isEmpty, force || Date().timeIntervalSince(checkedAt) > 180 else { return }
+    /// État de toutes les discussions en une requête — au plus une fois par
+    /// `minInterval` sans `force`. Un retour effacé ou expiré quitte la liste.
+    func refresh(force: Bool = false, minInterval: TimeInterval = 180) async {
+        guard !reports.isEmpty, force || Date().timeIntervalSince(checkedAt) > minInterval else { return }
         checkedAt = Date()
         let items = reports.map { ["id": $0.id, "token": $0.token] }
         guard let data = await post("/api/feedback/thread", ["items": items]),
@@ -119,9 +123,31 @@ final class FeedbackStore: ObservableObject {
         }
         save()
         // Réponse (ou nouvel état) du développeur arrivée depuis la dernière
-        // lecture : notification, en bannière si l'app est ouverte.
+        // lecture : bandeau dans l'app, ou notification. Pas de bandeau si
+        // « Mes signalements » est à l'écran : la réponse y est affichée.
         let fresh = reports.filter { $0.unread && $0.updatedAt > (before[$0.id] ?? 0) }
-        if !fresh.isEmpty { notifyTeamUpdates(fresh) }
+        let inboxOnScreen = inboxViewers > 0 && UIApplication.shared.applicationState == .active
+        if !fresh.isEmpty, !inboxOnScreen { notifyTeamUpdates(fresh) }
+    }
+
+    /// App au premier plan : relue toutes les minutes. Avant, rien ne se
+    /// relisait tant qu'on restait dans l'app — la réponse n'arrivait qu'en
+    /// ouvrant « Mes signalements », ou en revenant dans l'app 3 min après.
+    /// Sans retour envoyé, `refresh` ne fait aucune requête.
+    func startForegroundChecks() {
+        guard foregroundChecks == nil else { return }
+        foregroundChecks = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.refresh(minInterval: 50)
+            }
+        }
+    }
+
+    func stopForegroundChecks() {
+        foregroundChecks?.cancel()
+        foregroundChecks = nil
     }
 
     /// Un avis par retour mis à jour par le développeur : bandeau dans l'app,

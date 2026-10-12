@@ -232,9 +232,10 @@ no key to paste. The backend is already hosted and shared by every install.
   (received, seen, accepted, in progress, done, declined) and the developer's reply,
   and lets you answer back; a badge flags new replies, and open conversations
   refresh on their own. A reply (or a new status) also shows up as a banner
-  inside the app — notifications allowed or not — and as a notification while
-  the app is in the background (without permission, the banner waits until you
-  come back); tap it to open **My reports**.
+  inside the app — notifications allowed or not; replies are checked every
+  minute while the app is open — and as a notification while the app is in the
+  background (without permission, the banner waits until you come back); tap it
+  to open **My reports**.
 * 👥 **Switch account** — sign in with another Twitch account from Settings.
   After logging out, the next sign-in asks which account to use instead of
   quietly reusing the previous one.

@@ -104,6 +104,9 @@ struct MyFeedbackList: View {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
+        // À l'écran, une réponse s'y voit : pas de bandeau par-dessus.
+        .onAppear { inbox.inboxViewers += 1 }
+        .onDisappear { inbox.inboxViewers -= 1 }
         .refreshable { await inbox.refresh(force: true) }
     }
 
@@ -230,6 +233,8 @@ struct FeedbackThreadView: View {
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
         }
+        .onAppear { inbox.inboxViewers += 1 }
+        .onDisappear { inbox.inboxViewers -= 1 }
         .sheet(item: Binding(get: { zoomed.map(ZoomedPhoto.init) }, set: { zoomed = $0?.url })) { z in
             ZoomedPhotoView(url: z.url)
         }
