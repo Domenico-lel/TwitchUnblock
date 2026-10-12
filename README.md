@@ -52,7 +52,9 @@ no key to paste. The backend is already hosted and shared by every install.
   Scrub past that window and the recording takes over at that exact moment.
   A **Back to live** button brings you back.
 * ⚡ **Low latency mode** — stays as close to the live edge as the connection
-  allows.
+  allows, but never under 4 seconds behind (closer, playback stalls): the
+  target follows how long Twitch takes to publish each segment, and skipping
+  ahead or **Live** stop there too.
 * 🖥 **Fill the screen** — crops the video to remove the black bars in
   landscape. Cuts off the top and bottom: 16:9 in a phone screen can't do both.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
@@ -95,7 +97,13 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 💬 **Full live chat** — read and send, with replies.
 * 😀 **Emotes** — Twitch, BetterTTV, FrankerFaceZ and 7TV, global and
-  per-channel, animated.
+  per-channel, animated. BetterTTV's live connection adds the personal emotes
+  of BTTV Pro users (once BTTV announces them, i.e. when they open the chat)
+  and the emotes added to the channel during the stream.
+* 🔎 **Tap an emote or a badge** — its exact name and source (Twitch, BTTV,
+  FFZ, 7TV, personal), copy it or add it to your message; a badge shows its
+  title ("3-Month Subscriber"…). In the live chat, the pinned message and the
+  VOD chat.
 * 🏅 **Badges** — global and channel-specific, resolved through Helix.
 * 🕘 **Recent messages** — Twitch sends nothing from before you join, so the
   last messages are fetched from `recent-messages.robotty.de` (third party) and
@@ -107,7 +115,12 @@ no key to paste. The backend is already hosted and shared by every install.
 * 👤 **Tap a message** — opens the person: their avatar, everything they wrote
   in this session, reply, mention, copy.
 * 📌 **Pinned messages** — compact banner with badges, emotes, who pinned it and
-  a countdown; collapse it to a chip.
+  a countdown; collapse it to a chip. Shown in landscape too, along with polls,
+  predictions and raids.
+* 🎁 **Drops card** — when the channel runs a drops campaign, a card at the top
+  of the chat shows the reward, the watch time it takes, the end date and a
+  link to the details, like in the Twitch app; dismissed, it stays away for
+  that campaign (Settings → Customize → Channel drops).
 * 📊 **Polls, predictions, hype train** — vote, bet channel points on a
   prediction, see the countdown, the results and the winning outcome.
 * 🚀 **Raids** — follow the streamer to the raided channel automatically;
@@ -138,8 +151,8 @@ no key to paste. The backend is already hosted and shared by every install.
 
 ### Chat layout
 
-* 📐 **Resizable** — drag the divider between video and chat; the width is
-  remembered.
+* 📐 **Resizable** — drag the small handle between video and chat (no line
+  across the picture); the width is remembered.
 * 🪟 **Three landscape layouts** — a column on the right, translucent over the
   picture, or folded away. The player's buttons shift with the chat's width so
   nothing is ever covered.
@@ -150,6 +163,8 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 🏠 **Home** — your followed channels that are live, top streams (France or
   worldwide).
+* 📍 **Pinned streamers** — long-press a followed channel (live or offline) →
+  **Pin to the top of Following**: pinned ones come first, with a small pin.
 * 🎮 **Categories** — browse by game, then the live channels in it, filtered
   by language if you like (all, or a single one — kept for every category).
   Search puts the exact match first ("valorant" → VALORANT), with sharp box
@@ -213,7 +228,8 @@ no key to paste. The backend is already hosted and shared by every install.
   player menu, screenshots included. **My reports** shows where each one stands
   (received, seen, accepted, in progress, done, declined) and the developer's reply,
   and lets you answer back; a badge flags new replies, and open conversations
-  refresh on their own.
+  refresh on their own. A reply (or a new status) also comes as a notification,
+  even with the app in the background; tap it to open **My reports**.
 * 👥 **Switch account** — sign in with another Twitch account from Settings.
   After logging out, the next sign-in asks which account to use instead of
   quietly reusing the previous one.
