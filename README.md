@@ -235,7 +235,9 @@ no key to paste. The backend is already hosted and shared by every install.
   inside the app — notifications allowed or not; replies are checked every
   minute while the app is open — and as a notification while the app is in the
   background (without permission, the banner waits until you come back); tap it
-  to open **My reports**.
+  to open **My reports**. A report that's done or declined, with the developer
+  having the last word, is no longer checked (opening it still looks once);
+  answering it brings it back.
 * 👥 **Switch account** — sign in with another Twitch account from Settings.
   After logging out, the next sign-in asks which account to use instead of
   quietly reusing the previous one.

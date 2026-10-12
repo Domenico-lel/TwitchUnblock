@@ -38,6 +38,10 @@ struct MyFeedback: Codable, Identifiable, Hashable {
 
     /// Réponse (ou nouvel état) du développeur pas encore lue.
     var unread: Bool { lastFrom == "a" && updatedAt > seen }
+    /// Terminé (fait ou refusé), dernier mot au développeur : plus rien
+    /// n'est attendu, il n'est plus relu tout seul. Une réponse de la
+    /// personne le remet au suivi (dernier mot à elle).
+    var closed: Bool { (status == "done" || status == "refused") && lastFrom == "a" }
     var messages: [FeedbackMessage] { thread ?? [FeedbackMessage(f: "u", m: text, at: at)] }
 }
 
@@ -78,9 +82,10 @@ final class FeedbackStore: ObservableObject {
         if let data = try? JSONEncoder().encode(Array(reports.prefix(50))) {
             UserDefaults.standard.set(data, forKey: key)
         }
-        // Des retours à suivre : iOS réveille aussi l'app pour leurs réponses
-        // (LiveNotifier), même sans les notifications de live.
-        UserDefaults.standard.set(!reports.isEmpty, forKey: Self.hasReportsKey)
+        // Des retours encore suivis : iOS réveille aussi l'app pour leurs
+        // réponses (LiveNotifier), même sans les notifications de live. Tous
+        // terminés : plus de réveil pour eux.
+        UserDefaults.standard.set(reports.contains { !$0.closed }, forKey: Self.hasReportsKey)
     }
     nonisolated static let hasReportsKey = "fb_has_reports"
 
@@ -105,12 +110,15 @@ final class FeedbackStore: ObservableObject {
         return c?.url
     }
 
-    /// État de toutes les discussions en une requête — au plus une fois par
-    /// `minInterval` sans `force`. Un retour effacé ou expiré quitte la liste.
-    func refresh(force: Bool = false, minInterval: TimeInterval = 180) async {
-        guard !reports.isEmpty, force || Date().timeIntervalSince(checkedAt) > minInterval else { return }
+    /// État des discussions encore suivies, en une requête — au plus une fois
+    /// par `minInterval` sans `force`. Un retour terminé (`closed`) n'est plus
+    /// relu, sauf s'il est dans `including` (discussion qu'on ouvre, liste
+    /// tirée pour rafraîchir). Un retour effacé ou expiré quitte la liste.
+    func refresh(force: Bool = false, minInterval: TimeInterval = 180, including: Set<String> = []) async {
+        let followed = reports.filter { !$0.closed || including.contains($0.id) }
+        guard !followed.isEmpty, force || Date().timeIntervalSince(checkedAt) > minInterval else { return }
         checkedAt = Date()
-        let items = reports.map { ["id": $0.id, "token": $0.token] }
+        let items = followed.map { ["id": $0.id, "token": $0.token] }
         guard let data = await post("/api/feedback/thread", ["items": items]),
               let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
         else { return }
@@ -133,7 +141,8 @@ final class FeedbackStore: ObservableObject {
     /// App au premier plan : relue toutes les minutes. Avant, rien ne se
     /// relisait tant qu'on restait dans l'app — la réponse n'arrivait qu'en
     /// ouvrant « Mes signalements », ou en revenant dans l'app 3 min après.
-    /// Sans retour envoyé, `refresh` ne fait aucune requête.
+    /// Sans retour encore suivi (aucun, ou tous terminés), `refresh` ne fait
+    /// aucune requête.
     func startForegroundChecks() {
         guard foregroundChecks == nil else { return }
         foregroundChecks = Task { [weak self] in

@@ -107,7 +107,8 @@ struct MyFeedbackList: View {
         // À l'écran, une réponse s'y voit : pas de bandeau par-dessus.
         .onAppear { inbox.inboxViewers += 1 }
         .onDisappear { inbox.inboxViewers -= 1 }
-        .refreshable { await inbox.refresh(force: true) }
+        // Tirer pour rafraîchir relit tout, retours terminés compris.
+        .refreshable { await inbox.refresh(force: true, including: Set(inbox.reports.map(\.id))) }
     }
 
     @ViewBuilder
@@ -225,10 +226,14 @@ struct FeedbackThreadView: View {
         .navigationBarTitleDisplayMode(.inline)
         // Discussion ouverte : relue toutes les 20 s, la réponse apparaît
         // sans rien toucher. La tâche s'arrête quand on quitte l'écran.
+        // Terminé, il n'est lu qu'à l'ouverture (rouvert entre-temps ?), puis
+        // plus relu ; une réponse d'ici le remet au suivi.
         .task {
             inbox.markSeen(id)
+            var opening = true
             while !Task.isCancelled {
-                await inbox.refresh(force: true)
+                await inbox.refresh(force: true, including: opening ? [id] : [])
+                opening = false
                 inbox.markSeen(id)
                 try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
