@@ -22,6 +22,15 @@
       "versions": [
         {
           "version": "1.3.9",
+          "buildVersion": "289",
+          "date": "2026-10-12",
+          "localizedDescription": "- Improvements and fixes",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-289/TwitchUnblock.ipa",
+          "size": 3047082,
+          "commit": "a72868c7ebb9331e8c52f01c94cac1f2d5089279"
+        },
+        {
+          "version": "1.3.9",
           "buildVersion": "288",
           "date": "2026-10-12",
           "localizedDescription": "- Signalements : plus de relecture d'un retour terminé",
@@ -280,15 +289,6 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-257/TwitchUnblock.ipa",
           "size": 2449430,
           "commit": "6937a6cf54b07f00aad8b9f169f3fbdfdbefe397"
-        },
-        {
-          "version": "1.2.31",
-          "buildVersion": "256",
-          "date": "2026-10-11",
-          "localizedDescription": "- Usage stats (if enabled) now also include the app language, iPhone or iPad, the iOS version and anonymous play counters (which source served a live, failures) — never the channels.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-256/TwitchUnblock.ipa",
-          "size": 2446765,
-          "commit": "ad3cb9d208e1d036c9cd84142d1c778654fa19b4"
         }
       ],
       "appPermissions": {
@@ -297,8 +297,8 @@
       },
       "version": "1.3.9",
       "versionDate": "2026-10-12",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-288/TwitchUnblock.ipa",
-      "size": 3046362
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-289/TwitchUnblock.ipa",
+      "size": 3047082
     }
   ],
   "news": []
