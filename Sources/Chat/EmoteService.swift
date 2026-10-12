@@ -17,6 +17,11 @@ actor EmoteService {
     private var twitchById:     [String: TwitchEmote] = [:]
     private var loadedChannels: Set<String> = []
 
+    /// Emotes personnelles BTTV Pro, par identifiant Twitch de leur
+    /// propriétaire (annoncées par BTTVLive) ; 500 personnes au plus.
+    private var personalBTTV: [String: [String: TwitchEmote]] = [:]
+    private var personalOrder: [String] = []
+
     // MARK: – Load globals once
     func loadGlobals() async {
         await withTaskGroup(of: Void.self) { group in
@@ -69,12 +74,15 @@ actor EmoteService {
     }
 
     // MARK: – Resolve emote by name (channel-first, toutes les sources par channelId)
-    func resolve(name: String, channelId: String?) -> TwitchEmote? {
+    /// `userId` : auteur du message, pour ses emotes personnelles BTTV Pro
+    /// (après celles de la chaîne, avant les globales).
+    func resolve(name: String, channelId: String?, userId: String? = nil) -> TwitchEmote? {
         if let cid = channelId {
             if let e = channelBTTV[cid]?[name] { return e }
             if let e = channelFFZ[cid]?[name]  { return e }   // fix : clé = channelId
             if let e = channel7TV[cid]?[name]  { return e }
         }
+        if let uid = userId, let e = personalBTTV[uid]?[name] { return e }
         if let e = globalBTTV[name] { return e }
         if let e = globalFFZ[name]  { return e }
         if let e = global7TV[name]  { return e }
@@ -157,6 +165,37 @@ actor EmoteService {
                 for obj in arr { if let e = bttvEmote(obj) { map[e.name] = e } }
             }
         }
+        channelBTTV[channelId] = map
+    }
+
+    // MARK: – BTTV en direct (BTTVLive)
+    func setPersonalBTTV(userId: String, emotes: [[String: Any]]) {
+        var map: [String: TwitchEmote] = [:]
+        for obj in emotes {
+            if var e = bttvEmote(obj) { e.personal = true; map[e.name] = e }
+        }
+        guard !map.isEmpty else { return }
+        if personalBTTV[userId] == nil { personalOrder.append(userId) }
+        personalBTTV[userId] = map
+        if personalOrder.count > 500 { personalBTTV[personalOrder.removeFirst()] = nil }
+    }
+
+    /// Emote ajoutée ou modifiée (renommée) sur la chaîne pendant le live.
+    func upsertChannelBTTV(channelId: String, emote obj: [String: Any]) {
+        guard let id = obj["id"] as? String else { return }
+        var map = channelBTTV[channelId] ?? [:]
+        let old = map.first { $0.value.id == id }
+        guard let code = (obj["code"] as? String) ?? old?.key, !code.isEmpty else { return }
+        if let old { map[old.key] = nil }
+        map[code] = TwitchEmote(id: id, name: code,
+                                url: "https://cdn.betterttv.net/emote/\(id)/2x", source: .bttv)
+        channelBTTV[channelId] = map
+    }
+
+    func removeChannelBTTV(channelId: String, emoteId: String) {
+        guard var map = channelBTTV[channelId],
+              let key = map.first(where: { $0.value.id == emoteId })?.key else { return }
+        map[key] = nil
         channelBTTV[channelId] = map
     }
 

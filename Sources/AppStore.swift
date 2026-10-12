@@ -129,6 +129,10 @@ final class AppStore: ObservableObject {
     @Published var showPinnedMessages: Bool = true {
         didSet { UserDefaults.standard.set(showPinnedMessages, forKey: "cfg_pinned") }
     }
+    /// Carte « Drops » en haut du chat quand la chaîne a des drops.
+    @Published var showDropsNotice: Bool = true {
+        didSet { UserDefaults.standard.set(showDropsNotice, forKey: "cfg_drops_notice") }
+    }
     /// Afficher le bouton Suivre / Ne plus suivre.
     @Published var showFollowButton: Bool = true {
         didSet { UserDefaults.standard.set(showFollowButton, forKey: "cfg_follow") }
@@ -498,6 +502,7 @@ final class AppStore: ObservableObject {
         twitchAvatar = ud.string(forKey: "twitch_avatar")
         autoClaimChest = ud.object(forKey: "auto_claim_chest") as? Bool ?? true
         showPinnedMessages = ud.object(forKey: "cfg_pinned") as? Bool ?? true
+        showDropsNotice    = ud.object(forKey: "cfg_drops_notice") as? Bool ?? true
         showFollowButton   = ud.object(forKey: "cfg_follow") as? Bool ?? true
         showWatchStreak    = ud.object(forKey: "cfg_streak") as? Bool ?? true
         showLiveEvents     = ud.object(forKey: "cfg_events") as? Bool ?? true

@@ -17,7 +17,8 @@ final class VodChatService: ObservableObject {
     @Published var errorMsg: String? = nil
 
     private var videoId   = ""
-    private var channelId: String? = nil
+    /// Chaîne de la VOD (badges d'abonné de la fiche d'un badge touché).
+    private(set) var channelId: String? = nil
 
     /// Tampon des commentaires à venir, trié par offset croissant.
     private var buffer: [(offset: Double, msg: ChatMessage)] = []

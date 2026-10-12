@@ -18,6 +18,7 @@ struct ChatView: View {
     @StateObject private var chat          = ChatService()
     @StateObject private var pointsService = ChannelPointsService()
     @StateObject private var pubsub        = ChatPubSub()
+    @StateObject private var dropsNotice   = ChannelDropsNotice()
     @StateObject private var follow        = FollowService()
     @StateObject private var events        = LiveEventsService()
     @StateObject private var raidService   = RaidService()
@@ -35,6 +36,8 @@ struct ChatView: View {
     @State private var threadRoot: ChatMessage? = nil   // fil de discussion ouvert
     @State private var pinnedExpanded   = false   // bandeau épinglé déplié
     @State private var dismissedPinId: String? = nil   // épingle réduite en pastille
+    /// Emote ou badge touché : sa fiche (nom exact, source, copier).
+    @State private var infoItem: ChatInfoItem? = nil
     @State private var chromeWidth: CGFloat = 320
     @State private var isSetup          = false   // chat/points déjà initialisés
     @State private var teardownWork: DispatchWorkItem? = nil   // anti-rebond plein écran
@@ -53,9 +56,10 @@ struct ChatView: View {
         messageText.count <= 500
     }
 
-    /// Décor autour des messages : statut de connexion, épinglés, sondages,
-    /// raids. En paysage la colonne est étroite et ce bandeau lui mangeait la
-    /// moitié de la hauteur utile — d'où `ChatStyle.showsChrome`.
+    /// Barre de statut au-dessus des messages : connexion, synchro, suivre,
+    /// épingle réduite. En paysage la colonne est étroite et elle lui
+    /// mangeait la hauteur utile — d'où `ChatStyle.showsChrome`. Les bandeaux
+    /// (épinglé, drops, sondages, raid) sont à part : voir `notices`.
     @ViewBuilder private var chrome: some View {
         VStack(spacing: 0) {
 
@@ -162,7 +166,14 @@ struct ChatView: View {
             })
             .background(Color.tCard)
             .overlay(Divider().background(Color.tBorder), alignment: .bottom)
+        }
+    }
 
+    /// Bandeaux du salon : message épinglé, drops de la chaîne, sondages,
+    /// prédictions, raid. Affichés aussi sans la barre de statut (chat en
+    /// paysage, posé sur l'image) : avant, ils disparaissaient avec elle.
+    @ViewBuilder private var notices: some View {
+        VStack(spacing: 0) {
             // ── Message épinglé ─────────────────────────────────────
             // Replié, il garde sa place ; déplié, il s'affiche par-dessus le chat
             // au lieu de le pousser : le chat ne bouge pas et continue de défiler.
@@ -174,6 +185,14 @@ struct ChatView: View {
                 // `body`), calée sur cette ancre : un simple overlay restait
                 // sous la liste du chat (vue UIKit).
                 .anchorPreference(key: PinnedSlotKey.self, value: .bounds) { $0 }
+                .transition(.opacity)
+            }
+
+            // ── Drops de la chaîne (carte à fermer) ─────────────────
+            if store.showDropsNotice, let campaign = dropsNotice.campaign {
+                DropsNoticeCard(campaign: campaign) {
+                    withAnimation(.easeInOut(duration: 0.18)) { dropsNotice.dismiss(campaign) }
+                }
                 .transition(.opacity)
             }
 
@@ -233,12 +252,20 @@ struct ChatView: View {
                     }
                 }
             }
+            .sheet(item: $infoItem) { item in
+                ChatInfoSheet(item: item, channelId: channelId,
+                              onInsert: canSendMessages ? { (e: TwitchEmote) in insertEmote(e); infoItem = nil } : nil)
+                    .environmentObject(store)
+            }
+            // Toucher une emote ou un badge (messages, épinglé) : sa fiche.
+            .environment(\.chatInfoAction, { infoItem = $0 })
     }
 
     private var content: some View {
         VStack(spacing: 0) {
 
             if style.showsChrome { chrome }
+            notices
 
             // ── Zone principale ─────────────────────────────────────
             if showEmotePicker && canSendMessages {
@@ -468,6 +495,8 @@ struct ChatView: View {
                 guard !PlayerFullscreen.isActive else { return }   // plein écran → on garde tout actif
                 chat.disconnect()
                 pubsub.disconnect()
+                dropsNotice.stop()
+                if let cid = channelId { Task { await BTTVLive.shared.leave(channelId: cid) } }
                 events.stop()
                 raidService.disconnect()
                 pointsService.stopPolling()
@@ -485,6 +514,8 @@ struct ChatView: View {
         await EmoteService.shared.loadGlobals()
         if let cid = channelId {
             await EmoteService.shared.loadChannel(channelId: cid, channelName: channelName)
+            // BTTV en direct : emotes personnelles (Pro), emotes ajoutées en live.
+            await BTTVLive.shared.join(channelId: cid)
         }
         // Sans compte : BadgeService passe par la requête GQL publique.
         await BadgeService.shared.loadGlobal(token: token)
@@ -517,6 +548,10 @@ struct ChatView: View {
         // Lecture publique : plus besoin d'être connecté pour les voir.
         if store.showPinnedMessages, let cid = channelId {
             pubsub.connect(channelId: cid)
+        }
+        // Drops de la chaîne : lecture publique, une carte à fermer.
+        if store.showDropsNotice, let cid = channelId {
+            dropsNotice.start(channelId: cid)
         }
         if let cid = channelId {
             // Statut de suivi (nécessite le token web pour le champ self.follower)
@@ -992,6 +1027,8 @@ struct WrappingHStack: View {
     let timeString: String
     let availableWidth: CGFloat
     var style: ChatStyle = .standard
+    /// Fiche d'une emote ou d'un badge touché (fournie par le chat).
+    @Environment(\.chatInfoAction) private var infoAction
 
     var body: some View {
         let blocks = message.tokens.enumerated().map { i, t in TokenBlock(id: i, content: t) }
@@ -1012,6 +1049,7 @@ struct WrappingHStack: View {
             ForEach(message.badges) { badge in
                 CachedEmoteImage(url: badge.url, name: "", height: style.badgeHeight,
                                  showsNameFallback: false)
+                    .chatInfoTap(infoAction, .badge(badge))
             }
             Text(message.displayName + ":")
                 .font(.system(size: size, weight: .bold)).foregroundColor(message.color)
@@ -1022,6 +1060,7 @@ struct WrappingHStack: View {
                         .foregroundColor(message.isAction ? message.color : .tText)
                 case .emote(let e):
                     CachedEmoteImage(url: e.url, name: e.name, height: emoteHeight)
+                        .chatInfoTap(infoAction, .emote(e))
                 case .mention(let m):
                     Text("@\(m)").font(.system(size: size, weight: .semibold)).foregroundColor(.tPrimary)
                 case .link(let l):

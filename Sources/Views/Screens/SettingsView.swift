@@ -834,6 +834,9 @@ struct SettingsView: View {
                 toggleRow(store.t("cfg_pinned"), store.t("cfg_pinned_sub"),
                           $store.showPinnedMessages, log: "Messages épinglés")
                 Divider().background(Color.tBorder)
+                toggleRow(store.t("cfg_drops_notice"), store.t("cfg_drops_notice_sub"),
+                          $store.showDropsNotice, log: "Carte des drops")
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_follow"), store.t("cfg_follow_sub"),
                           $store.showFollowButton,   log: "Bouton suivre")
                 Divider().background(Color.tBorder)

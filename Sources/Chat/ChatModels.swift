@@ -71,6 +71,8 @@ struct TwitchEmote: Identifiable, Hashable {
     let name: String
     let url: String
     var source: EmoteSource = .twitch
+    /// Emote personnelle d'un abonné BTTV Pro (utilisable partout par lui seul).
+    var personal = false
 }
 
 enum EmoteSource: String {
@@ -182,8 +184,9 @@ struct ChatMessage: Identifiable {
 
 // MARK: – Tokenisation d'un segment de texte
 /// Découpe un texte en jetons : liens, mentions, emotes tierces (BTTV/FFZ/7TV), texte.
-/// Partagé par le chat live (IRC) et le chat des VODs.
-func tokenizeChatSegment(_ segment: String, channelId: String?) async -> [MessageToken] {
+/// Partagé par le chat live (IRC) et le chat des VODs. `userId` : auteur du
+/// message, pour ses emotes personnelles BTTV Pro.
+func tokenizeChatSegment(_ segment: String, channelId: String?, userId: String? = nil) async -> [MessageToken] {
     var tokens: [MessageToken] = []
     for word in segment.components(separatedBy: " ") {
         guard !word.isEmpty else { continue }
@@ -193,7 +196,7 @@ func tokenizeChatSegment(_ segment: String, channelId: String?) async -> [Messag
             tokens.append(.link(word))
         } else if word.hasPrefix("@") && word.count > 1 {
             tokens.append(.mention(String(word.dropFirst())))
-        } else if let emote = await EmoteService.shared.resolve(name: word, channelId: channelId) {
+        } else if let emote = await EmoteService.shared.resolve(name: word, channelId: channelId, userId: userId) {
             tokens.append(.emote(emote))
         } else {
             tokens.append(.text(word))

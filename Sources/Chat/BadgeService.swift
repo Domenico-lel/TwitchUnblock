@@ -10,6 +10,10 @@ actor BadgeService {
     private var channel: [String: [String: [String: String]]] = [:]   // channelId → setId → version → url
     private var globalsLoaded = false
     private var loadedChannels: Set<String> = []
+    /// Titre et description (« Moderator », « 3-Month Subscriber »…), pour la
+    /// fiche d'un badge touché. Clé : "set/version" ; canal puis global.
+    private var globalTitles: [String: (String, String)] = [:]
+    private var channelTitles: [String: [String: (String, String)]] = [:]
 
     /// Vide les badges chargés pour forcer un rechargement complet.
     func reset() {
@@ -36,6 +40,7 @@ actor BadgeService {
               let sets = json["data"] as? [[String: Any]] else { await loadGlobalPublic(); return }
 
         global = parseSets(sets)
+        globalTitles = titlesHelix(sets)
         globalsLoaded = true
         logger.success("BADGES", "Badges globaux chargés", "\(global.count) sets")
     }
@@ -60,6 +65,7 @@ actor BadgeService {
         }
 
         channel[channelId] = parseSets(sets)
+        channelTitles[channelId] = titlesHelix(sets)
         logger.success("BADGES", "Badges canal \(channelId) chargés",
                        "\(channel[channelId]?.count ?? 0) sets")
     }
@@ -93,20 +99,22 @@ actor BadgeService {
 
     private func loadGlobalPublic() async {
         guard !globalsLoaded,
-              let d = await gqlBadges("query { badges { setID version imageURL(size: DOUBLE) } }", [:]),
+              let d = await gqlBadges("query { badges { setID version title description imageURL(size: DOUBLE) } }", [:]),
               let list = d["badges"] as? [[String: Any]], !list.isEmpty else { return }
         global = parseGQL(list)
+        globalTitles = titlesGQL(list)
         globalsLoaded = true
         logger.success("BADGES", "Badges globaux chargés (GQL)", "\(global.count) sets")
     }
 
     private func loadChannelPublic(channelId: String) async {
         guard let d = await gqlBadges(
-                "query($id: ID!) { user(id: $id) { broadcastBadges { setID version imageURL(size: DOUBLE) } } }",
+                "query($id: ID!) { user(id: $id) { broadcastBadges { setID version title description imageURL(size: DOUBLE) } } }",
                 ["id": channelId]),
               let user = d["user"] as? [String: Any],
               let list = user["broadcastBadges"] as? [[String: Any]] else { return }
         channel[channelId] = parseGQL(list)
+        channelTitles[channelId] = titlesGQL(list)
         logger.success("BADGES", "Badges canal \(channelId) chargés (GQL)", "\(channel[channelId]?.count ?? 0) sets")
     }
 
@@ -123,6 +131,36 @@ actor BadgeService {
 
         // CDN statique : fonctionne pour broadcaster, moderator, staff, vip…
         return "https://static-cdn.jtvnw.net/badges/v1/\(setId)/\(version)/2"
+    }
+
+    /// Titre et description d'un badge (canal d'abord), nil si inconnu.
+    func info(badgeId: String, channelId: String?) -> (title: String, description: String)? {
+        if let cid = channelId, let t = channelTitles[cid]?[badgeId] { return (t.0, t.1) }
+        if let t = globalTitles[badgeId] { return (t.0, t.1) }
+        return nil
+    }
+
+    private func titlesHelix(_ sets: [[String: Any]]) -> [String: (String, String)] {
+        var map: [String: (String, String)] = [:]
+        for set in sets {
+            guard let setId = set["set_id"] as? String,
+                  let versions = set["versions"] as? [[String: Any]] else { continue }
+            for v in versions {
+                guard let vid = v["id"] as? String, let title = v["title"] as? String, !title.isEmpty else { continue }
+                map["\(setId)/\(vid)"] = (title, v["description"] as? String ?? "")
+            }
+        }
+        return map
+    }
+
+    private func titlesGQL(_ list: [[String: Any]]) -> [String: (String, String)] {
+        var map: [String: (String, String)] = [:]
+        for b in list {
+            guard let set = b["setID"] as? String, let v = b["version"] as? String,
+                  let title = b["title"] as? String, !title.isEmpty else { continue }
+            map["\(set)/\(v)"] = (title, b["description"] as? String ?? "")
+        }
+        return map
     }
 
     // MARK: – Parsing helper

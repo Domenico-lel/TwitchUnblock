@@ -402,7 +402,8 @@ final class ChatService: NSObject, ObservableObject {
             twitchEmotesByRange[range] = emote
         }
 
-        let tokens = await tokenize(text: text, twitchRanges: twitchEmotesByRange, channelId: channelId)
+        let tokens = await tokenize(text: text, twitchRanges: twitchEmotesByRange, channelId: channelId,
+                                    userId: irc.userId)
 
         // Le rejeu n'a pas de tag `login` fiable : on retombe sur le préfixe IRC.
         let login = irc.tags["login"] ?? irc.prefixNick ?? ""
@@ -460,7 +461,8 @@ final class ChatService: NSObject, ObservableObject {
                     source: .twitch)
                 await EmoteService.shared.registerTwitchEmote(id: emoteId, name: name)
             }
-            tokens = await tokenize(text: text, twitchRanges: byRange, channelId: channelId)
+            tokens = await tokenize(text: text, twitchRanges: byRange, channelId: channelId,
+                                    userId: irc.userId)
         }
 
         guard !systemMsg.isEmpty || !tokens.isEmpty else { return nil }
@@ -616,7 +618,8 @@ final class ChatService: NSObject, ObservableObject {
     private func tokenize(
         text: String,
         twitchRanges: [Range<String.Index>: TwitchEmote],
-        channelId: String?
+        channelId: String?,
+        userId: String? = nil
     ) async -> [MessageToken] {
         var tokens: [MessageToken] = []
         var currentIndex = text.startIndex
@@ -626,19 +629,19 @@ final class ChatService: NSObject, ObservableObject {
             guard range.lowerBound >= currentIndex else { continue }
             if range.lowerBound > currentIndex {
                 tokens += await tokenizeText(String(text[currentIndex..<range.lowerBound]),
-                                             channelId: channelId)
+                                             channelId: channelId, userId: userId)
             }
             if let emote = twitchRanges[range] { tokens.append(.emote(emote)) }
             currentIndex = range.upperBound
         }
         if currentIndex < text.endIndex {
-            tokens += await tokenizeText(String(text[currentIndex...]), channelId: channelId)
+            tokens += await tokenizeText(String(text[currentIndex...]), channelId: channelId, userId: userId)
         }
         return tokens
     }
 
-    private func tokenizeText(_ segment: String, channelId: String?) async -> [MessageToken] {
-        await tokenizeChatSegment(segment, channelId: channelId)
+    private func tokenizeText(_ segment: String, channelId: String?, userId: String? = nil) async -> [MessageToken] {
+        await tokenizeChatSegment(segment, channelId: channelId, userId: userId)
     }
 
     // MARK: – Moderation

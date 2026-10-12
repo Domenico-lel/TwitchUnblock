@@ -16,6 +16,8 @@ struct VodChatView: View {
     @State private var autoScroll      = true
     @State private var sentinelVisible = true
     @State private var isDragging      = false
+    /// Emote ou badge touché : sa fiche (nom exact, source).
+    @State private var infoItem: ChatInfoItem? = nil
 
     private let bottomAnchor = "vod_chat_bottom"
 
@@ -150,5 +152,9 @@ struct VodChatView: View {
             Task { await vod.update(offset: playbackTime) }
         }
         .onDisappear { vod.stop() }
+        .sheet(item: $infoItem) { item in
+            ChatInfoSheet(item: item, channelId: vod.channelId).environmentObject(store)
+        }
+        .environment(\.chatInfoAction, { infoItem = $0 })
     }
 }
