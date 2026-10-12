@@ -600,6 +600,7 @@ let kRussianStrings: [String: String] = [
     "icon_neon": "Неон",
     "multi_title": "Мульти-просмотр",
     "multi_add": "Добавить в мульти-просмотр",
+    "pin_streamer": "Закрепить вверху подписок", "unpin_streamer": "Открепить",
     "multi_remove": "Убрать из мульти-просмотра",
     "multi_add_sub": "до 4 трансляций рядом",
     "multi_full": "Не больше 4 трансляций",

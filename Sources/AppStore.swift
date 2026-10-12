@@ -336,6 +336,20 @@ final class AppStore: ObservableObject {
         else if !l.isEmpty { localFollows.insert(l, at: 0) }
     }
 
+    /// Streamers épinglés (en minuscules) : en tête des suivis, en live comme
+    /// hors ligne, dans l'ordre où on les a épinglés. Sur cet appareil.
+    @Published var pinnedStreamers: [String] = [] {
+        didSet { UserDefaults.standard.set(pinnedStreamers, forKey: "pinned_streamers") }
+    }
+    func isPinned(_ login: String) -> Bool { pinnedStreamers.contains(login.lowercased()) }
+    /// Rang d'épinglage, nil si la chaîne n'est pas épinglée.
+    func pinRank(_ login: String) -> Int? { pinnedStreamers.firstIndex(of: login.lowercased()) }
+    func togglePin(_ login: String) {
+        let l = login.lowercased()
+        if let i = pinnedStreamers.firstIndex(of: l) { pinnedStreamers.remove(at: i) }
+        else if !l.isEmpty { pinnedStreamers.append(l) }
+    }
+
     /// Accueil : chaînes en grille (cartes) ou en liste (façon Twitch).
     @Published var homeListLayout: Bool = false {
         didSet { UserDefaults.standard.set(homeListLayout, forKey: "cfg_home_list") }
@@ -519,6 +533,7 @@ final class AppStore: ObservableObject {
         topLang            = ud.string(forKey: "cfg_top_lang")
         categoryLang       = ud.string(forKey: "cfg_category_lang").flatMap { TopLanguage.codes.contains($0) ? $0 : nil }
         localFollows       = ud.stringArray(forKey: "local_follows") ?? []
+        pinnedStreamers    = ud.stringArray(forKey: "pinned_streamers") ?? []
         followedCategories = (ud.array(forKey: "followed_categories") as? [[String: String]] ?? []).compactMap { d in
             guard let id = d["id"] else { return nil }
             return TwitchCategory(id: id, name: d["name"] ?? "", boxArtURL: d["box"] ?? "")

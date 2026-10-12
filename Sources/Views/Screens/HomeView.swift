@@ -101,26 +101,48 @@ struct HomeView: View {
 
     // MARK: – Accueil (avec ou sans compte)
     /// Suivis du compte Twitch et de cet appareil, sans doublon, mêlés et
-    /// triés par audience comme sur Twitch (pas relégués en bas).
+    /// triés par audience comme sur Twitch (pas relégués en bas) ; les
+    /// streamers épinglés passent devant, dans l'ordre d'épinglage.
     private var allFollowedLive: [TwitchStream] {
         let known = Set(followedStreams.map { $0.userLogin.lowercased() })
         return (followedStreams + localLive.filter { !known.contains($0.userLogin.lowercased()) })
-            .sorted { $0.viewerCount > $1.viewerCount }
+            .sorted { a, b in
+                pinnedFirst(a.userLogin, b.userLogin) ?? (a.viewerCount > b.viewerCount)
+            }
     }
 
-    /// Grille de cartes ou liste, selon le réglage.
-    @ViewBuilder private func streamsBlock(_ streams: [TwitchStream]) -> some View {
+    /// Ordre imposé par l'épinglage (nil : aucun des deux n'est épinglé).
+    private func pinnedFirst(_ a: String, _ b: String) -> Bool? {
+        switch (store.pinRank(a), store.pinRank(b)) {
+        case let (x?, y?): return x < y
+        case (.some, nil): return true
+        case (nil, .some): return false
+        case (nil, nil): return nil
+        }
+    }
+
+    /// Hors ligne : les épinglés d'abord, puis par nom.
+    private var sortedOffline: [ChannelBrief] {
+        offlineChannels.sorted { a, b in
+            pinnedFirst(a.login, b.login)
+                ?? (a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending)
+        }
+    }
+
+    /// Grille de cartes ou liste, selon le réglage. `pinnable` : chaînes
+    /// suivies, qu'on peut épingler en tête (appui long).
+    @ViewBuilder private func streamsBlock(_ streams: [TwitchStream], pinnable: Bool = false) -> some View {
         if store.homeListLayout {
             LazyVStack(spacing: TSpace.md) {
                 ForEach(streams) { stream in
-                    StreamRowView(stream: stream) { onPlayStream(stream.userLogin) }
+                    StreamRowView(stream: stream, pinnable: pinnable) { onPlayStream(stream.userLogin) }
                 }
             }
             .padding(.horizontal, TSpace.lg)
         } else {
             LazyVGrid(columns: columns, spacing: TSpace.md) {
                 ForEach(streams) { stream in
-                    StreamCardView(stream: stream) { onPlayStream(stream.userLogin) }
+                    StreamCardView(stream: stream, pinnable: pinnable) { onPlayStream(stream.userLogin) }
                 }
             }
             .padding(.horizontal, TSpace.lg)
@@ -281,7 +303,7 @@ struct HomeView: View {
         } else if let err = errorFollowed, followed.isEmpty, offlineChannels.isEmpty {
             TEmptyState(icon: "exclamationmark.triangle", title: err)
         } else if !followed.isEmpty {
-            streamsBlock(followed)
+            streamsBlock(followed, pinnable: true)
         } else if store.twitchToken == nil && store.localFollows.isEmpty {
             TEmptyState(icon: "heart",
                         title: store.t("local_follow_empty"),
@@ -306,7 +328,7 @@ struct HomeView: View {
         if !offlineChannels.isEmpty {
             TSectionHeader("\(store.t("offline_channels")) · \(offlineChannels.count)", icon: "moon.fill")
             LazyVStack(spacing: 2) {
-                ForEach(offlineChannels) { offlineRow($0) }
+                ForEach(sortedOffline) { offlineRow($0) }
             }
             .padding(.horizontal, TSpace.lg)
         } else if !followsLoaded {
@@ -334,10 +356,13 @@ struct HomeView: View {
                 .clipShape(Circle())
                 .opacity(0.75)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(ch.name)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.tText)
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        if store.isPinned(ch.login) { PinnedMark() }
+                        Text(ch.name)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.tText)
+                            .lineLimit(1)
+                    }
                     if let end = ch.lastEnd {
                         let label = offlineLabel(since: end, store: store)
                         if !label.isEmpty {
@@ -362,6 +387,7 @@ struct HomeView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu { PinStreamerMenuButton(login: ch.login) }
     }
 
     // MARK: – Onglet « Top »

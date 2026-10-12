@@ -84,6 +84,8 @@ struct OneLineLayout: Layout {
 // MARK: – Carte de direct
 struct StreamCardView: View {
     let stream: TwitchStream
+    /// Chaîne suivie : l'appui long propose de l'épingler en tête.
+    var pinnable = false
     let onPress: () -> Void
     @EnvironmentObject private var store: AppStore
 
@@ -133,10 +135,13 @@ struct StreamCardView: View {
 
                     // Le pseudo ouvre la chaîne (comme sur Twitch), la carte le direct.
                     Button { store.openChannelPage(stream.userLogin) } label: {
-                        Text(stream.userName)
-                            .font(.tMeta)
-                            .foregroundColor(.tPurple)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            if pinnable && store.isPinned(stream.userLogin) { PinnedMark() }
+                            Text(stream.userName)
+                                .font(.tMeta)
+                                .foregroundColor(.tPurple)
+                                .lineLimit(1)
+                        }
                     }
                     .buttonStyle(.plain)
 
@@ -161,7 +166,37 @@ struct StreamCardView: View {
             .cornerRadius(TRadius.card)
         }
         .buttonStyle(.plain)
-        .contextMenu { MultiLiveMenuButton(login: stream.userLogin, name: stream.userName) }
+        .contextMenu {
+            MultiLiveMenuButton(login: stream.userLogin, name: stream.userName)
+            if pinnable { PinStreamerMenuButton(login: stream.userLogin) }
+        }
+    }
+}
+
+// MARK: – Épingler un streamer
+/// Appui long sur une chaîne suivie : l'épingler en tête des suivis, ou l'en retirer.
+struct PinStreamerMenuButton: View {
+    let login: String
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        let pinned = store.isPinned(login)
+        Button { withAnimation { store.togglePin(login) } } label: {
+            Label(store.t(pinned ? "unpin_streamer" : "pin_streamer"),
+                  systemImage: pinned ? "pin.slash" : "pin")
+        }
+    }
+}
+
+/// Petite punaise devant le nom d'une chaîne épinglée.
+struct PinnedMark: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        Image(systemName: "pin.fill")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(.tPrimary)
+            .accessibilityLabel(store.t("pinned_short"))
     }
 }
 
@@ -507,6 +542,8 @@ struct ChannelHeroView: View {
 /// Miniature à gauche, infos à droite : plus de chaînes visibles d'un coup.
 struct StreamRowView: View {
     let stream: TwitchStream
+    /// Chaîne suivie : l'appui long propose de l'épingler en tête.
+    var pinnable = false
     let onPress: () -> Void
     @EnvironmentObject private var store: AppStore
 
@@ -536,10 +573,13 @@ struct StreamRowView: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Button { store.openChannelPage(stream.userLogin) } label: {
-                        Text(stream.userName)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.tText)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            if pinnable && store.isPinned(stream.userLogin) { PinnedMark() }
+                            Text(stream.userName)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.tText)
+                                .lineLimit(1)
+                        }
                     }
                     .buttonStyle(.plain)
                     Text(stream.title)
@@ -563,6 +603,9 @@ struct StreamRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contextMenu { MultiLiveMenuButton(login: stream.userLogin, name: stream.userName) }
+        .contextMenu {
+            MultiLiveMenuButton(login: stream.userLogin, name: stream.userName)
+            if pinnable { PinStreamerMenuButton(login: stream.userLogin) }
+        }
     }
 }
