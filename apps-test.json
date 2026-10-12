@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.4",
+          "buildVersion": "282",
+          "date": "2026-10-12",
+          "localizedDescription": "- In landscape, the chat now shows the pinned message, polls, predictions and raids, plus a card when the channel has drops (reward, watch time, end date, details) that you can dismiss (Settings → Customize → Channel drops).\n- Tap an emote or a badge in the chat to see its exact name and where it comes from (Twitch, BetterTTV, FrankerFaceZ, 7TV), then copy it or add it to your message.\n- BetterTTV: personal emotes of BTTV Pro users show up once BTTV announces them, and emotes added to the channel during the stream appear right away.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-282/TwitchUnblock.ipa",
+          "size": 2999926,
+          "commit": "1be4bc2fd48bd874200f4ac91ba05b67000feef1"
+        },
+        {
           "version": "1.3.3",
           "buildVersion": "281",
           "date": "2026-10-12",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-250/TwitchUnblock.ipa",
           "size": 2319397,
           "commit": "4c6ea9b0e3c8d3a0922acae89967591d030f4f5d"
-        },
-        {
-          "version": "1.2.25",
-          "buildVersion": "249",
-          "date": "2026-10-11",
-          "localizedDescription": "- Choose the live source (Luminous Asia, Luminous Europe, Albania proxy or official Twitch) in Settings → Player or from the player's ⋯ menu, which also shows the source in use.\n- Stream tags (language, DropsEnabled…) under live streams, like on Twitch.\n- Category search puts the exact match first (VALORANT for “valorant”) and shows sharp box art.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-249/TwitchUnblock.ipa",
-          "size": 2312787,
-          "commit": "908bf2d18ab440597317af35a53b6a4129666600"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.3",
+      "version": "1.3.4",
       "versionDate": "2026-10-12",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-281/TwitchUnblock.ipa",
-      "size": 2948252
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-282/TwitchUnblock.ipa",
+      "size": 2999926
     }
   ],
   "news": []
