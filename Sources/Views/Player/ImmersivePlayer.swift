@@ -259,6 +259,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // Laisse le flux démarrer (quelques secondes) avant d'ajuster.
         guard Date().timeIntervalSince(lastCatchUp) > 4 else { return }
         latency.adjust(player: player, item: item, behind: endTime - position,
+                       total: currentDate.map { Date().timeIntervalSince($0) },
                        enabled: lowLatency && isLive && isPlaying && endTime > 0)
     }
 
@@ -275,7 +276,10 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     func seek(to s: Double, exact: Bool = true) {
         guard endTime > startTime else { return }
-        let clamped = max(startTime, min(endTime, s))
+        // Direct : jamais plus près du bord que le plancher du retard (4 s
+        // affichées, voir LiveLatencyController).
+        let ceiling = isLive ? endTime - (player.currentItem.map { latency.minBehind(for: $0) } ?? 6) : endTime
+        let clamped = max(startTime, min(max(startTime, ceiling), s))
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
                     toleranceBefore: exact ? .zero : .positiveInfinity,
                     toleranceAfter:  exact ? .zero : .positiveInfinity)
@@ -288,8 +292,8 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     func goLive() {
         // Même recul que la tenue du direct : plus près sur une playlist
-        // relue toutes les 2 s (mode faible latence).
-        let back = player.currentItem.map { LiveLatencyController.target(for: $0) } ?? 6
+        // relue toutes les 2 s (mode faible latence), jamais sous le plancher.
+        let back = player.currentItem.map { latency.minBehind(for: $0) } ?? 6
         seek(to: endTime - back, exact: false)
         if !isPlaying { togglePlay() }
     }

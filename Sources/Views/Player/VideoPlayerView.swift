@@ -111,7 +111,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                   liveEdge.isValid, liveEdge.isNumeric,
                   Date().timeIntervalSince(lastCatchUp) > 4 else { return }
             let behind = (liveEdge - item.currentTime()).seconds
-            latency.adjust(player: player, item: item, behind: behind, enabled: player.rate > 0)
+            latency.adjust(player: player, item: item, behind: behind,
+                           total: item.currentDate().map { Date().timeIntervalSince($0) },
+                           enabled: player.rate > 0)
         }
 
         // MARK: Plein écran — maintient PlayerFullscreen.isActive à jour

@@ -615,9 +615,8 @@ struct MainTabView: View {
             chatPane(style: chatStyle)
                 .frame(width: chatWidth)
                 .frame(maxHeight: .infinity)
-                // Un trait marque le bord du chat dans les deux dispositions :
-                // posé sur l'image, sans lui, on ne sait plus où il commence.
-                // Il sert aussi de poignée de redimensionnement.
+                // Bord du chat : une petite poignée pour régler sa largeur,
+                // sans trait au repos (le chat se fond dans l'image).
                 .overlay(alignment: .leading) {
                     if split { chatResizeHandle(totalWidth: size.width) }
                 }
@@ -627,23 +626,23 @@ struct MainTabView: View {
         }
     }
 
-    /// Trait de séparation vidéo / chat, qui se saisit pour régler la largeur.
+    /// Poignée du bord vidéo / chat, qui se saisit pour régler la largeur.
     ///
-    /// Le trait visible reste fin ; c'est une bande transparente de 24 pt qui
-    /// reçoit le geste, sous peine de viser un fil de 2 pt avec un pouce.
+    /// Au repos, pas de trait (violet sur l'image, il coupait le chat de la
+    /// vidéo) : seule une petite poignée discrète. Le trait n'apparaît que
+    /// pendant qu'on tire. Une bande transparente de 28 pt reçoit le geste,
+    /// sous peine de viser un fil avec un pouce.
     @ViewBuilder
     private func chatResizeHandle(totalWidth: CGFloat) -> some View {
-        let overlaying = store.landscapeChat == .overlay
-        let dragging   = chatDragRatio != nil
+        let dragging = chatDragRatio != nil
         Rectangle()
-            .fill(dragging ? Color.tPrimary
-                           : (overlaying ? Color.tPrimary.opacity(0.75) : Color.tBorder))
-            .frame(width: overlaying || dragging ? 2 : 1)
+            .fill(dragging ? Color.tPrimary : Color.clear)
+            .frame(width: dragging ? 2 : 1)
             .overlay {
                 // Sans repère, personne ne devine qu'on peut tirer.
                 Capsule()
-                    .fill(Color.white.opacity(dragging ? 0.95 : 0.35))
-                    .frame(width: dragging ? 5 : 4, height: dragging ? 48 : 36)
+                    .fill(Color.white.opacity(dragging ? 0.95 : 0.22))
+                    .frame(width: dragging ? 5 : 3, height: dragging ? 48 : 28)
             }
             .overlay {
                 Color.clear

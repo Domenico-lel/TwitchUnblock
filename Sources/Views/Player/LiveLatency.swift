@@ -12,9 +12,21 @@ import AVFoundation
 //   • sinon, vitesse normale.
 // La cible ne descend jamais sous le recul recommandé par le flux : plus près,
 // AVPlayer joue dans des segments pas encore chargés et cale en boucle.
+//
+// Plancher : le retard affiché (heure − horodatage du segment lu) ne passe
+// jamais sous 4 s — en dessous, la lecture cale (retour d'utilisateurs). Ce
+// retard, c'est notre distance au bord jouable plus le délai de Twitch avant
+// de publier un segment, qui change d'une chaîne à l'autre : la cible sur le
+// bord est relevée d'autant, et un passage sous le seuil recule aussitôt.
 struct LiveLatencyController {
     private var lastSeek = Date.distantPast
+    private var lastFloorSeek = Date.distantPast
     private(set) var speedingUp = false
+    /// Retard affiché minimal (s).
+    static let minDelay: Double = 4
+    /// Distance au bord jouable qu'il faut garder pour rester au-dessus de
+    /// `minDelay`, d'après le dernier retard mesuré (0 tant qu'on ne sait pas).
+    private(set) var floorBehind: Double = 0
 
     /// Retard visé par rapport au bord jouable. Le recul recommandé par AVPlayer
     /// vaut trois fois la durée cible de la playlist : 18 s sur une playlist
@@ -26,14 +38,35 @@ struct LiveLatencyController {
         return min(8, max(3.5, r - 2))
     }
 
+    /// Recul à garder sur le bord jouable : la cible du flux, ou plus pour
+    /// tenir le plancher du retard affiché.
+    func minBehind(for item: AVPlayerItem) -> Double { max(Self.target(for: item), floorBehind) }
+
     /// `behind` : secondes entre la position et le bord jouable (fin de la
-    /// plage cherchable). À appeler deux fois par seconde environ.
-    mutating func adjust(player: AVPlayer, item: AVPlayerItem, behind: Double, enabled: Bool) {
+    /// plage cherchable). `total` : retard affiché (heure − horodatage du
+    /// segment lu), nil sans horodatage. À appeler deux fois par seconde environ.
+    mutating func adjust(player: AVPlayer, item: AVPlayerItem, behind: Double, total: Double? = nil, enabled: Bool) {
         guard enabled, player.timeControlStatus == .playing, behind.isFinite else {
             if speedingUp { speedingUp = false; if player.rate > 1.01 { player.rate = 1 } }
             return
         }
-        let target = Self.target(for: item)
+        if let total, total.isFinite, total > 0 {
+            // Délai de publication de Twitch = retard total − distance au bord.
+            let publish = max(0, total - behind)
+            floorBehind = min(10, max(0, Self.minDelay + 0.5 - publish))
+            if total < Self.minDelay - 0.2, Date().timeIntervalSince(lastFloorSeek) > 8 {
+                // Trop près : on recule tout de suite au-dessus du plancher.
+                lastFloorSeek = Date()
+                speedingUp = false
+                player.rate = 1
+                let back = CMTime(seconds: Self.minDelay + 0.5 - total, preferredTimescale: 600)
+                player.seek(to: player.currentTime() - back,
+                            toleranceBefore: .zero, toleranceAfter: .positiveInfinity)
+                logger.debug("LIVE", "Plancher du direct", String(format: "%.1f s de retard", total))
+                return
+            }
+        }
+        let target = minBehind(for: item)
         if behind > target + 15, Date().timeIntervalSince(lastSeek) > 20 {
             // Grosse dérive : on recolle d'un coup, au recul recommandé.
             lastSeek = Date()
