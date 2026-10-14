@@ -109,12 +109,11 @@ private func workerVariants(_ value: Any?) -> [String: VariantInfo] {
 }
 
 // MARK: – GQL
-/// `clientID` : kGQLNextClientID seulement pour la page suivante d'une liste.
-private func twitchGQL(_ query: String, clientID: String = kGQLClientID) async throws -> Any {
+private func twitchGQL(_ query: String) async throws -> Any {
     guard let url = URL(string: "https://gql.twitch.tv/gql") else { throw URLError(.badURL) }
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
-    req.setValue(clientID, forHTTPHeaderField: "Client-ID")
+    req.setValue(kGQLClientID, forHTTPHeaderField: "Client-ID")
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue(requestHeaders["User-Agent"], forHTTPHeaderField: "User-Agent")
     req.setValue("MkMq8a9\(Int.random(in: 100000...999999))", forHTTPHeaderField: "Device-ID")
@@ -573,8 +572,9 @@ func getChannelVideos(channelName: String, cursor: String? = nil) async -> (vide
 }
 
 /// Comme getChannelVideos, plus `refused` : Twitch a refusé la page suivante
-/// (intégrité). La page 1 passe par le Client-ID web, la suite par celui
-/// d'Android : avec le web, Twitch refuse tout au-delà des 100 premières.
+/// (intégrité, 400/401/403). La page 1 passe par le Client-ID web, la suite
+/// par celui d'Android (gqlNextRequest) : avec le web, Twitch refuse tout
+/// au-delà des 100 premières. Panne de la suite : `error` non nil, curseur gardé.
 func getChannelVideosPage(channelName: String, cursor: String? = nil) async
     -> (videos: [VodData], avatar: String?, error: String?, cursor: String?, refused: Bool) {
     logger.info("VIDEOS", "Chargement VODs de \"\(channelName)\"\(cursor != nil ? " (Page suivante)" : "")")
@@ -592,13 +592,23 @@ func getChannelVideosPage(channelName: String, cursor: String? = nil) async
     }
     """
 
-    let json = try? await twitchGQL(q, clientID: cursor == nil ? kGQLClientID : kGQLNextClientID) as? [String: Any]
-    if cursor != nil, let json, gqlIntegrityRefused(json) {
-        logger.warn("VIDEOS", "Twitch refuse la suite des VODs de \"\(channelName)\" (intégrité)")
-        return (videos: [], avatar: nil, error: nil, cursor: nil, refused: true)
+    let data: [String: Any]?
+    if let cursor {
+        // Suite : même règle que les autres listes (gqlNextRequest) : refus
+        // d'intégrité ou rejet en 400/401/403 = refus, nil = panne.
+        guard let page = await gqlNextRequest(q, [:]) else {
+            logger.warn("VIDEOS", "Suite des VODs de \"\(channelName)\" indisponible (réseau)")
+            return (videos: [], avatar: nil, error: "Réseau", cursor: cursor, refused: false)
+        }
+        if page.refused {
+            logger.warn("VIDEOS", "Twitch refuse la suite des VODs de \"\(channelName)\"")
+            return (videos: [], avatar: nil, error: nil, cursor: nil, refused: true)
+        }
+        data = page.data
+    } else {
+        data = (try? await twitchGQL(q) as? [String: Any])?["data"] as? [String: Any]
     }
-    guard let data = json?["data"] as? [String: Any],
-          let user = data["user"] as? [String: Any] else {
+    guard let user = data?["user"] as? [String: Any] else {
         logger.error("VIDEOS", "Streamer \"\(channelName)\" introuvable")
         return (videos: [], avatar: nil, error: "Streamer introuvable", cursor: nil, refused: false)
     }

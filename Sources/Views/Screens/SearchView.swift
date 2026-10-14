@@ -657,7 +657,15 @@ struct SearchView: View {
                 if clipsCursor != nil {
                     TLoadMoreButton(busy: loadingMoreClips) { Task { await loadMoreClips() } }
                 } else if clipsLocked {
-                    TListEndNote(key: "more_needs_login")
+                    if store.twitchToken != nil {
+                        // Connecté depuis le refus : Helix reprend du début.
+                        TLoadMoreButton(busy: loadingMoreClips) {
+                            clipsCursor = .helix(nil); clipsLocked = false
+                            Task { await loadMoreClips() }
+                        }
+                    } else {
+                        TListEndNote(key: "more_needs_login")
+                    }
                 }
             }
         }

@@ -499,26 +499,25 @@ struct HomeView: View {
     @MainActor private func loadTopStreams(_ l: TopLang, isRefresh: Bool = false) async {
         let lang = l == .local ? TopLanguage.resolved(store.topLang) : nil
         if topStreams.isEmpty && !isRefresh { loadingTop = true }
+        // Plus de « Charger plus » pendant le rechargement : l'ancienne suite
+        // n'est peut-être plus la bonne (autre langue), et la garde
+        // `topNext == after` de loadMoreTop écarte une page déjà en route.
+        topNext = nil
+        topRefused = false
         guard let token = store.twitchToken else {
             // Sans compte : même top, par la requête publique, par pages de
             // 30 ; la suite passe par le Client-ID d'Android (loadMoreTop).
-            // Chaque rechargement repart de la 1ʳᵉ page.
+            // Chaque rechargement repart de la 1ʳᵉ page ; en cas d'échec, la
+            // liste est gardée, sans suite.
             let page = await getTopStreamsPageGQL(lang: lang, after: nil)
             if let page, !page.streams.isEmpty {
                 topStreams = page.streams
                 topNext = page.next
-            } else {
-                // Liste gardée, mais sa suite n'est peut-être plus la bonne
-                // (autre langue) : pas de « Charger plus ».
-                topNext = nil
             }
-            topRefused = false
             loadingTop = false
             return
         }
         // Avec le compte : Helix, 50 lives d'un coup, sans suite.
-        topNext = nil
-        topRefused = false
         do {
             let fetched = try await getTopStreams(token: token, lang: lang)
             // Réseau capricieux : on ne vide jamais une liste déjà affichée.

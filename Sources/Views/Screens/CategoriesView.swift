@@ -232,7 +232,15 @@ struct CategoriesView: View {
                         if cursor != nil {
                             TLoadMoreButton(busy: loadingMore) { Task { await loadMore() } }
                         } else if locked {
-                            TListEndNote(key: "more_needs_login")
+                            if store.twitchToken != nil {
+                                // Connecté depuis le refus : Helix reprend du début.
+                                TLoadMoreButton(busy: loadingMore) {
+                                    cursor = .helix(nil); locked = false
+                                    Task { await loadMore() }
+                                }
+                            } else {
+                                TListEndNote(key: "more_needs_login")
+                            }
                         }
                     }
 
@@ -444,7 +452,15 @@ struct CategoryStreamsView: View {
                     if cursor != nil {
                         TLoadMoreButton(busy: loadingMore) { Task { await loadMore() } }
                     } else if locked {
-                        TListEndNote(key: "more_needs_login")
+                        if store.twitchToken != nil {
+                            // Connecté depuis le refus : Helix reprend du début.
+                            TLoadMoreButton(busy: loadingMore) {
+                                cursor = .helix(nil); locked = false
+                                Task { await loadMore() }
+                            }
+                        } else {
+                            TListEndNote(key: "more_needs_login")
+                        }
                     }
 
                     Spacer(minLength: 40)

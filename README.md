@@ -331,8 +331,8 @@ Installing it needs a Mac with Xcode and the Apple TV paired with it
 
 **No install? Use it in your browser: https://twitchunblock.vercel.app**
 
-No sideloading? Use it in your browser, or add it to your Home Screen: it
-opens like an app and gets live notifications (iOS 16.4+).
+No sideloading? Add the website to your Home Screen: it opens like an app
+and gets live notifications (iOS 16.4+).
 
 The website has its own repository, [TwitchUnblock-Web](https://github.com/MXFia19/TwitchUnblock-Web),
 and shares this app's backend (the Cloudflare Worker, which now lives there too).
