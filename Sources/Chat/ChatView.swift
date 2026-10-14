@@ -57,7 +57,9 @@ struct ChatView: View {
 
     private let bottomAnchor = "chat_bottom_anchor"   // sentinelle de bas de liste
 
-    private var canSendMessages: Bool { token != nil && login != nil }
+    /// Faux aussi en lecture seule (compte banni de ce chat) : plus de champ,
+    /// de sélecteur d'emotes, de réponse ni de commandes.
+    private var canSendMessages: Bool { token != nil && login != nil && !chat.readOnly }
     private var canSend: Bool {
         chat.isConnected && chat.isAuthenticated &&
         !messageText.trimmingCharacters(in: .whitespaces).isEmpty &&
@@ -76,9 +78,10 @@ struct ChatView: View {
                 // Seul le point dit l'état de la connexion : la place va aux
                 // pastilles utiles (synchro, série, suivre, épinglé).
                 Circle()
-                    .fill(chat.isConnected ? Color.tSuccess : Color.tDanger)
+                    .fill(chat.readOnly ? Color.tWarning : (chat.isConnected ? Color.tSuccess : Color.tDanger))
                     .frame(width: 7, height: 7)
-                    .accessibilityLabel(chat.isConnected ? store.t("chat_connected") : store.t("chat_connecting"))
+                    .accessibilityLabel(chat.readOnly ? store.t("chat_ban_banner")
+                                        : chat.isConnected ? store.t("chat_connected") : store.t("chat_connecting"))
                 Spacer(minLength: 4)
                 // Synchro auto : décalage appliqué au chat. Un appui le retouche
                 // d'une seconde : le bon réglage dépend aussi du retard des
@@ -510,7 +513,8 @@ struct ChatView: View {
             }
 
             // ── Barre d'envoi ───────────────────────────────────────
-            if canSendMessages { inputBar }
+            // Compte banni de ce chat : un bandeau à la place du champ.
+            if chat.readOnly { readOnlyBar } else if canSendMessages { inputBar }
         }
         .task(id: messageText) { await refreshEmoteSuggestions() }
         // Superposé à l'image : pas de fond opaque, mais un dégradé qui assombrit
@@ -955,6 +959,52 @@ struct ChatView: View {
             .padding(.horizontal, style.showsChrome ? 12 : 8)
             .padding(.top, style.showsChrome ? 8 : 4)
             .padding(.bottom, style.showsChrome ? 10 : 6)
+            .background(style.translucent ? Color.black.opacity(0.45) : Color.tCard)
+        }
+    }
+
+    /// Lecture seule : Twitch refuse le compte dans ce chat (banni), le chat
+    /// continue sans lui. Twitch ne prévient pas d'un déban sur l'IRC, d'où
+    /// le bouton qui retente avec le compte. Le menu « … » reste à portée.
+    private var readOnlyBar: some View {
+        VStack(spacing: 0) {
+            if !style.translucent { Divider().background(Color.tBorder) }
+            HStack(spacing: 8) {
+                Image(systemName: "nosign").font(.system(size: 12, weight: .bold))
+                Text(store.t("chat_ban_banner"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    chat.reconnect(token: token, login: login)
+                } label: {
+                    Text(store.t("chat_ban_retry"))
+                        .font(.system(size: 12, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Color.tWarning.opacity(0.18))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                Button {
+                    showChatMenu = true
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.tMuted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .foregroundColor(.tWarning)
+            .padding(.leading, style.showsChrome ? 12 : 8)
+            .padding(.trailing, style.showsChrome ? 4 : 2)
+            .padding(.vertical, 2)
+            .background(Color.tWarning.opacity(0.14))
+            .accessibilityElement(children: .contain)
             .background(style.translucent ? Color.black.opacity(0.45) : Color.tCard)
         }
     }

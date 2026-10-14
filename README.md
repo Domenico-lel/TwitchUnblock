@@ -135,6 +135,11 @@ no key to paste. The backend is already hosted and shared by every install.
   so a slow or blocked service no longer leaves it on “Connecting…”; after
   three failed attempts in a row, a line in the chat says so and points to
   **Reconnect chat**.
+* 🚫 **Banned from a chat? Still readable** — when Twitch refuses your account
+  in a channel's chat (banned), the chat keeps going read-only without your
+  account, with a banner in place of the message box and a **Retry with my
+  account** button for when you're unbanned (remembered until the app
+  closes). A timeout only adds a line saying for how long.
 * 😀 **Emotes** — Twitch, BetterTTV, FrankerFaceZ and 7TV, global and
   per-channel, animated (FrankerFaceZ included). BetterTTV's live connection
   adds the personal emotes of BTTV Pro users (once BTTV announces them, i.e.
@@ -293,7 +298,8 @@ no key to paste. The backend is already hosted and shared by every install.
   modes (followers only and for how long, subscribers only, emotes only, slow
   mode, verified account…); the channel's chat rules to accept before your
   first message, like on Twitch; and when Twitch refuses a message, it's
-  removed and the reason shown in your language instead of looking sent.
+  removed and the reason shown in your language instead of looking sent;
+  banned from the chat, it switches to read-only (see above).
 * 🌍 **Four languages** — English (default), French, Spanish and Russian. The
   Russian translation was made with AI: the app says so next to the language
   picker, with a button to report a mistake.
