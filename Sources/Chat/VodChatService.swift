@@ -104,8 +104,10 @@ final class VodChatService: ObservableObject {
         if hasNext, !fetching, fetchedUntil < offset + lookahead, Date() >= retryAt {
             // Rien encore reçu depuis le saut (première page en échec) : on
             // repart de la position de lecture, pas du début de la vidéo.
+            // Pas de sablier pour un nouvel essai : seule la page du saut
+            // l'affiche (sinon il alternerait avec le message d'erreur).
             let first = fetchedUntil < 0
-            await load(offset: Int(max(0, first ? offset : fetchedUntil)), firstPage: first)
+            await load(offset: Int(max(0, first ? offset : fetchedUntil)), firstPage: false)
         }
     }
 
@@ -176,12 +178,19 @@ final class VodChatService: ObservableObject {
             logger.error("VODCHAT", "Erreur GQL commentaires", msgs)
             return
         }
-        guard let data     = res["data"]       as? [String: Any],
-              let video    = data["video"]     as? [String: Any],
-              let comments = video["comments"] as? [String: Any],
-              let edges    = comments["edges"] as? [[String: Any]] else {
+        guard let data = res["data"] as? [String: Any] else {
             failed(nil)
             logger.warn("VODCHAT", "Structure de réponse inattendue", "\(res.keys.sorted())")
+            return
+        }
+        guard let video    = data["video"]     as? [String: Any],
+              let comments = video["comments"] as? [String: Any],
+              let edges    = comments["edges"] as? [[String: Any]] else {
+            // Réponse sans erreur mais sans commentaires (VOD supprimée, chat
+            // indisponible) : rien à charger, comme le site. Un nouvel essai
+            // toutes les 30 s n'y changerait rien.
+            hasNext = false
+            logger.warn("VODCHAT", "Pas de commentaires pour cette VOD", nil)
             return
         }
         failures = 0; retryAt = .distantPast; errorMsg = nil

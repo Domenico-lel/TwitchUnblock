@@ -4,8 +4,9 @@ import Foundation
 // ═══════════════════════════════════════════════════════════════════════════
 //  Chat d'une VOD gardé avec son téléchargement, pour être rejoué hors ligne.
 //
-//  Les commentaires du passage (GQL `video.comments`, par position puis par
-//  curseur) sont mis en forme comme dans le chat de VOD — badges, emotes
+//  Les commentaires du passage (GQL `video.comments`, par position : les
+//  pages se chevauchent, les doublons sont écartés ; le curseur est refusé
+//  par Twitch) sont mis en forme comme dans le chat de VOD — badges, emotes
 //  Twitch, 7TV, BTTV, FFZ — puis écrits dans chat.json. Leurs images sont
 //  gardées dans le dossier (chat-images/) : sans connexion, tout s'affiche.
 // ═══════════════════════════════════════════════════════════════════════════

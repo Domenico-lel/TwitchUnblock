@@ -314,8 +314,15 @@ final class TVChatModel: ObservableObject {
                   message { userColor fragments { text emote { emoteID } } } } } pageInfo { hasNextPage } } } }
                 """])
         }
-        guard let comments = ((res?["data"] as? [String: Any])?["video"] as? [String: Any])?["comments"] as? [String: Any],
-              let edges = comments["edges"] as? [[String: Any]] else { return nil }
+        guard let data = res?["data"] as? [String: Any] else { return nil }
+        guard let comments = (data["video"] as? [String: Any])?["comments"] as? [String: Any],
+              let edges = comments["edges"] as? [[String: Any]] else {
+            // Sans erreur mais sans commentaires (VOD supprimée, chat
+            // indisponible) : page vide et sans suite, le chat s'arrête comme
+            // sur le site. Avec une erreur : nouvel essai plus tard.
+            if ((res?["errors"] as? [[String: Any]]) ?? []).isEmpty { return ([], false) }
+            return nil
+        }
         let hasNext = (comments["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? false
         return (edges.compactMap { $0["node"] as? [String: Any] }, hasNext)
     }
