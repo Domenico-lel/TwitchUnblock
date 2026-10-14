@@ -115,7 +115,7 @@ final class ChatService: NSObject, ObservableObject {
         lastLogin = login
         // Remis à jour à chaque connexion : autre chaîne ou autre compte,
         // l'état d'avant ne vaut plus.
-        readOnly = Self.readOnlyKey(channelName, login).map { Self.readOnlyKeys.contains($0) } ?? false
+        prepare(channel: channelName, login: login)
         let asAccount = !readOnly
         roomModes = ChatRoomModes()
         rules = []
@@ -182,6 +182,13 @@ final class ChatService: NSObject, ObservableObject {
         connect(channel: channelName, token: token, login: login)
     }
 
+    /// Avant `connect` (le chat attend d'abord emotes et badges, jusqu'à
+    /// 3,5 s) : un salon déjà refusé à ce compte montre le bandeau tout de
+    /// suite au lieu du champ « Connecting… ».
+    func prepare(channel: String, login: String?) {
+        readOnly = Self.readOnlyKey(channel, login).map { Self.readOnlyKeys.contains($0) } ?? false
+    }
+
     /// Clé de la mémoire de séance ; nil sans compte.
     private static func readOnlyKey(_ channel: String, _ login: String?) -> String? {
         guard let login, !login.isEmpty, !channel.isEmpty else { return nil }
@@ -205,7 +212,19 @@ final class ChatService: NSObject, ObservableObject {
     /// `msg_banned` du JOIN fera passer en lecture seule.
     private func rejoinWithAccount(_ reason: String) {
         if let last = lastRejoin, Date().timeIntervalSince(last) < 15 {
-            logger.info("CHAT", "\(reason) à notre nom", "reconnexion récente, ignoré")
+            // Pas ignoré : un vrai ban peut suivre de près un premier signal
+            // (chat partagé). Reporté à la fin de la fenêtre, une fois ; toute
+            // reconnexion d'ici là (nouvelle génération) l'annule.
+            guard reconnectTask == nil else { return }
+            let wait = 15 - Date().timeIntervalSince(last)
+            let gen = generation
+            logger.info("CHAT", "\(reason) à notre nom", "reconnexion récente, reportée de \(Int(wait.rounded(.up))) s")
+            reconnectTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(max(wait, 0) * 1_000_000_000))
+                guard let self, !Task.isCancelled, self.generation == gen, !self.readOnly else { return }
+                self.reconnectTask = nil
+                self.rejoinWithAccount(reason)
+            }
             return
         }
         lastRejoin = Date()
@@ -371,8 +390,10 @@ final class ChatService: NSObject, ObservableObject {
         let delay = reconnectDelay
         reconnectDelay = min(reconnectDelay * 2, 30)
         // Plusieurs échecs d'affilée (jeton refusé par l'IRC, par ex.) : on
-        // repasse en lecture anonyme plutôt que de réessayer sans fin.
-        if delay >= 8 { lastToken = nil; lastLogin = nil }
+        // repasse en lecture anonyme plutôt que de réessayer sans fin. Déjà en
+        // lecture seule, on est anonyme : le compte est gardé, c'est lui qui
+        // retrouve la mémoire de séance (et le bandeau) à la reconnexion.
+        if delay >= 8, !readOnly { lastToken = nil; lastLogin = nil }
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))

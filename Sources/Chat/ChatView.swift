@@ -672,6 +672,8 @@ struct ChatView: View {
         // l'un après l'autre et sans délai propre, un service lent ou bloqué
         // laissait le champ sur « Connecting… ». Le reste arrive derrière.
         let cid = channelId, name = channelName, tok = token
+        // Salon déjà refusé à ce compte pendant la séance : bandeau d'emblée.
+        chat.prepare(channel: channelName, login: login)
         let assets = Task {
             await withTaskGroup(of: Void.self) { group in
                 group.addTask { await EmoteService.shared.loadGlobals() }
