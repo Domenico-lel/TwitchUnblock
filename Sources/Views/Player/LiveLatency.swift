@@ -9,9 +9,9 @@ import AVFoundation
 // rattrapage à ×1,1 (ajouté le 10/10, retiré le 14/10) est la piste principale des
 // signalements de son décalé de l'image, que seul un saut (+10 s, « Direct »)
 // remettait en place.
-//   • démarrage lent → un seul recalage, dès que la lecture part, avec la
-//     marge d'un segment (début du segment ≤ bord − cible − 1 s) : recaler
-//     pile sur la cible faisait caler ;
+//   • démarrage lent (plus de cible + 3 s) → un seul recalage, dès que la
+//     lecture part, avec la marge d'un segment (début du segment ≤ bord −
+//     cible − 1 s) : recaler pile sur la cible faisait caler ;
 //   • sortie de la fenêtre du direct → saut près du bord, même après un recul ;
 //   • dérive durable (coupure, pause longue) → saut près du bord si le retard
 //     dépasse la cible de 5 s pendant 4 s, au plus une fois toutes les 30 s
@@ -115,9 +115,13 @@ struct LiveLatencyController {
 
         let target = minBehind(for: item)
         // 2. Recalage du démarrage, une seule fois, dès que la lecture part.
+        //    Le saut atterrit au début d'un segment (2 s), donc entre cible + 1
+        //    et cible + 3 du bord : en deçà, il pourrait éloigner du bord. Un
+        //    recul déjà posé (barre avant le premier tick, faible latence
+        //    activée en cours de direct) n'est pas défait.
         if !aligned {
             aligned = true
-            if behind > target + 2 {
+            if !holdingBehind, behind > target + 3 {
                 jumpToEdge(player: player, item: item, target: target, behind: behind,
                            total: total, reason: "Recalage du direct")
                 return
