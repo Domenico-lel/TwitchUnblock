@@ -38,7 +38,7 @@ actor EmoteInfoService {
     private init() {}
 
     /// Réponses de Twitch, `emote: null` compris (nil gardé), jamais les
-    /// erreurs réseau : une panne passagère ne doit pas priver la fiche de
+    /// erreurs réseau ni GQL : une panne passagère ne doit pas priver la fiche de
     /// ses infos pour toute la séance.
     private var cache: [String: TwitchEmoteInfo?] = [:]
     private var order: [String] = []
@@ -72,6 +72,12 @@ actor EmoteInfoService {
         }
         // `data` présent : Twitch a répondu, même par `emote: null`.
         let info = (d["emote"] as? [String: Any]).flatMap(Self.parse)
+        // Erreur partielle (« service timeout »… avec `emote: null`) : réponse
+        // rendue mais pas gardée, la prochaine fiche redemandera.
+        if (json["errors"] as? [Any])?.isEmpty == false {
+            logger.debug("EMOTES", "Fiche d'emote Twitch : erreur GQL", id)
+            return info
+        }
         if cache[id] == nil { order.append(id) }
         cache.updateValue(info, forKey: id)
         if order.count > 300 { cache[order.removeFirst()] = nil }

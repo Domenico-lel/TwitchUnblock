@@ -16,6 +16,9 @@ actor EmoteService {
 
     private var twitchById:     [String: TwitchEmote] = [:]
     private var loadedChannels: Set<String> = []
+    /// Nom affiché de la chaîne (« Trymacs »), donné par FFZ ou 7TV : BTTV ne
+    /// le donne pas pour les emotes mises en ligne par la chaîne.
+    private var channelDisplayNames: [String: String] = [:]
 
     /// Emotes personnelles BTTV Pro, par identifiant Twitch de leur
     /// propriétaire (annoncées par BTTVLive) ; 500 personnes au plus.
@@ -43,6 +46,13 @@ actor EmoteService {
             group.addTask { await self.loadFFZChannel(channelId: channelId, channelName: channelName) }
             group.addTask { await self.load7TVChannel(channelId: channelId) }
         }
+        // Auteur des emotes BTTV de la chaîne : le login passé en repli
+        // (« trymacs ») devient le nom affiché, comme pour les emotes partagées.
+        if let shown = channelDisplayNames[channelId], shown != channelName,
+           var map = channelBTTV[channelId] {
+            for (key, e) in map where e.author == channelName { map[key]?.author = shown }
+            channelBTTV[channelId] = map
+        }
         let total = (channelBTTV[channelId]?.count ?? 0)
                   + (channelFFZ[channelId]?.count ?? 0)
                   + (channel7TV[channelId]?.count ?? 0)
@@ -58,7 +68,7 @@ actor EmoteService {
     func reset() {
         globalBTTV.removeAll(); globalFFZ.removeAll(); global7TV.removeAll()
         channelBTTV.removeAll(); channelFFZ.removeAll(); channel7TV.removeAll()
-        loadedChannels.removeAll()
+        loadedChannels.removeAll(); channelDisplayNames.removeAll()
         // twitchById est alimenté au fil des messages reçus : on le garde,
         // sinon les emotes Twitch des messages déjà affichés disparaîtraient.
     }
@@ -245,6 +255,9 @@ actor EmoteService {
               let (data, _) = try? await URLSession.shared.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sets = json["sets"] as? [String: Any] else { return }
+        if let shown = (json["room"] as? [String: Any])?["display_name"] as? String, !shown.isEmpty {
+            channelDisplayNames[channelId] = shown
+        }
         var map: [String: TwitchEmote] = [:]
         for (_, setValue) in sets {
             guard let setObj = setValue as? [String: Any],
@@ -290,6 +303,10 @@ actor EmoteService {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let setObj = json["emote_set"] as? [String: Any],
               let emotes = setObj["emotes"] as? [[String: Any]] else { return }
+        if channelDisplayNames[channelId] == nil,
+           let shown = json["display_name"] as? String, !shown.isEmpty {
+            channelDisplayNames[channelId] = shown
+        }
         var map: [String: TwitchEmote] = [:]
         for obj in emotes { if let e = stvEmote(obj, scope: .channel) { map[e.name] = e } }
         channel7TV[channelId] = map
