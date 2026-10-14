@@ -151,14 +151,21 @@ final class FollowService: ObservableObject {
     }
 
     private func sendUnfollow(token: String) async {
+        let target = channelId, who = login
         let res = await TwitchGQL.shared.mutation("FollowButton_UnfollowUser",
-                    variables: ["input": ["targetID": channelId]],
+                    variables: ["input": ["targetID": target]],
                     sha256: Self.hashUnfollow, token: token)
         if let d = res?["data"] as? [String: Any], let u = d["unfollowUser"], !(u is NSNull),
            res?["errors"] == nil {
-            isFollowing = false
-            logger.success("FOLLOW", "Ne suit plus @\(login)", nil)
-        } else { logger.warn("FOLLOW", "Unfollow échoué @\(login)", nil) }
+            logger.success("FOLLOW", "Ne suit plus @\(who)", nil)
+            // Réponse arrivée après un changement de chaîne : pas sur son état.
+            if isCurrent(target) { isFollowing = false }
+        } else { logger.warn("FOLLOW", "Unfollow échoué @\(who)", nil) }
+    }
+
+    /// La chaîne visée par une mutation est-elle toujours celle affichée ?
+    private func isCurrent(_ target: String) -> Bool {
+        channelId == target && localStore == nil
     }
 
     func toggle(token: String?) async {
@@ -173,13 +180,14 @@ final class FollowService: ObservableObject {
         if current {
             await sendUnfollow(token: token)
         } else {
+            let target = channelId, who = login
             let res = await TwitchGQL.shared.mutation("FollowButton_FollowUser",
-                        variables: ["input": ["disableNotifications": false, "targetID": channelId]],
+                        variables: ["input": ["disableNotifications": false, "targetID": target]],
                         sha256: Self.hashFollow, token: token)
             if let d = res?["data"] as? [String: Any], d["followUser"] != nil, res?["errors"] == nil {
-                isFollowing = true
-                logger.success("FOLLOW", "Suit @\(login)", nil)
-            } else { logger.warn("FOLLOW", "Follow échoué @\(login)", nil) }
+                logger.success("FOLLOW", "Suit @\(who)", nil)
+                if isCurrent(target) { isFollowing = true }
+            } else { logger.warn("FOLLOW", "Follow échoué @\(who)", nil) }
         }
     }
 }

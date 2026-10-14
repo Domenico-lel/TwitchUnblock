@@ -302,6 +302,15 @@ struct ChatView: View {
         events.prediction.flatMap { $0.locked || $0.winnerId != nil ? nil : $0.closesAt }
     }
 
+    /// Clés des événements présents (sondage, prédiction, hype train).
+    private var liveNoticeKeys: Set<String> {
+        var keys: Set<String> = []
+        if let p = events.poll { keys.insert(p.noticeKey) }
+        if let p = events.prediction { keys.insert(p.noticeKey) }
+        if let h = events.hype { keys.insert(h.noticeKey) }
+        return keys
+    }
+
     private func reopenClosedNotices() {
         withAnimation(.easeInOut(duration: 0.18)) { closedNotices = [] }
     }
@@ -581,12 +590,18 @@ struct ChatView: View {
             }
             // Sans ça, le bouton gardait le mode d'avant (appareil ou compte)
             // et ne faisait plus rien, en silence.
-            if store.showFollowButton { Task { await loadFollow() } }
+            // Bouton masqué : statut oublié, relu quand on le réactive.
+            if store.showFollowButton { Task { await loadFollow() } } else { follow.reset() }
         }
         // Bouton Suivre réactivé pendant le live : il revient tout de suite.
         .onChange(of: store.showFollowButton) { show in
             guard show, follow.isFollowing == nil else { return }
             Task { await loadFollow() }
+        }
+        // Événement terminé : sa fermeture (×) est oubliée, le suivant
+        // s'affiche même s'il reprend la même clé (id absent).
+        .onChange(of: liveNoticeKeys) { keys in
+            closedNotices.formIntersection(keys)
         }
         // ── Token OAuth mis à jour → reconnecte uniquement l'IRC ──────
         .onChange(of: store.twitchToken) { newToken in
