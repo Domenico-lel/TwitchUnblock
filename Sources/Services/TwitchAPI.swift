@@ -141,6 +141,113 @@ private func getAccessToken(id: String, isLive: Bool) async -> (value: String, s
     return (value, sig)
 }
 
+// MARK: – Jeton de lecture du compte
+/// Identifiant d'appareil gardé pour la session web (points, drops, jeton de
+/// lecture du compte) : même clé que ChannelPointsService et TwitchGQL.
+func twitchWebDeviceId() -> String {
+    if let d = UserDefaults.standard.string(forKey: "twitch_device_id") { return d }
+    let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    let d = String((0..<32).map { _ in chars.randomElement()! })
+    UserDefaults.standard.set(d, forKey: "twitch_device_id")
+    return d
+}
+
+/// Jeton de lecture d'un direct au nom du compte, et ce que Twitch y a écrit.
+struct AccountPlaybackToken {
+    let value: String
+    let signature: String
+    /// Twitch ne servira pas de pub à ce jeton (abonné à la chaîne, ou Turbo
+    /// quand la chaîne l'accepte) : `hide_ads`, ou `show_ads` faux.
+    let adFree: Bool
+    let subscriber: Bool?
+    /// Lecture refusée à ce compte (géoblocage…) : les proxys prennent la main.
+    let forbidden: Bool
+}
+
+enum AccountPlayback {
+    case token(AccountPlaybackToken)
+    /// Session web refusée par Twitch (401/403) : à revalider.
+    case expired
+    /// Rien d'utilisable : réseau, refus, ou jeton anonyme.
+    case unavailable
+}
+
+/// Jeton de lecture au nom du compte (`webToken` : session web, cookie
+/// `auth-token`), avec le Client-ID web. Sans jeton d'intégrité d'abord ; si
+/// Twitch en exige un, une seule autre tentative avec `integrity` — des types
+/// simples : ce fichier est compilé pour l'Apple TV, sans TwitchWebGQL ni
+/// DropsService (la TV ne l'appelle d'ailleurs jamais).
+/// Sert aux drops (DropsHeartbeat) et au direct sans pub des abonnés.
+func accountPlaybackToken(login: String, webToken: String,
+                          integrity: (() async -> (token: String, deviceId: String)?)? = nil) async -> AccountPlayback {
+    let q = """
+    query($l: String!) { streamPlaybackAccessToken(channelName: $l,
+      params: {platform: "web", playerBackend: "mediaplayer", playerType: "site"}) { value signature } }
+    """
+    let body: [String: Any] = ["query": q, "variables": ["l": login]]
+    var res = await accountGQL(body, webToken: webToken, integrity: nil)
+    if res.status == 401 || res.status == 403 { return .expired }
+    if gqlErrorText(res.json).lowercased().contains("integrity"), let integrity,
+       let it = await integrity() {
+        res = await accountGQL(body, webToken: webToken, integrity: it)
+        if res.status == 401 || res.status == 403 { return .expired }
+    }
+    guard let pat = (res.json?["data"] as? [String: Any])?["streamPlaybackAccessToken"] as? [String: Any],
+          let value = pat["value"] as? String,
+          let signature = pat["signature"] as? String else {
+        logger.warn("TOKEN", "Jeton du compte indisponible", gqlErrorText(res.json))
+        return .unavailable
+    }
+    // Un jeton anonyme (« user_id »: null) : session web expirée, ou ignorée.
+    guard value.range(of: #""user_id":\d"#, options: .regularExpression) != nil else {
+        logger.warn("TOKEN", "Jeton du compte anonyme", "session web expirée ?")
+        return .unavailable
+    }
+    let flags = (value.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) }
+                 as? [String: Any]) ?? [:]
+    let hideAds = flags["hide_ads"] as? Bool
+    let showAds = flags["show_ads"] as? Bool
+    let subscriber = flags["subscriber"] as? Bool
+    let turbo = flags["turbo"] as? Bool
+    let forbidden = (flags["authorization"] as? [String: Any])?["forbidden"] as? Bool ?? false
+    // Jamais déduit de `turbo` seul : une chaîne peut refuser Turbo, et ce
+    // jeton recevrait alors de vraies pubs.
+    let adFree = hideAds == true || showAds == false
+    func flag(_ b: Bool?) -> String { b.map { $0 ? "oui" : "non" } ?? "?" }
+    logger.info("TOKEN", "Jeton du compte pour \"\(login)\"",
+                "abonné \(flag(subscriber)) · turbo \(flag(turbo)) · hide_ads \(flag(hideAds)) · show_ads \(flag(showAds))"
+                + (forbidden ? " · lecture refusée" : ""))
+    return .token(AccountPlaybackToken(value: value, signature: signature, adFree: adFree,
+                                       subscriber: subscriber, forbidden: forbidden))
+}
+
+/// Requête GQL au nom du compte, 6 s au plus : elle part en même temps que
+/// les sources du direct et ne doit jamais les retarder longtemps.
+private func accountGQL(_ body: [String: Any], webToken: String,
+                        integrity: (token: String, deviceId: String)?) async -> (status: Int, json: [String: Any]?) {
+    guard let url = URL(string: "https://gql.twitch.tv/gql"),
+          let payload = try? JSONSerialization.data(withJSONObject: body) else { return (0, nil) }
+    var req = URLRequest(url: url, timeoutInterval: 6)
+    req.httpMethod = "POST"
+    req.setValue(kGQLClientID, forHTTPHeaderField: "Client-ID")
+    req.setValue("text/plain;charset=UTF-8", forHTTPHeaderField: "Content-Type")
+    req.setValue("OAuth \(webToken)", forHTTPHeaderField: "Authorization")
+    // Le jeton d'intégrité est lié à l'identifiant d'appareil qui l'a obtenu.
+    let device = integrity.flatMap { $0.deviceId.isEmpty ? nil : $0.deviceId } ?? twitchWebDeviceId()
+    req.setValue(device, forHTTPHeaderField: "X-Device-Id")
+    if let integrity { req.setValue(integrity.token, forHTTPHeaderField: "Client-Integrity") }
+    req.httpBody = payload
+    guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return (0, nil) }
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    guard status == 200, let obj = try? JSONSerialization.jsonObject(with: data) else { return (status, nil) }
+    return (status, (obj as? [[String: Any]])?.first ?? (obj as? [String: Any]))
+}
+
+/// Messages d'erreur GQL, en une ligne (vide s'il n'y en a pas).
+private func gqlErrorText(_ json: [String: Any]?) -> String {
+    ((json?["errors"] as? [[String: Any]]) ?? []).compactMap { $0["message"] as? String }.joined(separator: " · ")
+}
+
 // MARK: – Storyboard Hack
 private func storyboardHack(vodId: String) async -> QualityLinks {
     logger.info("STORYBOARD", "Tentative storyboard hack pour VOD \(vodId)")
@@ -348,7 +455,13 @@ func getM3U8(vodId: String) async -> M3U8Data {
 }
 
 // MARK: – getLive (STREAMS)
-func getLive(channelName: String) async -> LiveData {
+/// `webToken` (session web, iPhone seulement) : si Twitch sert ce compte sans
+/// pub sur cette chaîne (abonné, Turbo accepté), le direct passe par lui avant
+/// les proxys — qui reçoivent, eux aussi, les pauses pub de la chaîne. Jamais
+/// pour un compte qui aurait des pubs : il en recevrait de vraies, ciblées sur
+/// son adresse réelle. `integrity` : voir accountPlaybackToken.
+func getLive(channelName: String, webToken: String? = nil,
+             integrity: (() async -> (token: String, deviceId: String)?)? = nil) async -> LiveData {
     let login = channelName.trimmingCharacters(in: .whitespaces).lowercased()
     logger.info("LIVE", "Lancement stream \"\(login)\"")
 
@@ -365,6 +478,8 @@ func getLive(channelName: String) async -> LiveData {
     """
     async let streamTask = twitchGQL(q)
     async let tokenTask  = getAccessToken(id: login, isLive: true)
+    // En même temps que le reste : 6 s au plus (accountGQL).
+    async let accountTask = accountPlaybackIfAsked(login: login, webToken: webToken, integrity: integrity)
 
     guard let (streamJSON, token) = try? await (streamTask, tokenTask),
           let json = streamJSON as? [String: Any],
@@ -403,12 +518,37 @@ func getLive(channelName: String) async -> LiveData {
     }
 
     var found: MasterPlaylist = ([:], [:])
+    var usedSource: String? = nil
+    var webSessionExpired = false
+    var subscriber: Bool? = nil
+
+    // Compte sans pub sur cette chaîne : son flux officiel d'abord. S'il ne
+    // répond pas (géoblocage, réseau filtré), l'ordre habituel reprend.
+    switch await accountTask {
+    case .token(let pat):
+        subscriber = pat.subscriber
+        if pat.adFree && !pat.forbidden {
+            found = await usherLiveLinks(login: login, token: (value: pat.value, signature: pat.signature))
+            if !found.links.isEmpty {
+                usedSource = "account"
+                logger.success("LIVE", "✅ Direct par le compte (sans pub)", "\(found.links.count) qualités")
+            } else {
+                logger.warn("LIVE", "⚠️ Flux du compte indisponible", "sources habituelles…")
+            }
+        } else {
+            logger.info("LIVE", "Compte pas sans pub sur cette chaîne", "jeton anonyme, sources habituelles")
+        }
+    case .expired:
+        webSessionExpired = true
+        logger.warn("LIVE", "Session web refusée par Twitch", "sources habituelles")
+    case .unavailable:
+        break
+    }
 
     // Ordre des sources (Réglages → Lecteur, ou menu du lecteur) : essayées
     // l'une après l'autre, pour que le direct se lance quand même.
     let steps = liveSourceSteps()
     logger.info("LIVE", "Ordre des sources : \(steps.joined(separator: " → ").uppercased())")
-    var usedSource: String? = nil
     for src in steps where found.links.isEmpty {
         switch src {
         case "as":     found = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login)
@@ -427,7 +567,15 @@ func getLive(channelName: String) async -> LiveData {
     return LiveData(title: title, game: game, thumbnail: thumbnail, avatar: avatar,
                     userId: userId, links: found.links, viewerCount: viewerCount,
                     startedAt: startedAt, dvrVideoId: dvrVideoId, source: usedSource,
-                    variants: found.variants)
+                    variants: found.variants, webSessionExpired: webSessionExpired,
+                    subscriber: subscriber)
+}
+
+/// Jeton du compte seulement si on en a donné un (iPhone, réglage actif).
+private func accountPlaybackIfAsked(login: String, webToken: String?,
+                                    integrity: (() async -> (token: String, deviceId: String)?)?) async -> AccountPlayback {
+    guard let webToken, !webToken.isEmpty else { return .unavailable }
+    return await accountPlaybackToken(login: login, webToken: webToken, integrity: integrity)
 }
 
 // MARK: – Sources du direct
@@ -444,10 +592,13 @@ func liveSourceSteps() -> [String] {
     return order + kLiveSources.filter { !order.contains($0) } + ["worker"]
 }
 
-/// Miroirs Luminous (sans pub), essayés dans l'ordre ; vide si aucun ne répond.
+/// Miroirs Luminous, essayés dans l'ordre ; vide si aucun ne répond. Pas
+/// « sans pub » : les pré-rolls et les pauses pub de la chaîne y arrivent
+/// comme sur Twitch (écran « Commercial break in progress » ou vraie pub,
+/// cousus dans la playlist ; voir AdBreakMonitor).
 private func luminousLiveLinks(hosts: [String], login: String) async -> MasterPlaylist {
     for host in hosts {
-        logger.info("LIVE", "Tentative Luminous (Sans Pub)…", host)
+        logger.info("LIVE", "Tentative Luminous…", host)
         guard var comps = URLComponents(string: "https://\(host)/live/\(login)") else { continue }
         comps.queryItems = [
             .init(name: "allow_source",     value: "true"),
@@ -479,7 +630,7 @@ private func luminousLiveLinks(hosts: [String], login: String) async -> MasterPl
 }
 
 /// Proxy albanais (format TTV.LOL : la requête usher encodée après
-/// /playlist/<chaîne>.m3u8), sans pub lui aussi.
+/// /playlist/<chaîne>.m3u8). Mêmes pauses pub de la chaîne que Luminous.
 private func ttvlolLiveLinks(login: String) async -> MasterPlaylist {
     var allowed = CharacterSet.alphanumerics
     allowed.insert(charactersIn: "-._~")
@@ -487,7 +638,7 @@ private func ttvlolLiveLinks(login: String) async -> MasterPlaylist {
         .addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
     for host in kTTVLOLHosts {
         guard let url = URL(string: "https://\(host)/playlist/\(login).m3u8%3F\(query)") else { continue }
-        logger.info("LIVE", "Tentative proxy TTV.LOL (Sans Pub)…", host)
+        logger.info("LIVE", "Tentative proxy TTV.LOL…", host)
         var req = URLRequest(url: url, timeoutInterval: 10)
         req.setValue("https://ttv.lol/donate", forHTTPHeaderField: "X-Donate-To")
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
@@ -529,8 +680,10 @@ private func usherLiveLinks(login: String, token: (value: String, signature: Str
         .init(name: "token",                      value: token.value),
     ]
     if wantsLowLatency { logger.info("LIVE", "Mode faible latence demandé à Twitch") }
+    // 8 s au plus (au lieu des 60 s par défaut) : réseau filtré, la source
+    // suivante doit prendre le relais sans faire attendre.
     guard let url = comps.url,
-          let (data, resp) = try? await URLSession.shared.data(from: url),
+          let (data, resp) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 8)),
           (resp as? HTTPURLResponse)?.statusCode == 200,
           let body = String(data: data, encoding: .utf8) else { return ([:], [:]) }
     let master = parseMaster(body, baseURL: url)

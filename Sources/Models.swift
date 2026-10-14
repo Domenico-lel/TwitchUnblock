@@ -16,11 +16,16 @@ struct LiveData {
     /// nil si le streamer n'archive pas ses lives.
     var dvrVideoId: String? = nil
     var error: String?
-    /// Source qui a servi le direct (« as », « al », « eu », « twitch », « worker »).
+    /// Source qui a servi le direct (« account », « as », « al », « eu »,
+    /// « twitch », « worker ») ; « account » : le compte, sans pub.
     var source: String? = nil
     /// Hauteur, cadence et débit de chaque qualité (mêmes clés que `links`) ;
     /// vide quand la source ne les donne pas.
     var variants: [String: VariantInfo] = [:]
+    /// La session web donnée à getLive a été refusée par Twitch (401/403).
+    var webSessionExpired: Bool = false
+    /// Abonné à la chaîne d'après le jeton du compte (nil : pas demandé).
+    var subscriber: Bool? = nil
 }
 
 /// Ce que la liste maîtresse dit d'une variante (RESOLUTION, FRAME-RATE,

@@ -89,6 +89,8 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     @Published var currentDate: Date? = nil
     @Published var pipActive  = false
     @Published var pipPossible = false
+    /// Pause pub cousue par Twitch dans le direct : bandeau, son coupé.
+    let adBreaks = AdBreakWatcher()
 
     /// Pas une constante : une bascule douce direct → enregistrement remplace
     /// la source sans reconstruire le modèle. Figée, elle laissait le lecteur
@@ -160,6 +162,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // Journaux LIVE (vitesse et raison, calages, sortie audio) : de quoi
         // vérifier sur appareil qu'un direct ne change plus de vitesse.
         diagnostics = LiveDiagnostics(player: player) { [weak self] in self?.isLive ?? false }
+        adBreaks.attach(player)
         load(url: url, seek: savedTime)
         timeObs = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
@@ -433,6 +436,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         pendingSeek = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
+        adBreaks.detach()
         pip = nil
         if let o = spatialObs { NotificationCenter.default.removeObserver(o); spatialObs = nil }
         if let o = rateObs { NotificationCenter.default.removeObserver(o); rateObs = nil }
@@ -609,6 +613,8 @@ struct ImmersivePlayer: View {
     /// Vitesse imposée par le lecteur (refus, AirPlay, bord du DVR) : le parent
     /// la réécrit dans la préférence, seule source de vérité.
     var onSpeedChange: (Double) -> Void = { _ in }
+    /// Annonce brève au lancement (direct servi par le compte, sans pub).
+    var notice: String? = nil
 
     var onProgress: (Double) -> Void = { _ in }
     var onLatency:  (Double?) -> Void = { _ in }
@@ -687,6 +693,7 @@ struct ImmersivePlayer: View {
          nowPlaying: NowPlayingMeta = NowPlayingMeta(),
          speed: Double = 1,
          onSpeedChange: @escaping (Double) -> Void = { _ in },
+         notice: String? = nil,
          onProgress: @escaping (Double) -> Void = { _ in },
          onLatency:  @escaping (Double?) -> Void = { _ in },
          onBehind:   @escaping (Double?) -> Void = { _ in },
@@ -710,7 +717,7 @@ struct ImmersivePlayer: View {
         self.fillScreen = fillScreen; self.canReturnToLive = canReturnToLive
         self.streamStartedAt = streamStartedAt; self.archiveAvailable = archiveAvailable
         self.chapters = chapters; self.nowPlaying = nowPlaying
-        self.speed = speed; self.onSpeedChange = onSpeedChange
+        self.speed = speed; self.onSpeedChange = onSpeedChange; self.notice = notice
         self.mutedRanges = mutedRanges; self.unmutedCount = unmutedCount
         self.onReduce = onReduce; self.onClose = onClose
         self.onMenu = onMenu; self.onRefresh = onRefresh
@@ -846,6 +853,14 @@ struct ImmersivePlayer: View {
                     .padding(.trailing, controlsInset)
                     .transition(.opacity)
             }
+
+            // Pause pub de la chaîne (direct) : on dit ce qu'est cet écran et
+            // quand le direct revient ; le son est coupé pendant ce temps.
+            AdBreakBanner(watcher: model.adBreaks)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, showControls ? 58 : TSpace.sm)
+                .padding(.horizontal, TSpace.md)
+                .padding(.trailing, controlsInset)
         }
         // La boîte est fixée par le parent (16:9 en portrait, toute la colonne en
         // paysage) : ici on remplit ce qu'on nous donne, sans jamais dériver la
@@ -890,7 +905,11 @@ struct ImmersivePlayer: View {
             // retenue est annoncée, elle ne doit pas surprendre.
             model.setSpeed(speed)
             if !isLive, model.speed != 1 { flash(speedFlash, duration: 1_500_000_000) }
+            if let notice { flash(notice, duration: 2_500_000_000) }
             scheduleAutoHide()
+        }
+        .onChange(of: notice) { n in
+            if let n { flash(n, duration: 2_500_000_000) }
         }
         // Vitesse choisie dans le menu ⋯. Égale à celle du modèle : c'est la
         // réécriture d'une vitesse imposée, déjà annoncée.
@@ -1634,4 +1653,64 @@ struct AirPlayButton: UIViewRepresentable {
         return v
     }
     func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+
+// MARK: – Pause pub de la chaîne
+/// Bandeau d'une pause pub cousue par Twitch (AdBreakWatcher) : ce qu'est
+/// l'écran violet, et dans combien de temps le direct revient. Rien hors
+/// pause. `compact` : une ligne, pour les tuiles du multi-live.
+struct AdBreakBanner: View {
+    @ObservedObject var watcher: AdBreakWatcher
+    var compact = false
+
+    @EnvironmentObject private var store: AppStore
+
+    /// Pas de session web, ou réglage coupé : un abonné ne profite pas de son
+    /// abonnement sans pub, on le lui dit.
+    private var showsLoginHint: Bool {
+        !store.subAdFree || (store.twitchWebToken ?? "").isEmpty
+    }
+
+    var body: some View {
+        if let left = watcher.remaining {
+            Group {
+                if compact {
+                    HStack(spacing: 5) {
+                        Image(systemName: "megaphone.fill").font(.system(size: 10, weight: .bold))
+                        Text(store.t("ad_break_title") + " · \(left) s")
+                            .font(.system(size: 11, weight: .bold))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 9).frame(height: 24)
+                    .background(Capsule().fill(Color.black.opacity(0.65)))
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "megaphone.fill").font(.system(size: 12, weight: .bold))
+                            Text(store.t("ad_break_title")).font(.system(size: 13, weight: .bold))
+                        }
+                        Text(store.t("ad_break_sub").replacingOccurrences(of: "{n}", with: "\(left)"))
+                            .font(.system(size: 12, weight: .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
+                        if showsLoginHint {
+                            Text(store.t("ad_break_login_hint"))
+                                .font(.system(size: 11))
+                                .opacity(0.75)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 9)
+                    .frame(maxWidth: 360, alignment: .leading)
+                    .background(Color.black.opacity(0.7))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.tPurple.opacity(0.6), lineWidth: 1))
+                }
+            }
+            .foregroundColor(.white)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+            .accessibilityElement(children: .combine)
+        }
+    }
 }

@@ -53,13 +53,28 @@ no key to paste. The backend is already hosted and shared by every install.
   is read from the playlist, so “720p” also finds a channel whose Source is
   720p60. Picking a quality in the player replaces the preference (as on the
   website); backups carry it under the website's name (`qualityPref`).
-* 🛡 **Ad-free lives, in the source order you pick** — lives come from ad-free
-  sources (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous Europe)
-  or official Twitch (with ads), tried one after the other until one answers.
-  Reorder them in Settings → Player; picking a source from the player's ⋯
-  menu (which also shows the source in use) moves it to the top. Channels that
-  stream with multiple encodes (Enhanced Broadcasting) keep each quality's own
-  name on every source.
+* 🛡 **Live sources, in the order you pick** — lives come from sources that
+  avoid most ads (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous
+  Europe) or official Twitch (with ads), tried one after the other until one
+  answers. Reorder them in Settings → Player; picking a source from the
+  player's ⋯ menu (which also shows the source in use) moves it to the top.
+  Channels that stream with multiple encodes (Enhanced Broadcasting) keep each
+  quality's own name on every source. No source escapes the channel's own ad
+  breaks: Twitch stitches them into the stream itself.
+* ⭐ **Ad-free with your sub** — subscribed to the channel (or Turbo, when the
+  channel allows it)? With the web session connected, the live goes through
+  your Twitch account and Twitch serves it without ad breaks, just like on
+  Twitch (Settings → Player → Watch ad-free with my sub, on by default; Twitch
+  then sees your account watching). Never used on a channel where your account
+  would get ads; if your account's stream doesn't answer, the usual sources
+  take over. Picking a source in the ⋯ menu skips your account for that
+  channel until the app restarts.
+* 📢 **Channel ad breaks explained** — during an ad break (or the pre-roll
+  when a stream opens), Twitch replaces the stream with its purple
+  “Commercial break in progress” screen or a real ad. The player now says so,
+  with a countdown to the stream's return, and mutes the sound meanwhile
+  (restored at the end). Works in the app's player, Apple's player and each
+  multi-live tile.
 * ⏪ **Rewind a live stream (DVR)** — when the channel archives its broadcasts,
   the progress bar covers the *whole* stream, not just the rewindable window.
   Scrub past that window and the recording takes over at that exact moment.
@@ -186,7 +201,9 @@ no key to paste. The backend is already hosted and shared by every install.
   tells you whether the stream you're watching counts.
 * 📈 **Progress while you watch** — since October 2026, Twitch only counts drops
   when your own account loads the stream. During a live with drops, the app does
-  that with small requests, without downloading the video a second time.
+  that with small requests, without downloading the video a second time (not
+  needed when the live already plays through your account, ad-free with your
+  sub).
 * 🔔 **Notifications** — told when a drop is ready to claim, or when the app
   has claimed it for you (Settings → Drops → Notify me). With the app open it's
   a banner inside the app, even if notifications aren't allowed.

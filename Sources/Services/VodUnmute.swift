@@ -81,6 +81,9 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         // Réglage « Audio spatial » : tous les lecteurs passent par ici.
         SpatialAudio.apply(to: item)
         keepPitch(item)
+        // Pauses pub cousues par Twitch dans un direct (AdBreakMonitor) ; une
+        // VOD n'en annonce pas, le collecteur n'y fait rien.
+        AdBreakMonitor.attach(to: item)
         return item
     }
 
@@ -108,6 +111,7 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         let item = AVPlayerItem(url: plain)
         SpatialAudio.apply(to: item)
         keepPitch(item)
+        AdBreakMonitor.attach(to: item)
         var obs: NSKeyValueObservation?
         obs = item.observe(\.status, options: [.new]) { item, _ in
             guard item.status == .readyToPlay else { return }

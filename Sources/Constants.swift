@@ -76,9 +76,10 @@ enum APIConfig {
     }
 }
 
-/// Miroirs Luminous (source « sans pub »), essayés dans l'ordre : si l'un est
-/// indisponible on passe au suivant. as = Asie (historique),
-/// eu/eu2/eu3 = Europe (recommandés pour le mobile).
+/// Miroirs Luminous, essayés dans l'ordre : si l'un est indisponible on passe
+/// au suivant. as = Asie (historique), eu/eu2/eu3 = Europe (recommandés pour
+/// le mobile). Pas « sans pub » : les pré-rolls et les pauses pub de la chaîne
+/// y arrivent comme sur Twitch (mesuré le 2026-10-14).
 let kLuminousHosts = [
     "as.luminous.dev",
     "eu.luminous.dev",
@@ -86,9 +87,9 @@ let kLuminousHosts = [
     "eu3.luminous.dev"
 ]
 
-/// Proxys sans pub au format TTV.LOL v1, essayés après Luminous. Celui-ci est
-/// en Albanie, où Twitch ne diffuse pas de pub ; ses variantes se lisent de
-/// n'importe quelle adresse et annoncent leurs segments d'avance.
+/// Proxys au format TTV.LOL v1, essayés après Luminous. Celui-ci est en
+/// Albanie ; ses variantes se lisent de n'importe quelle adresse et annoncent
+/// leurs segments d'avance. Les pauses pub de la chaîne y passent aussi.
 let kTTVLOLHosts = ["twitch-al.nadeko.net"]
 
 /// Sources du direct proposées dans les réglages et le menu du lecteur.
@@ -371,7 +372,7 @@ private let translations: [Lang: [String: String]] = [
         "cache_auto": "Vider en quittant",
         "cache_auto_sub": "Purge le cache en quittant le live ou l'application",
         "account_api": "Connexion API", "account_api_sub": "Chat, chaînes suivies et Top",
-        "account_web": "Session web (points)", "account_web_sub": "Requise pour les points de chaîne",
+        "account_web": "Session web (points)", "account_web_sub": "Points de chaîne, drops, et sans pub sur les chaînes où tu es abonné",
         "login_points_hint": "Pour les points de chaîne, connecte-toi aussi en « Session web » depuis les Réglages ⚙️",
         "points_title": "Points de chaîne",
         "points_connect_title": "Connecte ton compte Twitch",
@@ -519,9 +520,9 @@ private let translations: [Lang: [String: String]] = [
         "restore_muted": "Rétablir le son des passages coupés",
         "restore_muted_sub": "Twitch coupe le son des passages avec de la musique protégée. Un jour ou deux après le live, l'original est encore disponible : l'app le remet quand elle peut. Sans effet sur AirPlay.",
         "live_source": "Source du direct",
-        "live_source_sub": "Luminous et le proxy albanais sont sans pub. La source choisie est essayée en premier ; si elle ne répond pas, les autres prennent le relais.",
+        "live_source_sub": "Luminous et le proxy albanais évitent la plupart des pubs, mais Twitch peut afficher « Commercial break in progress » pendant les pauses pub de la chaîne. La source choisie est essayée en premier ; si elle ne répond pas, les autres prennent le relais.",
         "live_source_order": "Ordre des sources du direct",
-        "live_source_order_sub": "Essayées dans cet ordre : si une source ne répond pas, la suivante prend le relais. Luminous et le proxy albanais sont sans pub. Choisir une source dans le menu du lecteur la met en tête.",
+        "live_source_order_sub": "Essayées dans cet ordre : si une source ne répond pas, la suivante prend le relais. Aucune ne bloque les pauses pub de la chaîne ; abonné, active « Regarder sans pub avec mon abonnement ». Choisir une source dans le menu du lecteur la met en tête.",
         "pref_quality": "Qualité préférée",
         "pref_quality_sub": "Utilisée au lancement d'un direct ou d'une VOD. Si elle n'existe pas, la plus proche en dessous. Choisir une qualité dans le lecteur la remplace.",
         "q_source": "Source (originale)",
@@ -536,6 +537,14 @@ private let translations: [Lang: [String: String]] = [
         "src_twitch": "Twitch officiel (pubs)",
         "src_worker": "Serveur TwitchUnblock",
         "chat_unreachable": "Le chat ne répond pas. Vérifie ta connexion (VPN, réseau filtré) ou touche « Reconnecter le chat » dans le menu du chat.",
+        "src_account": "Ton compte (sans pub)",
+        "src_account_toast": "Sans pub grâce à ton abonnement",
+        "sub_adfree": "Regarder sans pub avec mon abonnement",
+        "sub_adfree_sub": "Si tu es abonné à la chaîne (ou Turbo), le direct passe par ton compte Twitch : plus de pauses pub, comme sur Twitch. Twitch voit alors ton compte regarder la chaîne. Nécessite la session web.",
+        "sub_adfree_connect": "Connecter la session web",
+        "ad_break_title": "Pause pub de la chaîne",
+        "ad_break_sub": "Twitch remplace le direct par cet écran pendant la pause. Reprise dans {n} s.",
+        "ad_break_login_hint": "Abonné à cette chaîne ? Connecte la session web (Paramètres → Compte Twitch) pour regarder sans pub.",
         "spatial_audio": "Audio spatial (AirPods)",
         "spatial_audio_sub": "« Désactivé » coupe l'audio spatial, et donc le suivi de la tête, dans l'app. iOS ne laisse pas une app choisir « Fixe » : Centre de contrôle → appui long sur le volume → Audio spatial, ou, pour toutes les apps, désactive « Suivre l'iPhone » dans les réglages Accessibilité des AirPods.",
         "spatial_auto": "Automatique",
@@ -887,7 +896,7 @@ private let translations: [Lang: [String: String]] = [
         "cache_auto": "Clear on exit",
         "cache_auto_sub": "Purge the cache when leaving the stream or the app",
         "account_api": "API login", "account_api_sub": "Chat, followed channels and Top",
-        "account_web": "Web session (points)", "account_web_sub": "Required for channel points",
+        "account_web": "Web session (points)", "account_web_sub": "Channel points, drops, and ad-free viewing on channels you're subbed to",
         "login_points_hint": "For channel points, also connect the \"Web session\" from Settings ⚙️",
         "points_title": "Channel Points",
         "points_connect_title": "Connect your Twitch account",
@@ -1035,9 +1044,9 @@ private let translations: [Lang: [String: String]] = [
         "restore_muted": "Restore muted sound",
         "restore_muted_sub": "Twitch mutes parts with copyrighted music. For a day or two after the stream the original is still available: the app puts it back when it can. No effect over AirPlay.",
         "live_source": "Live source",
-        "live_source_sub": "Luminous and the Albanian proxy are ad-free. The chosen source is tried first; if it doesn't answer, the others take over.",
+        "live_source_sub": "Luminous and the Albanian proxy avoid most ads, but Twitch can still show “Commercial break in progress” during the channel's ad breaks. The chosen source is tried first; if it doesn't answer, the others take over.",
         "live_source_order": "Live source order",
-        "live_source_order_sub": "Tried in this order: if a source doesn't answer, the next one takes over. Luminous and the Albanian proxy are ad-free. Picking a source from the player menu moves it to the top.",
+        "live_source_order_sub": "Tried in this order: if a source doesn't answer, the next one takes over. None of them blocks the channel's ad breaks; if you're subscribed, turn on “Watch ad-free with my sub”. Picking a source from the player menu moves it to the top.",
         "pref_quality": "Preferred quality",
         "pref_quality_sub": "Used when a stream or VOD starts. If it isn't available, the closest one below is used. Picking a quality in the player replaces it.",
         "q_source": "Source (original)",
@@ -1052,6 +1061,14 @@ private let translations: [Lang: [String: String]] = [
         "src_twitch": "Official Twitch (ads)",
         "src_worker": "TwitchUnblock server",
         "chat_unreachable": "The chat isn't responding. Check your connection (VPN, filtered network) or tap “Reconnect chat” in the chat menu.",
+        "src_account": "Your account (ad-free)",
+        "src_account_toast": "Ad-free thanks to your sub",
+        "sub_adfree": "Watch ad-free with my sub",
+        "sub_adfree_sub": "If you're subscribed to the channel (or have Turbo), the stream goes through your Twitch account: no ad breaks, just like on Twitch. Twitch then sees your account watching. Needs the web session.",
+        "sub_adfree_connect": "Connect the web session",
+        "ad_break_title": "Channel ad break",
+        "ad_break_sub": "Twitch shows this screen instead of the stream during the break. Back in {n}s.",
+        "ad_break_login_hint": "Subscribed to this channel? Connect the web session (Settings → Twitch Account) to watch ad-free.",
         "spatial_audio": "Spatial audio (AirPods)",
         "spatial_audio_sub": "“Off” turns spatial audio, and so head tracking, off in the app. iOS doesn't let an app pick “Fixed”: Control Center → touch and hold the volume → Spatial Audio, or, for every app, turn off “Follow iPhone” in the AirPods Accessibility settings.",
         "spatial_auto": "Automatic",
@@ -1403,7 +1420,7 @@ private let translations: [Lang: [String: String]] = [
         "cache_auto": "Vaciar al salir",
         "cache_auto_sub": "Purga el caché al salir del directo o de la app",
         "account_api": "Conexión API", "account_api_sub": "Chat, canales seguidos y Top",
-        "account_web": "Sesión web (puntos)", "account_web_sub": "Necesaria para los puntos del canal",
+        "account_web": "Sesión web (puntos)", "account_web_sub": "Puntos del canal, drops y sin anuncios en los canales a los que estás suscrito",
         "login_points_hint": "Para los puntos del canal, conéctate también con la « Sesión web » en Ajustes ⚙️",
         "points_title": "Puntos del canal",
         "points_connect_title": "Conecta tu cuenta de Twitch",
@@ -1551,9 +1568,9 @@ private let translations: [Lang: [String: String]] = [
         "restore_muted": "Restaurar el sonido silenciado",
         "restore_muted_sub": "Twitch silencia las partes con música protegida. Uno o dos días después del directo, el original aún está disponible: la app lo restaura cuando puede. Sin efecto por AirPlay.",
         "live_source": "Fuente del directo",
-        "live_source_sub": "Luminous y el proxy de Albania no tienen anuncios. La fuente elegida se prueba primero; si no responde, las demás toman el relevo.",
+        "live_source_sub": "Luminous y el proxy de Albania evitan la mayoría de los anuncios, pero Twitch puede mostrar «Commercial break in progress» durante las pausas publicitarias del canal. La fuente elegida se prueba primero; si no responde, las demás toman el relevo.",
         "live_source_order": "Orden de las fuentes del directo",
-        "live_source_order_sub": "Se prueban en este orden: si una fuente no responde, la siguiente toma el relevo. Luminous y el proxy de Albania no tienen anuncios. Elegir una fuente en el menú del reproductor la pone primera.",
+        "live_source_order_sub": "Se prueban en este orden: si una fuente no responde, la siguiente toma el relevo. Ninguna bloquea las pausas publicitarias del canal; si estás suscrito, activa «Ver sin anuncios con mi suscripción». Elegir una fuente en el menú del reproductor la pone primera.",
         "pref_quality": "Calidad preferida",
         "pref_quality_sub": "Se usa al iniciar un directo o un VOD. Si no existe, se usa la más cercana por debajo. Elegir una calidad en el reproductor la sustituye.",
         "q_source": "Source (original)",
@@ -1568,6 +1585,14 @@ private let translations: [Lang: [String: String]] = [
         "src_twitch": "Twitch oficial (anuncios)",
         "src_worker": "Servidor de TwitchUnblock",
         "chat_unreachable": "El chat no responde. Revisa tu conexión (VPN, red filtrada) o toca «Reconectar el chat» en el menú del chat.",
+        "src_account": "Tu cuenta (sin anuncios)",
+        "src_account_toast": "Sin anuncios gracias a tu suscripción",
+        "sub_adfree": "Ver sin anuncios con mi suscripción",
+        "sub_adfree_sub": "Si estás suscrito al canal (o tienes Turbo), el directo pasa por tu cuenta de Twitch: sin pausas publicitarias, como en Twitch. Twitch verá que tu cuenta lo está viendo. Requiere la sesión web.",
+        "sub_adfree_connect": "Conectar la sesión web",
+        "ad_break_title": "Pausa publicitaria del canal",
+        "ad_break_sub": "Twitch muestra esta pantalla en lugar del directo durante la pausa. Vuelve en {n} s.",
+        "ad_break_login_hint": "¿Suscrito a este canal? Conecta la sesión web (Ajustes → Cuenta de Twitch) para verlo sin anuncios.",
         "spatial_audio": "Audio espacial (AirPods)",
         "spatial_audio_sub": "«Desactivado» quita el audio espacial, y con él el seguimiento de la cabeza, en la app. iOS no deja que una app elija «Fijo»: Centro de control → mantén pulsado el volumen → Audio espacial, o, para todas las apps, desactiva «Seguir al iPhone» en los ajustes de Accesibilidad de los AirPods.",
         "spatial_auto": "Automático",

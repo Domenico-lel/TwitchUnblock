@@ -1166,8 +1166,22 @@ struct SettingsView: View {
     }
 
     /// Ordre des sources du direct : getLive les essaie l'une après l'autre.
+    /// Au-dessus, le direct par le compte pour les abonnés (sans pub), qui
+    /// passe avant toutes les sources.
     @ViewBuilder private var liveSourceRow: some View {
         VStack(alignment: .leading, spacing: 8) {
+            toggleRow(store.t("sub_adfree"), store.t("sub_adfree_sub"),
+                      $store.subAdFree, log: "Sans pub avec mon abonnement")
+            // Il faut la session web : sans elle, de quoi l'ouvrir ici.
+            if store.subAdFree, (store.twitchWebToken ?? "").isEmpty {
+                Button { startWebLogin() } label: {
+                    Label(store.t("sub_adfree_connect"), systemImage: "person.crop.circle.badge.plus")
+                        .font(.tLabel)
+                        .foregroundColor(.tPrimary)
+                }
+                .buttonStyle(.plain)
+            }
+            Divider().background(Color.tBorder)
             VStack(alignment: .leading, spacing: 2) {
                 Text(store.t("live_source_order"))
                     .font(.tCardTitle)

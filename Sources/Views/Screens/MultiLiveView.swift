@@ -37,6 +37,8 @@ struct MultiLiveView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear {
+            // Abonné sans pub : chaque direct passe par le compte (AppStore).
+            session.accountToken = { [store] in store.accountPlaybackWebToken(for: $0) }
             session.sync(multi.entries)
             UIApplication.shared.isIdleTimerDisabled = true
         }
@@ -159,6 +161,9 @@ struct MultiLiveTile: View {
             Color.black
             PlayerLayerView(player: model.player)
             state
+            AdBreakBanner(watcher: model.adBreaks, compact: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .padding(8)
             bar
         }
         .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))

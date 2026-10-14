@@ -227,6 +227,28 @@ final class AppStore: ObservableObject {
         liveSourceOrder = [id] + liveSourceOrder.filter { $0 != id }
     }
 
+    /// Abonné : le direct passe par le compte (session web) quand Twitch le
+    /// sert sans pub sur cette chaîne — plus de pauses pub. Twitch voit alors
+    /// le compte regarder, d'où le réglage. Jamais pour une chaîne où le
+    /// compte aurait des pubs (getLive).
+    @Published var subAdFree: Bool = true {
+        didSet { UserDefaults.standard.set(subAdFree, forKey: "cfg_sub_adfree") }
+    }
+
+    /// Chaînes où une source a été choisie à la main pendant une lecture par
+    /// le compte : le compte n'y est plus essayé jusqu'au prochain lancement,
+    /// sinon getLive le remettrait en tête et le menu ne servirait à rien.
+    var accountPlaybackSkipped: Set<String> = []
+
+    /// Session web à donner à getLive pour `channel` ; nil : jeton anonyme,
+    /// comme avant (réglage coupé, pas de session, session d'un autre compte).
+    func accountPlaybackWebToken(for channel: String) -> String? {
+        guard subAdFree, webSessionMismatch == nil,
+              let web = twitchWebToken, !web.isEmpty,
+              !accountPlaybackSkipped.contains(channel.lowercased()) else { return nil }
+        return web
+    }
+
     /// Audio spatial (AirPods) : « auto » = choix d'iOS (Centre de contrôle),
     /// « off » = jamais spatialisé dans l'app (voir SpatialAudio).
     /// Drops : pendant un live qui en a, la session du compte charge le flux
@@ -614,6 +636,7 @@ final class AppStore: ObservableObject {
         // (« liveSource »), mise en tête. Réécrit pour getLive.
         liveSourceOrder    = liveSourceSteps().filter { $0 != "worker" }
         ud.set(liveSourceOrder, forKey: "liveSourceOrder")
+        subAdFree          = ud.object(forKey: "cfg_sub_adfree") as? Bool ?? true
         spatialAudio       = ud.string(forKey: SpatialAudio.key) == "off" ? "off" : "auto"
         dropsProgress      = ud.object(forKey: "cfg_drops_progress")  as? Bool ?? true
         autoClaimDrops     = ud.object(forKey: "cfg_drops_autoclaim") as? Bool ?? true

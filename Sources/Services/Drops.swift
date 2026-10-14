@@ -63,15 +63,6 @@ struct DropSession {
 }
 
 // MARK: – GQL (session web)
-/// Même identifiant d'appareil que les points de chaîne (ChannelPointsService).
-private func twitchDeviceId() -> String {
-    if let d = UserDefaults.standard.string(forKey: "twitch_device_id") { return d }
-    let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    let d = String((0..<32).map { _ in chars.randomElement()! })
-    UserDefaults.standard.set(d, forKey: "twitch_device_id")
-    return d
-}
-
 /// Requête GQL au nom du compte (`token` : session web) ; sans `token`, une
 /// requête publique. `integrity` pour les opérations protégées.
 private func webGQL(_ body: Any, token: String?,
@@ -84,7 +75,8 @@ private func webGQL(_ body: Any, token: String?,
     req.setValue("text/plain;charset=UTF-8", forHTTPHeaderField: "Content-Type")
     if let token, !token.isEmpty { req.setValue("OAuth \(token)", forHTTPHeaderField: "Authorization") }
     // Le jeton d'intégrité est lié à l'identifiant d'appareil qui l'a obtenu.
-    let device = integrity.map { $0.deviceId }.flatMap { $0.isEmpty ? nil : $0 } ?? twitchDeviceId()
+    // Même identifiant d'appareil que les points de chaîne (twitchWebDeviceId).
+    let device = integrity.map { $0.deviceId }.flatMap { $0.isEmpty ? nil : $0 } ?? twitchWebDeviceId()
     req.setValue(device, forHTTPHeaderField: "X-Device-Id")
     if let integrity { req.setValue(integrity.token, forHTTPHeaderField: "Client-Integrity") }
     req.httpBody = payload
@@ -261,6 +253,13 @@ final class DropsService: ObservableObject {
         if let i = integrity, i.expiry > Date().addingTimeInterval(60) { return i }
         integrity = await TwitchWebGQL.shared.mintIntegrity(token: token)
         return integrity
+    }
+
+    /// Le même, en types simples : pour accountPlaybackToken (TwitchAPI.swift,
+    /// compilé aussi pour l'Apple TV, qui n'a pas TwitchWebGQL).
+    func integrityPair(token: String) async -> (token: String, deviceId: String)? {
+        guard let i = await validIntegrity(token: token) else { return nil }
+        return (i.token, i.deviceId)
     }
 
     // MARK: Notifications
@@ -519,30 +518,21 @@ final class DropsHeartbeat: ObservableObject {
         return last.flatMap { URL(string: $0, relativeTo: url)?.absoluteURL }
     }
 
-    /// Jeton de lecture au nom du compte. Sans jeton d'intégrité d'abord ; si
-    /// Twitch en exige un, avec.
+    /// Jeton de lecture au nom du compte (accountPlaybackToken, partagé avec
+    /// le direct sans pub des abonnés) ; nil s'il est anonyme ou refusé — un
+    /// jeton anonyme ne ferait rien avancer.
     private static func playbackToken(login: String, token: String) async -> (value: String, signature: String)? {
-        let q = """
-        query($l: String!) { streamPlaybackAccessToken(channelName: $l,
-          params: {platform: "web", playerBackend: "mediaplayer", playerType: "site"}) { value signature } }
-        """
-        let body: [String: Any] = ["query": q, "variables": ["l": login]]
-        var json = await webGQL(body, token: token)
-        if gqlErrors(json).lowercased().contains("integrity"),
-           let it = await DropsService.shared.validIntegrity(token: token) {
-            json = await webGQL(body, token: token, integrity: it)
-        }
-        guard let pat = (json?["data"] as? [String: Any])?["streamPlaybackAccessToken"] as? [String: Any],
-              let value = pat["value"] as? String,
-              let signature = pat["signature"] as? String else {
-            logger.warn("DROPS", "Jeton de lecture indisponible", gqlErrors(json))
+        guard case .token(let pat) = await accountPlaybackToken(login: login, webToken: token,
+                                                                integrity: dropsIntegrity(for: token)) else {
+            logger.warn("DROPS", "Jeton de lecture indisponible", login)
             return nil
         }
-        // Un jeton anonyme (« user_id »: null) ne ferait rien avancer.
-        guard value.range(of: #""user_id":\d"#, options: .regularExpression) != nil else {
-            logger.warn("DROPS", "Jeton de lecture anonyme", "session web expirée ?")
-            return nil
-        }
-        return (value, signature)
+        return (pat.value, pat.signature)
     }
+}
+
+/// Jeton d'intégrité de la session web `webToken`, à donner à
+/// accountPlaybackToken (WebView éphémère si besoin, voir DropsService).
+func dropsIntegrity(for webToken: String) -> () async -> (token: String, deviceId: String)? {
+    { await DropsService.shared.integrityPair(token: webToken) }
 }

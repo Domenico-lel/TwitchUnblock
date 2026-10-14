@@ -348,9 +348,19 @@ struct MainTabView: View {
                 liveSource: menuLiveSource,
                 onSelectSource: { id in
                     showPlayerMenu = false
-                    guard id != store.liveSourceOrder.first else { return }
-                    logger.settingChanged("Source du direct en tête", value: id)
-                    store.preferLiveSource(id)
+                    // Lecture par le compte : un choix de source est respecté,
+                    // même celle déjà en tête — le compte est mis de côté pour
+                    // cette chaîne jusqu'au prochain lancement.
+                    let fromAccount = liveSourceUsed == "account"
+                    guard fromAccount || id != store.liveSourceOrder.first else { return }
+                    if fromAccount, case .live(let ch)? = playerMode {
+                        store.accountPlaybackSkipped.insert(ch.lowercased())
+                        logger.info("LECTEUR", "Compte mis de côté pour \(ch)", "source choisie : \(id)")
+                    }
+                    if id != store.liveSourceOrder.first {
+                        logger.settingChanged("Source du direct en tête", value: id)
+                        store.preferLiveSource(id)
+                    }
                     reloadCurrent()
                 },
                 onDownload: downloadAction,
@@ -783,6 +793,7 @@ struct MainTabView: View {
                 nowPlaying: nowPlayingMeta,
                 speed: playbackSpeed,
                 onSpeedChange: { setPlaybackSpeed($0) },
+                notice: accountNotice,
                 onProgress: { time in
                     // Pendant une bascule, `playerMode` désigne déjà la
                     // nouvelle source alors que le lecteur en place joue encore
@@ -830,6 +841,7 @@ struct MainTabView: View {
                 onTime: { vodPlaybackTime = $0 },
                 onLatency: { updateLatency($0) },
                 onBehind: { updateBehind($0) },
+                notice: accountNotice,
                 onChat: nil,
                 onRewind: rewindAction,
                 onBackToLive: backToLiveAction
@@ -1029,6 +1041,11 @@ struct MainTabView: View {
             showPlayerMenu = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showDownloadSheet = true }
         }
+    }
+
+    /// Direct servi par le compte (abonné sans pub) : annoncé au lancement.
+    private var accountNotice: String? {
+        menuLiveSource == "account" ? store.t("src_account_toast") : nil
     }
 
     /// Source du direct pour le menu du lecteur : seulement pendant un direct
@@ -1362,7 +1379,16 @@ struct MainTabView: View {
                 }
 
             case .live(let channel):
-                let data = await getLive(channelName: channel)
+                // Abonné sans pub sur cette chaîne : le direct passe par son
+                // compte (session web), sinon jeton anonyme comme avant.
+                let web = store.accountPlaybackWebToken(for: channel)
+                let data = await getLive(channelName: channel, webToken: web,
+                                         integrity: web.map { dropsIntegrity(for: $0) })
+                // Session refusée par Twitch : le circuit habituel l'efface et
+                // affiche « session expirée ».
+                if data.webSessionExpired {
+                    Task { @MainActor in await store.validateWebSession() }
+                }
                 // Santé du direct (/stats) : la source qui a servi, ou un échec
                 // — jamais la chaîne. Hors ligne n'est pas un échec.
                 if let links = data.links, !links.isEmpty {
@@ -1472,7 +1498,10 @@ struct MainTabView: View {
         }
         // Drops : Twitch ne les compte que si la session du compte charge le
         // flux, ce que la lecture par proxy ne fait pas (voir DropsHeartbeat).
-        if store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty {
+        // Direct lu par le compte : c'est déjà le cas, une seconde session du
+        // compte ne servirait à rien.
+        if store.dropsProgress, liveSourceUsed != "account",
+           let web = store.twitchWebToken, !web.isEmpty {
             DropsHeartbeat.shared.start(login: channel, token: web)
         }
     }

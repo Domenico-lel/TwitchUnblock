@@ -75,6 +75,8 @@ targets:
       - path: Sources/Services/TwitchAPI.swift
       - path: Sources/Services/LivePlaylistLoader.swift
       - path: Sources/Services/VodUnmute.swift
+      # Pauses pub du direct : VodUnmuteLoader.playerItem y fait appel.
+      - path: Sources/Services/AdBreakMonitor.swift
       - path: Sources/Services/SpatialAudio.swift
       - path: Sources/Services/HiddenContent.swift
 

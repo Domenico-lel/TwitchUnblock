@@ -89,6 +89,9 @@ final class MultiTileModel: ObservableObject {
 
     let login: String
     let player = AVPlayer()
+    /// Pause pub à l'écran (bandeau de la tuile), son coupé le temps qu'elle
+    /// dure — seule la tuile qui a le son en a un à couper.
+    let adBreaks = AdBreakWatcher()
     @Published private(set) var phase: Phase = .loading
     /// Identifiant Twitch de la chaîne (emotes et badges de son chat).
     @Published private(set) var channelId: String?
@@ -98,10 +101,14 @@ final class MultiTileModel: ObservableObject {
     private var count = 2
     /// Relances après une coupure, remises à zéro dès que l'image revient.
     private var restarts = 0
+    /// Session web à donner à getLive (abonné sans pub, voir AppStore).
+    private let accountToken: (String) -> String?
 
-    init(login: String) {
+    init(login: String, accountToken: @escaping (String) -> String? = { _ in nil }) {
         self.login = login
+        self.accountToken = accountToken
         player.isMuted = true
+        adBreaks.attach(player)
     }
 
     func start(count: Int) {
@@ -110,8 +117,10 @@ final class MultiTileModel: ObservableObject {
         stopMedia()
         phase = .loading
         let login = self.login
+        let web = accountToken(login)
         task = Task { [weak self] in
-            let data = await getLive(channelName: login)
+            let data = await getLive(channelName: login, webToken: web,
+                                     integrity: web.map { dropsIntegrity(for: $0) })
             guard let self, !Task.isCancelled else { return }
             if let id = data.userId { self.channelId = id }
             guard let links = data.links, !links.isEmpty,
@@ -120,7 +129,8 @@ final class MultiTileModel: ObservableObject {
                 self.phase = gone ? .offline : .failed
                 return
             }
-            let item = AVPlayerItem(url: url)
+            // Même fabrique que les autres lecteurs : audio spatial, pauses pub.
+            let item = VodUnmuteLoader.playerItem(url: url)
             self.observe(item)
             self.player.replaceCurrentItem(with: item)
             self.player.play()
@@ -136,6 +146,7 @@ final class MultiTileModel: ObservableObject {
         task?.cancel()
         task = nil
         stopMedia()
+        adBreaks.detach()
     }
 
     private func stopMedia() {
@@ -182,6 +193,8 @@ final class MultiLiveSession: ObservableObject {
     @Published private(set) var tiles: [String: MultiTileModel] = [:]
     /// Direct qui a le son.
     @Published var audible: String? { didSet { applyAudio() } }
+    /// Session web à donner à getLive pour une chaîne (AppStore).
+    var accountToken: (String) -> String? = { _ in nil }
 
     /// Un lecteur par direct choisi : ajoutés, retirés.
     func sync(_ entries: [MultiLiveEntry]) {
@@ -191,7 +204,7 @@ final class MultiLiveSession: ObservableObject {
             tiles[login] = nil
         }
         for entry in entries where tiles[entry.login] == nil {
-            let model = MultiTileModel(login: entry.login)
+            let model = MultiTileModel(login: entry.login, accountToken: accountToken)
             tiles[entry.login] = model
             model.start(count: entries.count)
         }
@@ -205,6 +218,10 @@ final class MultiLiveSession: ObservableObject {
     }
 
     private func applyAudio() {
-        for (login, model) in tiles { model.player.isMuted = login != audible }
+        for (login, model) in tiles {
+            model.player.isMuted = login != audible
+            // En pause pub, la tuile qui a le son est recoupée au tour suivant.
+            model.adBreaks.audioTakenOver()
+        }
     }
 }

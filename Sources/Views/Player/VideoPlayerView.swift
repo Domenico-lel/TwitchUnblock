@@ -27,11 +27,15 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
     var speedOptions: [AVPlaybackSpeed] = []
     /// Vitesse choisie dans le menu d'Apple (ou imposée) : retenue par le parent.
     var onSpeedChange: (Double) -> Void = { _ in }
+    /// Pause pub du direct (bandeau du parent) : suit chaque nouvel AVPlayer.
+    var adBreaks: AdBreakWatcher? = nil
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let player = AVPlayer(playerItem: VodUnmuteLoader.playerItem(url: url))
         // Le son continue écran verrouillé, comme dans le lecteur immersif.
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+        context.coordinator.adBreaks = adBreaks
+        adBreaks?.attach(player)
         let vc = AVPlayerViewController()
         vc.player = player
         vc.allowsPictureInPicturePlayback = true
@@ -78,6 +82,8 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             let player = AVPlayer(playerItem: VodUnmuteLoader.playerItem(url: url))
             player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
             vc.player = player
+            // L'ancien lecteur retrouve son son avant d'être lâché.
+            adBreaks?.attach(player)
             context.coordinator.isLive = isLive
             context.coordinator.lowLatency = lowLatency && isLive
             context.coordinator.configureLatency(player)
@@ -98,6 +104,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
     // Force l'arrêt de la vidéo quand la vue est détruite
     static func dismantleUIViewController(_ vc: AVPlayerViewController, coordinator: Coordinator) {
         vc.player?.pause()
+        coordinator.adBreaks?.detach()
         vc.player = nil
         PlayerActivity.end()
     }
@@ -112,6 +119,8 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
 
         /// Lecture d'un direct (journaux LIVE).
         var isLive = false
+        /// Pause pub du direct : détachée quand le lecteur disparaît.
+        var adBreaks: AdBreakWatcher?
         /// Mode faible latence actif (direct uniquement).
         var lowLatency = false
         /// Vitesse retenue hors direct, et qui la reçoit quand elle change.
@@ -378,6 +387,8 @@ struct VideoPlayerView: View {
     var onLatency: (Double?) -> Void = { _ in }
     /// Distance au bord du direct remontee au parent (synchro auto du chat).
     var onBehind: (Double?) -> Void = { _ in }
+    /// Annonce brève au lancement (direct servi par le compte, sans pub).
+    var notice: String? = nil
     // Actions affichees a cote du bouton Source (nil = bouton masque).
     var onChat: (() -> Void)? = nil
     var onRewind: (() -> Void)? = nil
@@ -389,6 +400,9 @@ struct VideoPlayerView: View {
     @State private var currentTime: Double = 0
     @State private var lastPersisted: Double = -99
     @State private var latency: Double? = nil
+    /// Pause pub cousue par Twitch dans le direct : bandeau, son coupé.
+    @StateObject private var adBreaks = AdBreakWatcher()
+    @State private var noticeShown: String? = nil
 
     private var qualities: [String] { sortQualities(Array(qualityLinks.keys), variants: variants) }
     private var currentURL: URL? { qualityLinks[selectedQuality].flatMap(URL.init) }
@@ -526,7 +540,8 @@ struct VideoPlayerView: View {
                 AVPlaybackSpeed(rate: Float($0),
                                 localizedName: $0 == 1 ? store.t("speed_normal") : VodSpeed.label($0, store.lang))
             },
-            onSpeedChange: onSpeedChange
+            onSpeedChange: onSpeedChange,
+            adBreaks: adBreaks
         )
         .aspectRatio(16/9, contentMode: .fit)
         .background(Color.black)
@@ -534,6 +549,33 @@ struct VideoPlayerView: View {
             if store.showLatency, isLive {
                 latencyChip.padding(8)
             }
+        }
+        .overlay(alignment: .top) {
+            AdBreakBanner(watcher: adBreaks).padding(.top, 44).padding(.horizontal, 12)
+        }
+        .overlay(alignment: .bottom) {
+            if let text = noticeShown {
+                Text(text)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(Color.black.opacity(0.65)))
+                    .padding(.bottom, 56)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .onAppear { showNotice(notice) }
+        .onChange(of: notice) { showNotice($0) }
+    }
+
+    /// Annonce affichée 2,5 s par-dessus l'image.
+    private func showNotice(_ text: String?) {
+        guard let text else { return }
+        withAnimation(.easeOut(duration: 0.15)) { noticeShown = text }
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            withAnimation(.easeOut(duration: 0.2)) { if noticeShown == text { noticeShown = nil } }
         }
     }
 

@@ -63,6 +63,7 @@ enum Backup {
             "ios_landNoticesHidden": store.landscapeNoticesHidden,
             "ios_autoPurgeCache": store.autoPurgeImageCache,
             "ios_lowLatency": store.lowLatency,
+            "ios_subAdFree": store.subAdFree,
             "ios_immersivePlayer": store.immersivePlayer,
             "ios_fillScreen": store.fillScreen,
             "ios_landscapeChat": store.landscapeChat.rawValue,
@@ -156,6 +157,7 @@ enum Backup {
         bool("ios_landNoticesHidden") { store.landscapeNoticesHidden = $0 }
         bool("ios_autoPurgeCache") { store.autoPurgeImageCache = $0 }
         bool("ios_lowLatency") { store.lowLatency = $0 }
+        bool("ios_subAdFree") { store.subAdFree = $0 }
         bool("ios_immersivePlayer") { store.immersivePlayer = $0 }
         bool("ios_fillScreen") { store.fillScreen = $0 }
         if let v = s["ios_landscapeChat"] as? String, let lc = LandscapeChat(rawValue: v) { store.landscapeChat = lc }
