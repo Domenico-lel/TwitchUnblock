@@ -221,8 +221,8 @@ func accountPlaybackToken(login: String, webToken: String,
                                        subscriber: subscriber, forbidden: forbidden))
 }
 
-/// Requête GQL au nom du compte, 6 s au plus : elle part en même temps que
-/// les sources du direct et ne doit jamais les retarder longtemps.
+/// Requête GQL au nom du compte, 6 s au plus. Pour le direct, getLive borne
+/// en plus l'ensemble (accountPlaybackIfAsked) : jeton d'intégrité compris.
 private func accountGQL(_ body: [String: Any], webToken: String,
                         integrity: (token: String, deviceId: String)?) async -> (status: Int, json: [String: Any]?) {
     guard let url = URL(string: "https://gql.twitch.tv/gql"),
@@ -478,7 +478,7 @@ func getLive(channelName: String, webToken: String? = nil,
     """
     async let streamTask = twitchGQL(q)
     async let tokenTask  = getAccessToken(id: login, isLive: true)
-    // En même temps que le reste : 6 s au plus (accountGQL).
+    // En même temps que le reste : 6 s au plus en tout (accountPlaybackIfAsked).
     async let accountTask = accountPlaybackIfAsked(login: login, webToken: webToken, integrity: integrity)
 
     guard let (streamJSON, token) = try? await (streamTask, tokenTask),
@@ -572,10 +572,70 @@ func getLive(channelName: String, webToken: String? = nil,
 }
 
 /// Jeton du compte seulement si on en a donné un (iPhone, réglage actif).
+/// 6 s au plus EN TOUT : si Twitch exige le jeton d'intégrité, sa fabrication
+/// (WebView twitch.tv, jusqu'à ~20 s) et la seconde requête dépasseraient,
+/// et getLive attend ce résultat avant les sources. Au-delà, ou si getLive
+/// abandonne (chaîne hors ligne), on rend `.unavailable` tout de suite ; la
+/// demande continue sans nous et le jeton d'intégrité fabriqué reste en cache
+/// (DropsService) pour le direct suivant.
 private func accountPlaybackIfAsked(login: String, webToken: String?,
                                     integrity: (() async -> (token: String, deviceId: String)?)?) async -> AccountPlayback {
     guard let webToken, !webToken.isEmpty else { return .unavailable }
-    return await accountPlaybackToken(login: login, webToken: webToken, integrity: integrity)
+    let work = Task { await accountPlaybackToken(login: login, webToken: webToken, integrity: integrity) }
+    let gate = AccountPlaybackGate()
+    return await withTaskCancellationHandler {
+        await withCheckedContinuation { (cont: CheckedContinuation<AccountPlayback, Never>) in
+            gate.wait(cont)
+            Task { gate.resume(await work.value) }
+            Task {
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if gate.resume(.unavailable) {
+                    logger.warn("TOKEN", "Jeton du compte trop lent (6 s)", "sources habituelles")
+                }
+            }
+        }
+    } onCancel: {
+        gate.resume(.unavailable)
+    }
+}
+
+/// Reprend l'attente du jeton du compte une seule fois : le premier arrivé
+/// l'emporte (jeton, délai ou abandon). Un abandon qui arrive avant que
+/// l'attente commence est gardé et rendu dès qu'elle commence.
+private final class AccountPlaybackGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<AccountPlayback, Never>?
+    private var early: AccountPlayback?
+    private var done = false
+
+    func wait(_ c: CheckedContinuation<AccountPlayback, Never>) {
+        lock.lock()
+        if let early {
+            self.early = nil
+            lock.unlock()
+            c.resume(returning: early)
+            return
+        }
+        cont = c
+        lock.unlock()
+    }
+
+    /// true si c'est cette valeur qui a été rendue.
+    @discardableResult
+    func resume(_ value: AccountPlayback) -> Bool {
+        lock.lock()
+        guard !done else { lock.unlock(); return false }
+        done = true
+        guard let c = cont else {
+            early = value
+            lock.unlock()
+            return true
+        }
+        cont = nil
+        lock.unlock()
+        c.resume(returning: value)
+        return true
+    }
 }
 
 // MARK: – Sources du direct

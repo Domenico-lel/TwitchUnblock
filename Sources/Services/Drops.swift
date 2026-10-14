@@ -386,11 +386,15 @@ final class DropsHeartbeat: ObservableObject {
     /// Segments déjà demandés (les 256 derniers).
     private var seen: [String] = []
 
-    func start(login: String, token: String) {
+    /// `pollSegments` faux : le lecteur charge déjà le flux au nom du compte
+    /// (direct par le compte) ; on ne relit pas les segments — une seconde
+    /// session du compte ne servirait à rien —, mais on garde l'état de la
+    /// page Drops et l'inventaire des 5 min (réclamation automatique).
+    func start(login: String, token: String, pollSegments: Bool = true) {
         stop()
         let login = login.lowercased()
         status = .checking(login)
-        task = Task { [weak self] in await self?.run(login: login, token: token) }
+        task = Task { [weak self] in await self?.run(login: login, token: token, pollSegments: pollSegments) }
     }
 
     func stop() {
@@ -403,7 +407,7 @@ final class DropsHeartbeat: ObservableObject {
 
     private enum Poll { case ok, expired, offline }
 
-    private func run(login: String, token: String) async {
+    private func run(login: String, token: String, pollSegments: Bool) async {
         var variant: URL? = nil
         var lastCheck = Date.distantPast
         var lastInventory = Date()
@@ -418,14 +422,16 @@ final class DropsHeartbeat: ObservableObject {
                 if let id = found {
                     channelId = id
                     status = .active(login)
-                    logger.success("DROPS", "Drops sur \(login)", "progression : HEAD des segments toutes les 10 s")
+                    logger.success("DROPS", "Drops sur \(login)",
+                                   pollSegments ? "progression : HEAD des segments toutes les 10 s"
+                                                : "progression : flux du lecteur (direct par le compte)")
                 } else {
                     status = .noDrops(login)
                     logger.debug("DROPS", "Pas de drops sur \(login)", nil)
                 }
             }
             if channelId != nil {
-                if variant == nil {
+                if pollSegments, variant == nil {
                     variant = await Self.lowestVariant(login: login, token: token)
                     guard !Task.isCancelled else { return }
                     failures = variant == nil ? failures + 1 : 0
@@ -451,7 +457,7 @@ final class DropsHeartbeat: ObservableObject {
                     await DropsService.shared.refresh(token: token, autoClaim: auto)
                 }
             }
-            let pause: UInt64 = channelId == nil ? 60 : (failures > 2 ? 60 : 10)
+            let pause: UInt64 = channelId == nil || !pollSegments ? 60 : (failures > 2 ? 60 : 10)
             try? await Task.sleep(nanoseconds: pause * 1_000_000_000)
         }
     }

@@ -1499,10 +1499,11 @@ struct MainTabView: View {
         // Drops : Twitch ne les compte que si la session du compte charge le
         // flux, ce que la lecture par proxy ne fait pas (voir DropsHeartbeat).
         // Direct lu par le compte : c'est déjà le cas, une seconde session du
-        // compte ne servirait à rien.
-        if store.dropsProgress, liveSourceUsed != "account",
-           let web = store.twitchWebToken, !web.isEmpty {
-            DropsHeartbeat.shared.start(login: channel, token: web)
+        // compte ne servirait à rien ; la pulsation garde alors seulement
+        // l'état de la page Drops et la réclamation automatique.
+        if store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty {
+            DropsHeartbeat.shared.start(login: channel, token: web,
+                                        pollSegments: liveSourceUsed != "account")
         }
     }
 

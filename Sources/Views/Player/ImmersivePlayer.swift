@@ -1677,7 +1677,7 @@ struct AdBreakBanner: View {
                 if compact {
                     HStack(spacing: 5) {
                         Image(systemName: "megaphone.fill").font(.system(size: 10, weight: .bold))
-                        Text(store.t("ad_break_title") + " · \(left) s")
+                        Text(store.t("ad_break_short").replacingOccurrences(of: "{n}", with: "\(left)"))
                             .font(.system(size: 11, weight: .bold))
                             .lineLimit(1)
                     }

@@ -83,16 +83,23 @@ final class AdBreakMonitor: NSObject, AVPlayerItemMetadataCollectorPushDelegate 
         breaks = breaks.filter { $0.value.end > old }
     }
 
-    /// Pause à l'écran à l'heure `date` de l'image, prolongée par celles qui
-    /// la suivent sans trou (plusieurs pubs d'affilée).
+    /// Pause à l'écran à l'heure `date` de l'image : le bloc entier des pubs
+    /// qui se suivent sans trou (plusieurs pubs d'affilée), sous l'identifiant
+    /// de sa première pub — le même d'un bout à l'autre du bloc, pour que le
+    /// son remis par la personne ne soit pas recoupé à la pub suivante.
     func active(at date: Date) -> AdBreak? {
-        guard var current = breaks.values.first(where: { $0.start <= date && date < $0.end }) else { return nil }
-        let sorted = breaks.values.sorted { $0.start < $1.start }
-        for next in sorted where next.start > current.start && next.start <= current.end.addingTimeInterval(1)
-            && next.end > current.end {
-            current = AdBreak(id: current.id, start: current.start, end: next.end)
+        var block: AdBreak? = nil
+        for next in breaks.values.sorted(by: { ($0.start, $0.id) < ($1.start, $1.id) }) {
+            if let b = block, next.start <= b.end.addingTimeInterval(1) {
+                if next.end > b.end { block = AdBreak(id: b.id, start: b.start, end: next.end) }
+                continue
+            }
+            if let b = block, b.start <= date, date < b.end { return b }
+            if next.start > date { return nil }
+            block = next
         }
-        return current
+        if let b = block, b.start <= date, date < b.end { return b }
+        return nil
     }
 }
 
@@ -114,6 +121,7 @@ final class AdBreakWatcher: ObservableObject {
     /// de secours) : on ne le recoupe pas.
     private var spared: String?
     private var currentId: String?
+    private var currentEnd: Date?
     /// Minuteur de secours : fin prévue + 5 s, en temps réel.
     private var deadline: Date?
 
@@ -157,10 +165,12 @@ final class AdBreakWatcher: ObservableObject {
               let brk = AdBreakMonitor.monitor(of: item)?.active(at: now) else { finish(); return }
         let left = max(0, Int(brk.end.timeIntervalSince(now).rounded(.up)))
         if remaining != left { remaining = left }
-        if currentId != brk.id {
+        if currentId != brk.id || currentEnd != brk.end {
+            if currentId != brk.id { logger.info("PUB", "Pause pub à l'écran", "\(left) s restantes") }
             currentId = brk.id
+            // Bloc prolongé par une pub annoncée après coup : secours repoussé.
+            currentEnd = brk.end
             deadline = Date().addingTimeInterval(brk.end.timeIntervalSince(now) + 5)
-            logger.info("PUB", "Pause pub à l'écran", "\(left) s restantes")
         }
         guard managesAudio else { return }
         if let deadline, Date() > deadline {
@@ -185,6 +195,7 @@ final class AdBreakWatcher: ObservableObject {
             logger.info("PUB", "Fin de la pause pub", nil)
         }
         currentId = nil
+        currentEnd = nil
         deadline = nil
         spared = nil
     }

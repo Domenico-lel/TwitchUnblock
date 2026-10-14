@@ -35,19 +35,18 @@ actor EmoteService {
     private var personalBTTV: [String: [String: TwitchEmote]] = [:]
     private var personalOrder: [String] = []
 
-    /// Emotes globales déjà chargées : une fois par séance (reset() les oublie).
-    private var globalsLoaded = false
-
     // MARK: – Load globals once
+    /// Emotes globales : une fois par séance et par service (reset() les
+    /// oublie). Un service encore vide (délai dépassé, réseau) est retenté au
+    /// prochain chat, sans recharger ceux qui ont répondu.
     func loadGlobals() async {
-        guard !globalsLoaded else { return }
+        let bttv = globalBTTV.isEmpty, ffz = globalFFZ.isEmpty, stv = global7TV.isEmpty
+        guard bttv || ffz || stv else { return }
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.loadBTTVGlobal() }
-            group.addTask { await self.loadFFZGlobal() }
-            group.addTask { await self.load7TVGlobal() }
+            if bttv { group.addTask { await self.loadBTTVGlobal() } }
+            if ffz  { group.addTask { await self.loadFFZGlobal() } }
+            if stv  { group.addTask { await self.load7TVGlobal() } }
         }
-        // Rien du tout (réseau) : on retentera au prochain chat.
-        globalsLoaded = !globalBTTV.isEmpty || !globalFFZ.isEmpty || !global7TV.isEmpty
         logger.success("EMOTES", "Emotes globales chargées",
                        "BTTV:\(globalBTTV.count) FFZ:\(globalFFZ.count) 7TV:\(global7TV.count)")
     }
@@ -83,7 +82,6 @@ actor EmoteService {
     /// (action « Recharger emotes et badges » du menu du chat).
     func reset() {
         globalBTTV.removeAll(); globalFFZ.removeAll(); global7TV.removeAll()
-        globalsLoaded = false
         channelBTTV.removeAll(); channelFFZ.removeAll(); channel7TV.removeAll()
         loadedChannels.removeAll(); channelDisplayNames.removeAll()
         // twitchById est alimenté au fil des messages reçus : on le garde,
