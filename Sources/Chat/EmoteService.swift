@@ -1,5 +1,15 @@
 import Foundation
 
+/// Emotes et badges du chat : 10 s au plus par requête (60 s par défaut). Un
+/// service tiers bloqué (réseau filtré, VPN) ne doit pas tenir le chat sur
+/// « Connecting… ».
+let chatAssetSession: URLSession = {
+    let config = URLSessionConfiguration.default
+    config.timeoutIntervalForRequest = 10
+    config.timeoutIntervalForResource = 20
+    return URLSession(configuration: config)
+}()
+
 // MARK: – Emote cache per channel
 actor EmoteService {
     static let shared = EmoteService()
@@ -25,13 +35,19 @@ actor EmoteService {
     private var personalBTTV: [String: [String: TwitchEmote]] = [:]
     private var personalOrder: [String] = []
 
+    /// Emotes globales déjà chargées : une fois par séance (reset() les oublie).
+    private var globalsLoaded = false
+
     // MARK: – Load globals once
     func loadGlobals() async {
+        guard !globalsLoaded else { return }
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.loadBTTVGlobal() }
             group.addTask { await self.loadFFZGlobal() }
             group.addTask { await self.load7TVGlobal() }
         }
+        // Rien du tout (réseau) : on retentera au prochain chat.
+        globalsLoaded = !globalBTTV.isEmpty || !globalFFZ.isEmpty || !global7TV.isEmpty
         logger.success("EMOTES", "Emotes globales chargées",
                        "BTTV:\(globalBTTV.count) FFZ:\(globalFFZ.count) 7TV:\(global7TV.count)")
     }
@@ -67,6 +83,7 @@ actor EmoteService {
     /// (action « Recharger emotes et badges » du menu du chat).
     func reset() {
         globalBTTV.removeAll(); globalFFZ.removeAll(); global7TV.removeAll()
+        globalsLoaded = false
         channelBTTV.removeAll(); channelFFZ.removeAll(); channel7TV.removeAll()
         loadedChannels.removeAll(); channelDisplayNames.removeAll()
         // twitchById est alimenté au fil des messages reçus : on le garde,
@@ -162,14 +179,14 @@ actor EmoteService {
     // MARK: – BTTV
     private func loadBTTVGlobal() async {
         guard let url = URL(string: "https://api.betterttv.net/3/cached/emotes/global"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await chatAssetSession.data(from: url),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
         for obj in arr { if let e = bttvEmote(obj, scope: .global) { globalBTTV[e.name] = e } }
     }
 
     private func loadBTTVChannel(channelId: String, channelName: String) async {
         guard let url = URL(string: "https://api.betterttv.net/3/cached/users/twitch/\(channelId)"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await chatAssetSession.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         var map: [String: TwitchEmote] = [:]
         // channelEmotes : mises en ligne par la chaîne ; sharedEmotes : leur
@@ -239,7 +256,7 @@ actor EmoteService {
     // MARK: – FFZ
     private func loadFFZGlobal() async {
         guard let url = URL(string: "https://api.frankerfacez.com/v1/set/global"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await chatAssetSession.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sets = json["sets"] as? [String: Any] else { return }
         for (_, setValue) in sets {
@@ -252,7 +269,7 @@ actor EmoteService {
     // Fix : stockage par channelId (API appellée avec channelName)
     private func loadFFZChannel(channelId: String, channelName: String) async {
         guard let url = URL(string: "https://api.frankerfacez.com/v1/room/\(channelName)"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await chatAssetSession.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sets = json["sets"] as? [String: Any] else { return }
         if let shown = (json["room"] as? [String: Any])?["display_name"] as? String, !shown.isEmpty {
@@ -291,7 +308,7 @@ actor EmoteService {
     // MARK: – 7TV
     private func load7TVGlobal() async {
         guard let url = URL(string: "https://7tv.io/v3/emote-sets/global"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await chatAssetSession.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let emotes = json["emotes"] as? [[String: Any]] else { return }
         for obj in emotes { if let e = stvEmote(obj, scope: .global) { global7TV[e.name] = e } }
@@ -299,7 +316,7 @@ actor EmoteService {
 
     private func load7TVChannel(channelId: String) async {
         guard let url = URL(string: "https://7tv.io/v3/users/twitch/\(channelId)"),
-              let (data, _) = try? await URLSession.shared.data(from: url),
+              let (data, _) = try? await chatAssetSession.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let setObj = json["emote_set"] as? [String: Any],
               let emotes = setObj["emotes"] as? [[String: Any]] else { return }

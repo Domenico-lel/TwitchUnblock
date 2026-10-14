@@ -662,21 +662,41 @@ struct ChatView: View {
 
     // MARK: – Setup initial
     private func setupChat() async {
-        await EmoteService.shared.loadGlobals()
+        // Emotes (globales, de la chaîne) et badges en parallèle avant la
+        // connexion : les messages sont découpés en emotes à la réception, le
+        // premier et l'historique doivent les trouver. Mais 3,5 s au plus :
+        // l'un après l'autre et sans délai propre, un service lent ou bloqué
+        // laissait le champ sur « Connecting… ». Le reste arrive derrière.
+        let cid = channelId, name = channelName, tok = token
+        let assets = Task {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await EmoteService.shared.loadGlobals() }
+                // Sans compte : BadgeService passe par la requête GQL publique.
+                group.addTask { await BadgeService.shared.loadGlobal(token: tok) }
+                if let cid {
+                    group.addTask { await EmoteService.shared.loadChannel(channelId: cid, channelName: name) }
+                    group.addTask { await BadgeService.shared.loadChannel(channelId: cid, token: tok) }
+                }
+            }
+        }
+        let ready = await finishes(assets, within: 3.5)
+        if !ready { logger.warn("CHAT", "Emotes et badges encore en chargement après 3,5 s", "connexion sans les attendre") }
+        // Chat refermé pendant l'attente : pas de connexion orpheline.
+        guard isSetup else { return }
+        pointsService.autoClaim = store.autoClaimChest
+        chat.channelId = channelId
+        chat.displayDelay = chatDelay
+        // Réglés AVANT la connexion : c'est elle qui déclenche le rejeu de
+        // l'historique, et la modération peut frapper dès les premières secondes.
+        chat.loadRecent  = store.chatLoadRecent
+        chat.keepDeleted = store.chatShowDeleted
+        chat.connect(channel: channelName, token: token, login: login)
+
         if let cid = channelId {
-            await EmoteService.shared.loadChannel(channelId: cid, channelName: channelName)
             // BTTV en direct : emotes personnelles (Pro), emotes ajoutées en live.
             await BTTVLive.shared.join(channelId: cid)
-        }
-        // Sans compte : BadgeService passe par la requête GQL publique.
-        await BadgeService.shared.loadGlobal(token: token)
-        if let cid = channelId {
-            await BadgeService.shared.loadChannel(channelId: cid, token: token)
-        }
-        pointsService.autoClaim = store.autoClaimChest
-        // Points : on utilise le token de session web (cookie auth-token), pas l'OAuth.
-        // Si absent, load() affiche quand même les récompenses et signale needsWebLogin.
-        if let cid = channelId {
+            // Points : on utilise le token de session web (cookie auth-token), pas l'OAuth.
+            // Si absent, load() affiche quand même les récompenses et signale needsWebLogin.
             await pointsService.load(
                 channelLogin: channelName,
                 channelId:   cid,
@@ -685,13 +705,6 @@ struct ChatView: View {
                 viewerId:    store.twitchUserId
             )
         }
-        chat.channelId = channelId
-        chat.displayDelay = chatDelay
-        // Réglés AVANT la connexion : c'est elle qui déclenche le rejeu de
-        // l'historique, et la modération peut frapper dès les premières secondes.
-        chat.loadRecent  = store.chatLoadRecent
-        chat.keepDeleted = store.chatShowDeleted
-        chat.connect(channel: channelName, token: token, login: login)
 
         // Les services ci-dessous sont conditionnés par les réglages de personnalisation :
         // on n'ouvre pas de sondage/websocket inutile si l'option est désactivée.
@@ -1319,5 +1332,32 @@ struct ChatRulesSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.tDark.ignoresSafeArea())
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// Attend `work` au plus `seconds` secondes ; au-delà, il continue sans nous.
+/// true s'il a fini à temps.
+private func finishes(_ work: Task<Void, Never>, within seconds: Double) async -> Bool {
+    await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+        let gate = FirstResume(cont)
+        Task { await work.value; gate.resume(true) }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            gate.resume(false)
+        }
+    }
+}
+
+/// Reprend une attente une seule fois : le premier arrivé l'emporte.
+private final class FirstResume {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<Bool, Never>?
+    init(_ cont: CheckedContinuation<Bool, Never>) { self.cont = cont }
+    func resume(_ value: Bool) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
     }
 }

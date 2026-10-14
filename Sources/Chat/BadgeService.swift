@@ -34,7 +34,7 @@ actor BadgeService {
         req.setValue("Bearer \(token)",  forHTTPHeaderField: "Authorization")
         req.setValue(kHelixClientID,      forHTTPHeaderField: "Client-Id")
 
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await chatAssetSession.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sets = json["data"] as? [[String: Any]] else { await loadGlobalPublic(); return }
@@ -57,7 +57,7 @@ actor BadgeService {
         req.setValue("Bearer \(token)",  forHTTPHeaderField: "Authorization")
         req.setValue(kHelixClientID,      forHTTPHeaderField: "Client-Id")
 
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+        guard let (data, resp) = try? await chatAssetSession.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let sets = json["data"] as? [[String: Any]] else {
@@ -82,7 +82,7 @@ actor BadgeService {
         req.setValue(kGQLClientID, forHTTPHeaderField: "Client-ID")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = body
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
+        guard let (data, _) = try? await chatAssetSession.data(for: req),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return json["data"] as? [String: Any]
     }

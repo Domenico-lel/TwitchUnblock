@@ -115,7 +115,11 @@ no key to paste. The backend is already hosted and shared by every install.
 
 ### Chat
 
-* 💬 **Full live chat** — read and send, with replies.
+* 💬 **Full live chat** — read and send, with replies. Emotes and badges get
+  3.5 s to load before the chat connects (each request gives up after 10 s),
+  so a slow or blocked service no longer leaves it on “Connecting…”; after
+  three failed attempts in a row, a line in the chat says so and points to
+  **Reconnect chat**.
 * 😀 **Emotes** — Twitch, BetterTTV, FrankerFaceZ and 7TV, global and
   per-channel, animated (FrankerFaceZ included). BetterTTV's live connection
   adds the personal emotes of BTTV Pro users (once BTTV announces them, i.e.

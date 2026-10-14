@@ -41,6 +41,9 @@ final class ChatService: NSObject, ObservableObject {
     /// Attente avant la prochaine reconnexion automatique (recul progressif).
     private var reconnectDelay: Double = 2
     private var reconnectTask: Task<Void, Never>?
+    /// Échecs d'affilée (délai dépassé, connexion perdue) depuis le dernier
+    /// « 001 » : au troisième, on le dit dans le chat au lieu de rester muet.
+    private var failures = 0
 
     /// Garder à l'écran les messages supprimés par la modération, barrés, au
     /// lieu de les faire disparaître. Piloté par les réglages.
@@ -114,6 +117,11 @@ final class ChatService: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             guard let self, !Task.isCancelled, !self.isConnected else { return }
             logger.warn("CHAT", "Timeout IRC (10 s) — fallback anonyme")
+            self.countFailure("pas de réponse de l'IRC en 10 s")
+            // Oubliée d'abord : reconnectAnonymously annule la tâche du délai,
+            // c'est-à-dire celle-ci — la connexion anonyme partait alors dans
+            // une tâche annulée (envois et lecture interrompus).
+            self.connectionTimeoutTask = nil
             await self.reconnectAnonymously()
         }
 
@@ -151,6 +159,9 @@ final class ChatService: NSObject, ObservableObject {
     func reconnect(token: String?, login: String?) {
         guard !channelName.isEmpty else { return }
         logger.info("CHAT", "Reconnexion demandée → #\(channelName)")
+        // Nouvel essai voulu : une nouvelle série d'échecs sera signalée.
+        failures = 0
+        reconnectDelay = 2
         connect(channel: channelName, token: token, login: login)
     }
 
@@ -186,6 +197,19 @@ final class ChatService: NSObject, ObservableObject {
               let url = URL(string: "wss://irc-ws.chat.twitch.tv:443") else { return }
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
+        // Même délai qu'à la connexion : sans lui, une connexion anonyme muette
+        // laissait le chat sur « Connecting… » pour de bon.
+        let gen = generation
+        let task = webSocketTask
+        connectionTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self, !Task.isCancelled, !self.isConnected,
+                  self.generation == gen, self.webSocketTask === task else { return }
+            logger.warn("CHAT", "Timeout IRC anonyme (10 s)", "nouvel essai")
+            self.webSocketTask?.cancel(with: .goingAway, reason: nil)
+            self.webSocketTask = nil
+            self.scheduleReconnect(gen: gen, reason: "connexion anonyme muette (10 s)")
+        }
         await send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership")
         await send("NICK justinfan\(Int.random(in: 10000...99999))")
         await send("JOIN #\(channelName)")
@@ -280,7 +304,7 @@ final class ChatService: NSObject, ObservableObject {
                 guard webSocketTask === task, generation == gen else { return }
                 logger.error("CHAT", "Connexion IRC perdue", error.localizedDescription)
                 isConnected = false
-                scheduleReconnect(gen: gen)
+                scheduleReconnect(gen: gen, reason: error.localizedDescription)
                 return
             }
         }
@@ -288,8 +312,9 @@ final class ChatService: NSObject, ObservableObject {
 
     /// Reconnexion automatique après une coupure (réseau, serveur), avec un
     /// recul progressif plafonné à 30 s.
-    private func scheduleReconnect(gen: Int) {
+    private func scheduleReconnect(gen: Int, reason: String) {
         guard !channelName.isEmpty else { return }
+        countFailure(reason)
         let delay = reconnectDelay
         reconnectDelay = min(reconnectDelay * 2, 30)
         // Plusieurs échecs d'affilée (jeton refusé par l'IRC, par ex.) : on
@@ -304,6 +329,16 @@ final class ChatService: NSObject, ObservableObject {
         }
     }
 
+    /// Un échec de plus ; au troisième d'affilée, une ligne dans le chat
+    /// (VPN, réseau filtré…) qui renvoie à « Reconnecter le chat ».
+    private func countFailure(_ reason: String) {
+        failures += 1
+        logger.warn("CHAT", "Échec de connexion n°\(failures) → #\(channelName)", reason)
+        guard failures == 3 else { return }
+        let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+        insertSystemMessage(translate("chat_unreachable", lang))
+    }
+
     // MARK: – Handle raw IRC lines
     private func handleRaw(_ text: String) async {
         let lines = text.components(separatedBy: "\r\n").filter { !$0.isEmpty }
@@ -314,6 +349,7 @@ final class ChatService: NSObject, ObservableObject {
                 isConnected = true
                 connectionTimeoutTask?.cancel(); connectionTimeoutTask = nil
                 reconnectDelay = 2
+                failures = 0
                 logger.success("CHAT", "IRC connecté à #\(channelName)")
             case "PING":
                 await send("PONG :tmi.twitch.tv")
