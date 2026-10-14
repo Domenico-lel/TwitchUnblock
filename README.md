@@ -84,8 +84,9 @@ no key to paste. The backend is already hosted and shared by every install.
   on the progress bar, with a notice and a **Skip** button. For a day or two
   after a stream, Twitch's CDN still serves the original sound: the app puts it
   back automatically (Settings → Player; not over AirPlay). On VODs in the newer
-  MP4 format, Twitch often still serves muted parts with their sound: the app
-  plays them as they are instead of swapping in the silent version.
+  MP4 format, Twitch often still serves muted parts with their sound: when
+  streaming, the app plays them as they are instead of swapping in the silent
+  version (offline downloads still keep the silent one for now).
 * 🗂 **Unlisted & deleted broadcasts** — streams whose VOD is hidden or was
   deleted show up among the channel's VODs as "Unlisted VOD", rebuilt from
   Twitch's CDN as long as it still has them (stream IDs from `vodvod.top`,

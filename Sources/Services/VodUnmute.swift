@@ -28,8 +28,11 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     static let resultNotification = Notification.Name("VodUnmuteResult")
 
     private let queue = DispatchQueue(label: "twitchunblock.unmute")
-    /// Playlists déjà réécrites (changement de qualité, retour en arrière).
-    private var cache: [String: Data] = [:]
+    /// Annonce d'une playlist réécrite (voir `resultNotification`).
+    private struct Outcome { let restored: Int; let remaining: [MutedRange] }
+    /// Playlists déjà réécrites (changement de qualité, retour en arrière),
+    /// avec leur annonce (nil : rien de coupé, pas d'annonce).
+    private var cache: [String: (data: Data, outcome: Outcome?)] = [:]
     private let lock = NSLock()
 
     // MARK: Adresses
@@ -133,31 +136,40 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         return true
     }
 
-    private func cached(_ key: String) -> Data? {
+    private func cached(_ key: String) -> (data: Data, outcome: Outcome?)? {
         lock.lock(); defer { lock.unlock() }
         return cache[key]
     }
 
-    private func store(_ data: Data, for key: String) {
+    private func store(_ data: Data, outcome: Outcome?, for key: String) {
         lock.lock(); defer { lock.unlock() }
         if cache.count > 20 { cache.removeAll() }
-        cache[key] = data
+        cache[key] = (data, outcome)
     }
 
     private func playlist(_ url: URL) async -> Data? {
-        if let hit = cached(url.absoluteString) { return hit }
+        // Playlist déjà réécrite : on refait l'annonce. Le lecteur remet la
+        // barre aux passages coupés de GQL à chaque ouverture : sans elle, une
+        // VOD rouverte montrerait muets des passages qui ont le son.
+        if let hit = cached(url.absoluteString) {
+            if let outcome = hit.outcome { await announce(outcome, for: url.absoluteString) }
+            return hit.data
+        }
         guard let (data, resp) = try? await URLSession.shared.data(from: url),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         let text = String(decoding: data, as: UTF8.self)
         guard text.hasPrefix("#EXTM3U") else { return nil }
-        let out = Data(await rewrite(text, base: url).utf8)
-        store(out, for: url.absoluteString)
+        let (rewritten, outcome) = await rewrite(text, base: url)
+        let out = Data(rewritten.utf8)
+        store(out, outcome: outcome, for: url.absoluteString)
+        if let outcome { await announce(outcome, for: url.absoluteString) }
         return out
     }
 
     /// Adresses rendues absolues (la base n'est plus celle du CDN), passages
     /// coupés remplacés par leur original quand le CDN l'a encore.
-    private func rewrite(_ text: String, base: URL) async -> String {
+    /// Avec l'annonce à faire (nil : rien de coupé).
+    private func rewrite(_ text: String, base: URL) async -> (String, Outcome?) {
         var lines = text.components(separatedBy: "\n")
         struct Muted { let index: Int; let original: URL; let start: Double; let duration: Double }
         var muted: [Muted] = []
@@ -205,7 +217,7 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         // Rien de coupé : pas d'annonce. Que des « -unmuted.mp4 » : annonce
         // quand même, la barre ne doit plus montrer ces passages comme muets
         // (`exist([])` rend [] sans requête).
-        guard !muted.isEmpty || kept > 0 else { return lines.joined(separator: "\n") }
+        guard !muted.isEmpty || kept > 0 else { return (lines.joined(separator: "\n"), nil) }
 
         // Quatre premiers d'abord : tous refusés, les originaux sont effacés
         // (VOD trop ancienne) — inutile d'interroger les centaines suivants.
@@ -232,15 +244,17 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         logger.info("UNMUTE", "Passages coupés : \(available.count)/\(muted.count) segments rétablis, \(kept) déjà avec le son (-unmuted.mp4)",
                     base.deletingLastPathComponent().lastPathComponent)
         // Les « -unmuted.mp4 » comptent comme rétablis : ils se lisent avec le son.
-        let restored = available.count + kept
-        let playlistURL = base.absoluteString
-        let stillMuted = remaining
+        let outcome = Outcome(restored: available.count + kept, remaining: remaining)
+        return (lines.joined(separator: "\n"), outcome)
+    }
+
+    /// `resultNotification` pour la playlist `url` (adresse du CDN).
+    private func announce(_ outcome: Outcome, for url: String) async {
         await MainActor.run {
             NotificationCenter.default.post(name: Self.resultNotification, object: nil, userInfo: [
-                "url": playlistURL, "restored": restored, "remaining": stillMuted,
+                "url": url, "restored": outcome.restored, "remaining": outcome.remaining,
             ])
         }
-        return lines.joined(separator: "\n")
     }
 
     /// Le CDN sert-il ces fichiers ? HEAD en parallèle, huit à la fois.
