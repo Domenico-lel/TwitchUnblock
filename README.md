@@ -37,7 +37,8 @@ no key to paste. The backend is already hosted and shared by every install.
   is remembered from one VOD to the next, shown next to the timer, and synced
   with the website through the backup file; clips start at 1×, live streams
   always play at normal speed. Catching up with a live recording drops back to
-  1× near its edge.
+  1× near its edge, and a speed the player can't keep (AirPlay, slow motion
+  refused) is announced; in both cases 1× becomes the remembered speed.
 * ⏩ **Double-tap to skip ±10 s** — consecutive taps add up, so three taps read
   "+30 s" instead of three separate "+10 s". On a live there's nothing to skip
   ahead to: in landscape, double-tap shows or hides the chat instead, and once

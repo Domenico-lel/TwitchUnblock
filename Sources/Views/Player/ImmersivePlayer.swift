@@ -185,7 +185,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // sinon le menu montrerait une vitesse qui ne joue pas.
         rateObs = NotificationCenter.default.addObserver(
             forName: AVPlayer.rateDidChangeNotification, object: player, queue: .main
-        ) { [weak self] _ in self?.rateChanged() }
+        ) { [weak self] note in self?.rateChanged(note) }
         // AirPlay ne lit pas les playlists réécrites : retour à celle du CDN.
         externalObs = player.observe(\.isExternalPlaybackActive, options: [.new]) { p, _ in
             DispatchQueue.main.async { VodUnmuteLoader.fallBackForAirPlay(p) }
@@ -372,13 +372,19 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     }
 
     /// Changement de vitesse venu du lecteur. Les nôtres (setSpeed, play())
-    /// donnent la vitesse retenue et ne font rien ici.
-    private func rateChanged() {
+    /// donnent la vitesse retenue et ne font rien ici. Comparée au cran : une
+    /// vitesse hors cran maintenue par le lecteur ne relance rien. La raison
+    /// va au journal (PiP, AirPlay, refus… à départager sur appareil).
+    private func rateChanged(_ note: Notification) {
         let rate = Double(player.rate)
-        guard !isLive, player.currentItem != nil, rate > 0, abs(rate - speed) > 0.01 else { return }
-        force(speed: VodSpeed.nearest(rate),
+        let v = VodSpeed.nearest(rate)
+        guard !isLive, player.currentItem != nil, rate > 0, abs(v - speed) > 0.01 else { return }
+        let raw = note.userInfo?[AVPlayer.rateDidChangeReasonKey]
+        let reason = (raw as? AVPlayer.RateDidChangeReason)?.rawValue ?? (raw as? String) ?? "?"
+        force(speed: v,
               notice: nearRecordingEdge ? "speed_caught_up" : "speed_unavailable",
-              why: String(format: "×%.2f imposé par le lecteur", rate))
+              why: String(format: "×%.2f imposé par le lecteur · ", rate) + reason,
+              apply: false)
     }
 
     /// Enregistrement d'un direct en cours (pas de fin déclarée) lu près de
@@ -391,11 +397,13 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     /// Vitesse imposée : elle devient la vitesse retenue (la vue la réécrit
     /// dans la préférence), sinon re-choisir la vitesse affichée dans le menu
-    /// ne ferait rien.
-    private func force(speed v: Double, notice: String, why: String) {
+    /// ne ferait rien. `apply` faux quand la vitesse vient du lecteur : elle
+    /// est adoptée telle quelle, la reposer arrondie au cran relancerait
+    /// rateDidChange sans fin s'il maintient la sienne.
+    private func force(speed v: Double, notice: String, why: String, apply: Bool = true) {
         speed = v
         player.defaultRate = Float(v)
-        if player.rate != 0, abs(Double(player.rate) - v) > 0.01 { player.rate = Float(v) }
+        if apply, player.rate != 0, abs(Double(player.rate) - v) > 0.01 { player.rate = Float(v) }
         forcedSpeed = SpeedChange(value: v, notice: notice, id: (forcedSpeed?.id ?? 0) + 1)
         logger.info("LECTEUR", "Vitesse ramenée à " + String(format: "×%g", v), why)
         refreshNowPlaying(force: true)
@@ -867,9 +875,11 @@ struct ImmersivePlayer: View {
         // l'enregistrement rouvrait la VOD à 0:00 — il fallait re-balayer la
         // barre — et le modèle continuait de se croire en direct.
         .onChange(of: url) {
+            let wasLive = model.isLive
             model.load(url: $0, seek: savedTime, isLive: isLive)
             // Bascule sur l'enregistrement : la vitesse retenue s'y applique.
-            if !isLive, model.speed != 1 { flash(speedFlash) }
+            // Pas à un changement de qualité ou de source d'une VOD.
+            if wasLive, !isLive, model.speed != 1 { flash(speedFlash) }
         }
         // La boîte change du tout au tout : on repart de l'image entière.
         .onChange(of: isLandscape) { _ in resetZoom() }
@@ -1547,9 +1557,11 @@ struct ImmersivePlayer: View {
         }
     }
 
-    /// « Vitesse 1,5× », annoncé au changement et à l'ouverture.
+    /// « Vitesse 1,5× », annoncé au changement et à l'ouverture. 1× se dit
+    /// « Normale », comme dans le menu ⋯.
     private var speedFlash: String {
-        store.t("speed") + " " + VodSpeed.label(model.speed, store.lang)
+        store.t("speed") + " " + (model.speed == 1 ? store.t("speed_normal")
+                                                    : VodSpeed.label(model.speed, store.lang))
     }
 
     /// Bandeau fugace au centre de l'image (±10 s, changement de mode du chat).
