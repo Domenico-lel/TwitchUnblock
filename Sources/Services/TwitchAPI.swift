@@ -257,6 +257,8 @@ private func workerJSON(_ path: String) async -> [String: Any]? {
 /// réécrire une playlist : quand il y en a, elle passe par le proxy du Worker,
 /// qui fait la substitution ; les segments, eux, viennent toujours du CDN
 /// (`isVod=false`). Sans passage coupé, rien ne change.
+/// Seulement « -unmuted.ts » : en fMP4, « N-unmuted.mp4 » est servi avec le
+/// son (« -muted.mp4 » est silencieux) — ne jamais l'ajouter ici.
 func playableMutedLinks(_ links: QualityLinks) async -> QualityLinks {
     guard let source = links["Source"] ?? links.values.first, let url = URL(string: source),
           let (data, _) = try? await URLSession.shared.data(from: url),

@@ -13,6 +13,10 @@ import AVFoundation
 //  remplace ceux dont l'original répond. Les segments, eux, viennent toujours
 //  du CDN en direct (adresses absolues) : rien ne transite par nos serveurs.
 //
+//  VODs en fMP4 : « N-unmuted.mp4 » est servi, lui, et AVEC le son (c'est
+//  « N-muted.mp4 » qui est silencieux, et « N.mp4 » est refusé). On le laisse
+//  tel quel : seul « -unmuted.ts » est remplacé.
+//
 //  AirPlay ne sait pas lire ces adresses : quand la lecture part sur un autre
 //  écran, on revient à la playlist du CDN (`fallBackForAirPlay`).
 // ═══════════════════════════════════════════════════════════════════════════
@@ -157,6 +161,8 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         var lines = text.components(separatedBy: "\n")
         struct Muted { let index: Int; let original: URL; let start: Double; let duration: Double }
         var muted: [Muted] = []
+        // Passages coupés déjà servis avec le son (« -unmuted.mp4 »).
+        var kept = 0
         var clock = 0.0, pending = 0.0
         for (i, raw) in lines.enumerated() {
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -172,10 +178,20 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
             }
             guard !line.isEmpty, let abs = URL(string: line, relativeTo: base)?.absoluteURL else { continue }
             var segment = abs.absoluteString
-            // « N-muted.ts », ou « N-muted.mp4 » pour les VODs en fMP4.
+            // « N-unmuted.mp4 » (VODs en fMP4) : le CDN le sert, AVEC le son
+            // (sondé : piste audio pleine, « N-muted.mp4 » est silencieux et
+            // « N.mp4 » refusé). Surtout pas de version muette : on le garde.
+            if segment.contains("-unmuted.mp4") {
+                kept += 1
+                lines[i] = segment
+                clock += pending
+                pending = 0
+                continue
+            }
+            // « N-muted.ts » / « N-unmuted.ts », ou « N-muted.mp4 » en fMP4.
             if let r = segment.range(of: #"-(un)?muted\.(ts|mp4)"#, options: .regularExpression) {
                 let ext = segment[r].hasSuffix(".mp4") ? "mp4" : "ts"
-                // « -unmuted » n'existe pas sur le CDN : la version muette sert de repli.
+                // « -unmuted.ts » est refusé par le CDN : la version muette sert de repli.
                 let original = segment.replacingCharacters(in: r, with: ".\(ext)")
                 segment = segment.replacingCharacters(in: r, with: "-muted.\(ext)")
                 if let o = URL(string: original) {
@@ -186,7 +202,10 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
             clock += pending
             pending = 0
         }
-        guard !muted.isEmpty else { return lines.joined(separator: "\n") }
+        // Rien de coupé : pas d'annonce. Que des « -unmuted.mp4 » : annonce
+        // quand même, la barre ne doit plus montrer ces passages comme muets
+        // (`exist([])` rend [] sans requête).
+        guard !muted.isEmpty || kept > 0 else { return lines.joined(separator: "\n") }
 
         // Quatre premiers d'abord : tous refusés, les originaux sont effacés
         // (VOD trop ancienne) — inutile d'interroger les centaines suivants.
@@ -210,9 +229,10 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
                 remaining.append(MutedRange(start: m.start, end: m.start + m.duration))
             }
         }
-        logger.info("UNMUTE", "Passages coupés : \(available.count)/\(muted.count) segments rétablis",
+        logger.info("UNMUTE", "Passages coupés : \(available.count)/\(muted.count) segments rétablis, \(kept) déjà avec le son (-unmuted.mp4)",
                     base.deletingLastPathComponent().lastPathComponent)
-        let restored = available.count
+        // Les « -unmuted.mp4 » comptent comme rétablis : ils se lisent avec le son.
+        let restored = available.count + kept
         let playlistURL = base.absoluteString
         let stillMuted = remaining
         await MainActor.run {
