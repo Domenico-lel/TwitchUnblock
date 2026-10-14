@@ -134,7 +134,10 @@ private struct MultiLiveChatPane: View {
         ChatView(channelName: model.login, channelId: model.channelId,
                  token: store.twitchToken, login: store.twitchLogin,
                  chatOnly: .constant(false),
-                 style: store.chatStyle(chrome: true, translucent: false))
+                 style: store.chatStyle(chrome: true, translucent: false),
+                 // Mosaïque plein écran : la page d'une chaîne s'ouvrirait
+                 // dessous, sans qu'on la voie.
+                 opensChannelPages: false)
             // Autre direct, ou identifiant arrivé : chat reconstruit à neuf.
             .id("\(model.login)-\(model.channelId ?? "")")
     }

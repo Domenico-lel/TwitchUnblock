@@ -114,13 +114,22 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 💬 **Full live chat** — read and send, with replies.
 * 😀 **Emotes** — Twitch, BetterTTV, FrankerFaceZ and 7TV, global and
-  per-channel, animated. BetterTTV's live connection adds the personal emotes
-  of BTTV Pro users (once BTTV announces them, i.e. when they open the chat)
-  and the emotes added to the channel during the stream.
-* 🔎 **Tap an emote or a badge** — its exact name and source (Twitch, BTTV,
-  FFZ, 7TV, personal), copy it or add it to your message; a badge shows its
-  title ("3-Month Subscriber"…). In the live chat, the pinned message and the
-  VOD chat.
+  per-channel, animated (FrankerFaceZ included). BetterTTV's live connection
+  adds the personal emotes of BTTV Pro users (once BTTV announces them, i.e.
+  when they open the chat) and the emotes added to the channel during the
+  stream. The emote picker is translated; long-press an emote there to open
+  its card or copy its name.
+* 🔎 **Tap an emote or a badge** — a card with the image in large, its exact
+  name and source (Twitch, BTTV, FFZ, 7TV, personal), copy it or add it to your
+  message. BetterTTV, FFZ and 7TV emotes show their scope (global or channel),
+  author, original name (7TV), whether they overlay the previous emote (7TV
+  zero-width) or are modifiers, and a link to their page. Twitch emotes show
+  their type (global, Tier 1/2/3 sub, channel points), the channel they belong
+  to (live or not, with "See channel") and a preview of that channel's other
+  sub emotes of the same tier — one public Twitch request, no account needed.
+  A badge shows its title ("3-Month Subscriber"…) in high resolution. In the
+  live chat, the multistream, the pinned message, a message thread and the
+  VOD and clip chat; VoiceOver can open it too.
 * 🏅 **Badges** — global and channel-specific, resolved through Helix.
 * 🕘 **Recent messages** — Twitch sends nothing from before you join, so the
   last messages are fetched from `recent-messages.robotty.de` (third party) and

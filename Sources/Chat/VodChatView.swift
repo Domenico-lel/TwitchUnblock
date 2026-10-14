@@ -153,7 +153,15 @@ struct VodChatView: View {
         }
         .onDisappear { vod.stop() }
         .sheet(item: $infoItem) { item in
-            ChatInfoSheet(item: item, channelId: vod.channelId).environmentObject(store)
+            ChatInfoSheet(item: item, channelId: vod.channelId,
+                          onOpenChannel: { login in
+                              // La fiche se ferme d'abord : une seule feuille à la fois.
+                              infoItem = nil
+                              DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                  store.openChannelPage(login)
+                              }
+                          })
+                .environmentObject(store)
         }
         .environment(\.chatInfoAction, { infoItem = $0 })
     }

@@ -38,7 +38,7 @@ actor EmoteService {
         guard !loadedChannels.contains(channelId) else { return }
         loadedChannels.insert(channelId)
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.loadBTTVChannel(channelId: channelId) }
+            group.addTask { await self.loadBTTVChannel(channelId: channelId, channelName: channelName) }
             // FFZ reçoit maintenant les deux : channelId pour stocker, channelName pour l'API
             group.addTask { await self.loadFFZChannel(channelId: channelId, channelName: channelName) }
             group.addTask { await self.load7TVChannel(channelId: channelId) }
@@ -103,7 +103,9 @@ actor EmoteService {
             canal += Array((channelFFZ[cid]  ?? [:]).values)   // fix : clé = channelId
             canal.sort { $0.name.lowercased() < $1.name.lowercased() }
             if !canal.isEmpty {
-                groups.append(("⭐ Canal", canal))
+                // Clé de traduction : le sélecteur l'affiche dans la langue de
+                // l'app (les autres onglets sont des noms de marque).
+                groups.append(("emotes_channel", canal))
             }
         }
 
@@ -152,17 +154,21 @@ actor EmoteService {
         guard let url = URL(string: "https://api.betterttv.net/3/cached/emotes/global"),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
-        for obj in arr { if let e = bttvEmote(obj) { globalBTTV[e.name] = e } }
+        for obj in arr { if let e = bttvEmote(obj, scope: .global) { globalBTTV[e.name] = e } }
     }
 
-    private func loadBTTVChannel(channelId: String) async {
+    private func loadBTTVChannel(channelId: String, channelName: String) async {
         guard let url = URL(string: "https://api.betterttv.net/3/cached/users/twitch/\(channelId)"),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         var map: [String: TwitchEmote] = [:]
+        // channelEmotes : mises en ligne par la chaîne ; sharedEmotes : leur
+        // créateur est dans `user`.
         for key in ["channelEmotes", "sharedEmotes"] {
             if let arr = json[key] as? [[String: Any]] {
-                for obj in arr { if let e = bttvEmote(obj) { map[e.name] = e } }
+                for obj in arr {
+                    if let e = bttvEmote(obj, scope: .channel, author: channelName) { map[e.name] = e }
+                }
             }
         }
         channelBTTV[channelId] = map
@@ -172,7 +178,7 @@ actor EmoteService {
     func setPersonalBTTV(userId: String, emotes: [[String: Any]]) {
         var map: [String: TwitchEmote] = [:]
         for obj in emotes {
-            if var e = bttvEmote(obj) { e.personal = true; map[e.name] = e }
+            if var e = bttvEmote(obj, scope: .personal) { e.personal = true; map[e.name] = e }
         }
         guard !map.isEmpty else { return }
         if personalBTTV[userId] == nil { personalOrder.append(userId) }
@@ -187,8 +193,14 @@ actor EmoteService {
         let old = map.first { $0.value.id == id }
         guard let code = (obj["code"] as? String) ?? old?.key, !code.isEmpty else { return }
         if let old { map[old.key] = nil }
+        // Renommage : l'événement ne porte que l'id et le nom, l'auteur connu
+        // est gardé.
         map[code] = TwitchEmote(id: id, name: code,
-                                url: "https://cdn.betterttv.net/emote/\(id)/2x", source: .bttv)
+                                url: "https://cdn.betterttv.net/emote/\(id)/2x", source: .bttv,
+                                scope: .channel,
+                                author: ((obj["user"] as? [String: Any])?["displayName"] as? String) ?? old?.value.author,
+                                isModifier: (obj["modifier"] as? Bool) ?? old?.value.isModifier ?? false,
+                                largeURL: "https://cdn.betterttv.net/emote/\(id)/3x")
         channelBTTV[channelId] = map
     }
 
@@ -199,10 +211,18 @@ actor EmoteService {
         channelBTTV[channelId] = map
     }
 
-    private func bttvEmote(_ obj: [String: Any]) -> TwitchEmote? {
+    /// `author` : repli quand l'emote ne nomme pas son créateur (emotes mises
+    /// en ligne par la chaîne elle-même).
+    private func bttvEmote(_ obj: [String: Any], scope: EmoteScope, author: String? = nil) -> TwitchEmote? {
         guard let id = obj["id"] as? String, let name = obj["code"] as? String else { return nil }
+        let user = obj["user"] as? [String: Any]
         return TwitchEmote(id: id, name: name,
-                           url: "https://cdn.betterttv.net/emote/\(id)/2x", source: .bttv)
+                           url: "https://cdn.betterttv.net/emote/\(id)/2x", source: .bttv,
+                           scope: scope,
+                           author: (user?["displayName"] as? String) ?? (user?["name"] as? String) ?? author,
+                           // c!, w!… : modificateurs, pas des emotes qui se superposent.
+                           isModifier: obj["modifier"] as? Bool ?? false,
+                           largeURL: "https://cdn.betterttv.net/emote/\(id)/3x")
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -215,7 +235,7 @@ actor EmoteService {
         for (_, setValue) in sets {
             guard let setObj = setValue as? [String: Any],
                   let emoticons = setObj["emoticons"] as? [[String: Any]] else { continue }
-            for obj in emoticons { if let e = ffzEmote(obj) { globalFFZ[e.name] = e } }
+            for obj in emoticons { if let e = ffzEmote(obj, scope: .global) { globalFFZ[e.name] = e } }
         }
     }
 
@@ -229,18 +249,29 @@ actor EmoteService {
         for (_, setValue) in sets {
             guard let setObj = setValue as? [String: Any],
                   let emoticons = setObj["emoticons"] as? [[String: Any]] else { continue }
-            for obj in emoticons { if let e = ffzEmote(obj) { map[e.name] = e } }
+            for obj in emoticons { if let e = ffzEmote(obj, scope: .channel) { map[e.name] = e } }
         }
         channelFFZ[channelId] = map   // ← stocké par channelId, pas channelName
     }
 
-    private func ffzEmote(_ obj: [String: Any]) -> TwitchEmote? {
+    /// Les emotes animées sont dans `animated` (WebP) : `urls` n'en garde
+    /// qu'une image fixe. `animated` vaut null pour les autres.
+    private func ffzEmote(_ obj: [String: Any], scope: EmoteScope) -> TwitchEmote? {
+        let urls = obj["urls"] as? [String: Any] ?? [:]
+        let anim = obj["animated"] as? [String: Any] ?? [:]
+        func link(_ d: [String: Any], _ size: String) -> String? {
+            guard let u = d[size] as? String, !u.isEmpty else { return nil }
+            return u.hasPrefix("//") ? "https:\(u)" : u
+        }
         guard let id   = obj["id"] as? Int,
               let name = obj["name"] as? String,
-              let urls = obj["urls"] as? [String: Any],
-              let url  = (urls["2"] ?? urls["1"]) as? String else { return nil }
-        let fullURL = url.hasPrefix("//") ? "https:\(url)" : url
-        return TwitchEmote(id: "\(id)", name: name, url: fullURL, source: .ffz)
+              let url  = link(anim, "2") ?? link(urls, "2") ?? link(urls, "1") else { return nil }
+        return TwitchEmote(id: "\(id)", name: name, url: url, source: .ffz,
+                           scope: scope,
+                           author: (obj["owner"] as? [String: Any])?["display_name"] as? String,
+                           // ffzW, ffzHyper… : effets appliqués à une autre emote.
+                           isModifier: obj["modifier"] as? Bool ?? false,
+                           largeURL: link(anim, "4") ?? link(urls, "4"))
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -250,7 +281,7 @@ actor EmoteService {
               let (data, _) = try? await URLSession.shared.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let emotes = json["emotes"] as? [[String: Any]] else { return }
-        for obj in emotes { if let e = stvEmote(obj) { global7TV[e.name] = e } }
+        for obj in emotes { if let e = stvEmote(obj, scope: .global) { global7TV[e.name] = e } }
     }
 
     private func load7TVChannel(channelId: String) async {
@@ -260,15 +291,24 @@ actor EmoteService {
               let setObj = json["emote_set"] as? [String: Any],
               let emotes = setObj["emotes"] as? [[String: Any]] else { return }
         var map: [String: TwitchEmote] = [:]
-        for obj in emotes { if let e = stvEmote(obj) { map[e.name] = e } }
+        for obj in emotes { if let e = stvEmote(obj, scope: .channel) { map[e.name] = e } }
         channel7TV[channelId] = map
     }
 
-    private func stvEmote(_ obj: [String: Any]) -> TwitchEmote? {
+    private func stvEmote(_ obj: [String: Any], scope: EmoteScope) -> TwitchEmote? {
         guard let id   = obj["id"] as? String,
               let name = obj["name"] as? String,
               let data = obj["data"] as? [String: Any],
               let host = (data["host"] as? [String: Any])?["url"] as? String else { return nil }
-        return TwitchEmote(id: id, name: name, url: "https:\(host)/2x.webp", source: .seventv)
+        // `name` : nom choisi par la chaîne ; `data.name` : nom d'origine.
+        let original = data["name"] as? String
+        return TwitchEmote(id: id, name: name, url: "https:\(host)/2x.webp", source: .seventv,
+                           scope: scope,
+                           author: (data["owner"] as? [String: Any])?["display_name"] as? String,
+                           originalName: original.flatMap { $0.isEmpty || $0 == name ? nil : $0 },
+                           // Drapeau actif dans ce jeu d'emotes (data.flags n'est
+                           // qu'une recommandation).
+                           zeroWidth: ((obj["flags"] as? Int) ?? 0) & 1 != 0,
+                           largeURL: "https:\(host)/4x.webp")
     }
 }

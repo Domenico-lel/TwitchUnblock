@@ -330,6 +330,14 @@ enum ChatInfoItem: Identifiable {
         case .badge(let b): return "badge:\(b.id)"
         }
     }
+
+    /// Ce que VoiceOver annonce : nom de l'emote, ou nom du jeu de badges.
+    var accessibilityName: String {
+        switch self {
+        case .emote(let e): return e.name
+        case .badge(let b): return ChatInfoSheet.fallbackTitle(b)
+        }
+    }
 }
 
 private struct ChatInfoActionKey: EnvironmentKey {
@@ -347,92 +355,300 @@ extension EnvironmentValues {
 
 extension View {
     /// Toucher → fiche, seulement si un chat la propose : sinon le geste
-    /// prendrait le toucher destiné au message.
+    /// prendrait le toucher destiné au message. Annoncé comme un bouton à
+    /// VoiceOver, qui peut alors l'ouvrir aussi.
     @ViewBuilder
     func chatInfoTap(_ action: ((ChatInfoItem) -> Void)?, _ item: @escaping @autoclosure () -> ChatInfoItem) -> some View {
-        if let action { onTapGesture { action(item()) } } else { self }
+        if let action {
+            onTapGesture { action(item()) }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel(Text(item().accessibilityName))
+                .accessibilityAction { action(item()) }
+        } else {
+            self
+        }
     }
 }
 
-/// Nom exact (à copier), source et image en grand, ou titre d'un badge.
+/// Hauteur du contenu de la fiche : la feuille prend juste ce qu'il faut.
+private struct ChatInfoHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+/// Nom exact (à copier), source et portée, auteur, image en grand ; pour une
+/// emote Twitch, son type et sa chaîne (lus à part, comme sur twitch.tv) ;
+/// pour un badge, son titre.
 struct ChatInfoSheet: View {
     let item: ChatInfoItem
     let channelId: String?
     /// Ajouter l'emote au message en cours (nil si on ne peut pas écrire).
     var onInsert: ((TwitchEmote) -> Void)? = nil
+    /// « Voir la chaîne » d'une emote Twitch : ferme la fiche et ouvre la page
+    /// de la chaîne. nil : bouton masqué (multi-live, fil d'un message).
+    var onOpenChannel: ((String) -> Void)? = nil
 
     @EnvironmentObject private var store: AppStore
     @State private var badge: (title: String, description: String)? = nil
+    @State private var twitchInfo: TwitchEmoteInfo? = nil
     @State private var copied = false
+    @State private var contentHeight: CGFloat = 260
 
     var body: some View {
-        VStack(spacing: 12) {
+        // Défile si le contenu dépasse l'écran (paysage, grand texte).
+        ScrollView {
+            VStack(spacing: 12) {
+                switch item {
+                case .emote(let e): emoteContent(e)
+                case .badge(let b): badgeContent(b)
+                }
+            }
+            .padding(20)
+            .padding(.top, 6)
+            .frame(maxWidth: .infinity)
+            .background(GeometryReader { g in
+                Color.clear.preference(key: ChatInfoHeightKey.self, value: g.size.height)
+            })
+        }
+        .onPreferenceChange(ChatInfoHeightKey.self) { h in
+            if h > 0 { contentHeight = ceil(h) }
+        }
+        // Nouvelle fiche dans la même feuille : l'ancienne réponse n'est
+        // jamais posée sur la nouvelle.
+        .task(id: item.id) {
             switch item {
-            case .emote(let e):
-                CachedEmoteImage(url: Self.largeURL(e), name: e.name, height: 72)
-                Text(e.name)
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
-                    .foregroundColor(.tText)
-                    .textSelection(.enabled)
-                    .multilineTextAlignment(.center)
-                Text(sourceLabel(e)).font(.system(size: 13)).foregroundColor(.tMuted)
-                HStack(spacing: 10) {
-                    Button {
-                        UIPasteboard.general.string = e.name
-                        copied = true
-                    } label: {
-                        Label(store.t(copied ? "chat_info_copied" : "chat_info_copy"),
-                              systemImage: copied ? "checkmark" : "doc.on.doc")
-                    }
-                    .buttonStyle(.borderedProminent).tint(.tPrimary)
-                    if let onInsert {
-                        Button { onInsert(e) } label: {
-                            Label(store.t("chat_info_insert"), systemImage: "text.cursor")
-                        }
-                        .buttonStyle(.bordered).tint(.tPrimary)
-                    }
-                }
-                .font(.system(size: 14, weight: .semibold))
             case .badge(let b):
-                CachedEmoteImage(url: b.url, name: "", height: 54, showsNameFallback: false)
-                Text(badge?.title ?? Self.fallbackTitle(b))
-                    .font(.system(size: 20, weight: .bold)).foregroundColor(.tText)
-                    .multilineTextAlignment(.center)
-                if let d = badge?.description, !d.isEmpty, d != badge?.title {
-                    Text(d).font(.system(size: 13)).foregroundColor(.tMuted)
-                        .multilineTextAlignment(.center)
-                }
-                Text(store.t("chat_info_badge")).font(.system(size: 12)).foregroundColor(.tMuted)
+                let info = await BadgeService.shared.info(badgeId: b.id, channelId: channelId)
+                if !Task.isCancelled { badge = info }
+            case .emote(let e):
+                twitchInfo = nil
+                guard e.source == .twitch else { return }
+                // Sans réponse (Twitch bloqué, schéma changé) : la fiche reste
+                // celle d'avant, sans message d'erreur.
+                let info = await EmoteInfoService.shared.twitch(id: e.id)
+                if !Task.isCancelled { twitchInfo = info }
             }
         }
-        .padding(20)
-        .frame(maxWidth: .infinity)
-        .task {
-            if case .badge(let b) = item {
-                badge = await BadgeService.shared.info(badgeId: b.id, channelId: channelId)
-            }
-        }
-        .presentationDetents([.height(260)])
+        // Un peu de marge : selon le système, la barre d'accueil est comptée
+        // dans la hauteur demandée.
+        .presentationDetents([.height(max(200, contentHeight + 16))])
         .presentationDragIndicator(.visible)
     }
 
+    // MARK: Emote
+    @ViewBuilder
+    private func emoteContent(_ e: TwitchEmote) -> some View {
+        // 72 pt suffisent : les plus grandes images servies font 84 à 128 px.
+        // Largeur bornée : une emote très large ne déborde pas.
+        CachedEmoteImage(url: Self.largeURL(e), name: e.name, height: 72,
+                         maxWidth: 280, fallbackURL: e.url)
+        Text(e.name)
+            .font(.system(size: 22, weight: .bold, design: .monospaced))
+            .foregroundColor(.tText)
+            .textSelection(.enabled)
+            .multilineTextAlignment(.center)
+        VStack(spacing: 4) {
+            Text(sourceLabel(e)).font(.system(size: 13)).foregroundColor(.tMuted)
+            ForEach(detailLines(e), id: \.self) { line in
+                Text(line).font(.system(size: 12)).foregroundColor(.tMuted)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        if let info = twitchInfo, let owner = info.owner {
+            ownerRow(owner)
+            subEmotes(info, ownerName: owner.displayName)
+        }
+        if let page = Self.pageURL(e) {
+            Button { UIApplication.shared.open(page.url) } label: {
+                Label(store.t("emote_view_on").replacingOccurrences(of: "{p}", with: page.name),
+                      systemImage: "arrow.up.right.square")
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(.tPrimary)
+            .buttonStyle(.plain)
+        }
+        HStack(spacing: 10) {
+            Button {
+                UIPasteboard.general.string = e.name
+                copied = true
+            } label: {
+                Label(store.t(copied ? "chat_info_copied" : "chat_info_copy"),
+                      systemImage: copied ? "checkmark" : "doc.on.doc")
+            }
+            .buttonStyle(.borderedProminent).tint(.tPrimary)
+            if let onInsert {
+                Button { onInsert(e) } label: {
+                    Label(store.t("chat_info_insert"), systemImage: "text.cursor")
+                }
+                .buttonStyle(.bordered).tint(.tPrimary)
+            }
+        }
+        .font(.system(size: 14, weight: .semibold))
+    }
+
+    /// Chaîne propriétaire d'une emote Twitch : avatar, nom, en direct ou non.
+    @ViewBuilder
+    private func ownerRow(_ o: TwitchEmoteInfo.Owner) -> some View {
+        HStack(spacing: 10) {
+            AsyncImage(url: URL(string: o.avatar ?? "")) { img in
+                img.resizable().scaledToFill()
+            } placeholder: {
+                Circle().fill(Color.tSurface)
+            }
+            .frame(width: 28, height: 28)
+            .clipShape(Circle())
+            Text(o.displayName)
+                .font(.system(size: 14, weight: .bold)).foregroundColor(.tText)
+                .lineLimit(1)
+            if o.isLive { TLiveBadge(compact: true) }
+            Spacer(minLength: 4)
+            if let onOpenChannel {
+                Button { onOpenChannel(o.login) } label: {
+                    HStack(spacing: 2) {
+                        Text(store.t("see_channel"))
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
+                    }
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.tPrimary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color.tSurface.opacity(0.6))
+        .cornerRadius(10)
+    }
+
+    /// Emotes d'abonné du même niveau, comme Twitch (« 63 autres » pour 64 au
+    /// niveau 1) : leur nombre et quelques aperçus.
+    @ViewBuilder
+    private func subEmotes(_ info: TwitchEmoteInfo, ownerName: String) -> some View {
+        if info.type == "SUBSCRIPTIONS", info.tier != nil, !info.sameTier.isEmpty {
+            let others = Array(info.sameTier.filter { $0.id != info.id }.prefix(8))
+            Text(store.t("emote_sub_count")
+                    .replacingOccurrences(of: "{c}", with: ownerName)
+                    .replacingOccurrences(of: "{n}", with: "\(info.sameTier.count)"))
+                .font(.system(size: 12)).foregroundColor(.tMuted)
+                .multilineTextAlignment(.center)
+            if !others.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(others) { x in
+                        CachedEmoteImage(url: x.url, name: x.token, height: 28,
+                                         showsNameFallback: false, maxWidth: 34)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Source et portée : « 7TV · Emote de la chaîne » ; pour une emote
+    /// Twitch, son type dès qu'il est connu.
     private func sourceLabel(_ e: TwitchEmote) -> String {
         switch e.source {
-        case .twitch: return store.t("emote_src_twitch")
-        case .bttv: return e.personal ? store.t("emote_src_bttv_personal") : "BetterTTV"
-        case .ffz: return "FrankerFaceZ"
+        case .twitch:
+            return twitchTypeLabel ?? store.t("emote_src_twitch")
+        case .bttv where e.personal:
+            return store.t("emote_src_bttv_personal")
+        default:
+            let scope: String?
+            switch e.scope {
+            case .global:  scope = store.t("emote_scope_global")
+            case .channel: scope = store.t("emote_scope_channel")
+            case .personal, .unknown: scope = nil
+            }
+            return [Self.brand(e.source), scope].compactMap { $0 }.joined(separator: " · ")
+        }
+    }
+
+    /// Seuls ces types sont vérifiés : pour un autre, la ligne générique
+    /// plutôt qu'une valeur brute.
+    private var twitchTypeLabel: String? {
+        guard let info = twitchInfo else { return nil }
+        switch info.type {
+        case "GLOBALS", "SMILIES":
+            return store.t("emote_type_global")
+        case "SUBSCRIPTIONS":
+            guard let n = info.tier else { return nil }
+            return "Twitch · " + store.t("emote_type_sub").replacingOccurrences(of: "{n}", with: "\(n)")
+        case "CHANNEL_POINTS":
+            return "Twitch · " + store.t("emote_type_points")
+        default:
+            return nil
+        }
+    }
+
+    /// Auteur, nom d'origine, zero-width (7TV), modificateur (BTTV, FFZ).
+    private func detailLines(_ e: TwitchEmote) -> [String] {
+        var lines: [String] = []
+        if let a = e.author, !a.isEmpty {
+            lines.append(store.t("emote_by").replacingOccurrences(of: "{u}", with: a))
+        }
+        if let o = e.originalName {
+            lines.append(store.t("emote_original").replacingOccurrences(of: "{n}", with: o))
+        }
+        if e.zeroWidth { lines.append(store.t("emote_zero_width")) }
+        if e.isModifier { lines.append(store.t("emote_modifier")) }
+        return lines
+    }
+
+    private static func brand(_ s: EmoteSource) -> String {
+        switch s {
+        case .twitch:  return "Twitch"
+        case .bttv:    return "BetterTTV"
+        case .ffz:     return "FrankerFaceZ"
         case .seventv: return "7TV"
         }
     }
 
+    /// Page de l'emote chez BTTV, FFZ ou 7TV (« Voir sur … »).
+    static func pageURL(_ e: TwitchEmote) -> (name: String, url: URL)? {
+        guard !e.id.isEmpty,
+              let id = e.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
+        let link: String
+        switch e.source {
+        case .twitch:  return nil
+        case .bttv:    link = "https://betterttv.com/emotes/\(id)"
+        case .ffz:     link = "https://www.frankerfacez.com/emoticon/\(id)"
+        case .seventv: link = "https://7tv.app/emotes/\(id)"
+        }
+        guard let url = URL(string: link) else { return nil }
+        return (name: brand(e.source), url: url)
+    }
+
     /// Image plus grande que celle du chat, quand la source la propose.
     static func largeURL(_ e: TwitchEmote) -> String {
+        // VOD téléchargée : image gardée dans le dossier, une seule taille.
+        guard e.url.hasPrefix("https://") else { return e.url }
+        if let large = e.largeURL, !large.isEmpty { return large }
         switch e.source {
         case .twitch: return e.url.replacingOccurrences(of: "/2.0", with: "/3.0")
         case .bttv: return e.url.replacingOccurrences(of: "/2x", with: "/3x")
         case .seventv: return e.url.replacingOccurrences(of: "/2x.", with: "/4x.")
         case .ffz: return e.url
         }
+    }
+
+    // MARK: Badge
+    @ViewBuilder
+    private func badgeContent(_ b: TwitchBadge) -> some View {
+        CachedEmoteImage(url: Self.largeBadgeURL(b.url), name: "", height: 54,
+                         showsNameFallback: false, fallbackURL: b.url)
+        Text(badge?.title ?? Self.fallbackTitle(b))
+            .font(.system(size: 20, weight: .bold)).foregroundColor(.tText)
+            .multilineTextAlignment(.center)
+        if let d = badge?.description, !d.isEmpty, d != badge?.title {
+            Text(d).font(.system(size: 13)).foregroundColor(.tMuted)
+                .multilineTextAlignment(.center)
+        }
+        Text(store.t("chat_info_badge")).font(.system(size: 12)).foregroundColor(.tMuted)
+    }
+
+    /// Taille /3 (72 px) : la /2 du chat (36 px) est floue en grand.
+    static func largeBadgeURL(_ url: String) -> String {
+        guard url.hasPrefix("https://"), url.hasSuffix("/2") else { return url }
+        return String(url.dropLast()) + "3"
     }
 
     /// Sans titre connu : le nom du jeu de badges (« subscriber »…).

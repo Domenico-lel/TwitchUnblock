@@ -13,6 +13,9 @@ struct ChatView: View {
     /// Présentation : plein cadre, colonne étroite, ou calque sur l'image.
     var style: ChatStyle = .standard
     var onJoinChannel: (String) -> Void = { _ in }   // raid → bascule vers une autre chaîne
+    /// « Voir la chaîne » dans la fiche d'une emote. Faux en multi-live : la
+    /// mosaïque est plein écran, la page s'ouvrirait dessous.
+    var opensChannelPages = true
 
     @EnvironmentObject private var store: AppStore
     @StateObject private var chat          = ChatService()
@@ -378,7 +381,15 @@ struct ChatView: View {
             }
             .sheet(item: $infoItem) { item in
                 ChatInfoSheet(item: item, channelId: channelId,
-                              onInsert: canSendMessages ? { (e: TwitchEmote) in insertEmote(e); infoItem = nil } : nil)
+                              onInsert: canSendMessages ? { (e: TwitchEmote) in insertEmote(e); infoItem = nil } : nil,
+                              onOpenChannel: opensChannelPages ? { (login: String) in
+                                  // Une seule feuille à la fois : la fiche se ferme
+                                  // avant que la page s'ouvre (le lecteur se réduit).
+                                  infoItem = nil
+                                  DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                      store.openChannelPage(login)
+                                  }
+                              } : nil)
                     .environmentObject(store)
             }
             // Toucher une emote ou un badge (messages, épinglé) : sa fiche.
@@ -393,9 +404,11 @@ struct ChatView: View {
 
             // ── Zone principale ─────────────────────────────────────
             if showEmotePicker && canSendMessages {
-                EmotePickerView(channelId: channelId) { emote in
-                    insertEmote(emote)
-                }
+                // Appui long sur une emote : sa fiche (le sélecteur est dans la
+                // vue, pas dans une feuille : aucun conflit).
+                EmotePickerView(channelId: channelId,
+                                onSelect: { emote in insertEmote(emote) },
+                                onInfo: { emote in infoItem = .emote(emote) })
                 .transition(.asymmetric(
                     insertion: .move(edge: .bottom).combined(with: .opacity),
                     removal:   .move(edge: .bottom).combined(with: .opacity)

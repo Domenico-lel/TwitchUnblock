@@ -74,10 +74,30 @@ struct TwitchEmote: Identifiable, Hashable {
     var source: EmoteSource = .twitch
     /// Emote personnelle d'un abonné BTTV Pro (utilisable partout par lui seul).
     var personal = false
+    // Infos déjà téléchargées avec les emotes BTTV, FFZ et 7TV, pour leur
+    // fiche. Valeurs par défaut : les emotes Twitch (tag IRC) et celles du
+    // chat.json d'une VOD téléchargée n'en ont pas.
+    var scope: EmoteScope = .unknown
+    /// Créateur de l'emote (BTTV partagée, FFZ, 7TV) ou chaîne qui l'a mise en ligne.
+    var author: String? = nil
+    /// 7TV : nom de l'emote avant que la chaîne la renomme.
+    var originalName: String? = nil
+    /// 7TV seulement : se pose par-dessus l'emote précédente (flags & 1).
+    var zeroWidth = false
+    /// Champ `modifier` de BTTV et FFZ (w!, ffzW…) : modifie une autre emote.
+    /// Ce n'est pas un zero-width.
+    var isModifier = false
+    /// Plus grande image servie (fiche) : BTTV 3x, FFZ 4, 7TV 4x.
+    var largeURL: String? = nil
 }
 
 enum EmoteSource: String {
     case twitch, bttv, ffz, seventv
+}
+
+/// Portée d'une emote tierce : de la chaîne, globale, ou personnelle (BTTV Pro).
+enum EmoteScope {
+    case global, channel, personal, unknown
 }
 
 // MARK: – Modes du salon

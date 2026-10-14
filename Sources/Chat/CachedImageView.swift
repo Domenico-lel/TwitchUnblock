@@ -51,13 +51,17 @@ struct CachedEmoteImage: View {
     /// Largeur maximale : une emote très large est réduite (proportions
     /// gardées) au lieu de déborder sur ses voisines.
     let maxWidth: CGFloat?
+    /// Image de repli si `url` ne répond pas (grande taille absente : fiche).
+    let fallbackURL: String?
 
     @State private var img: CachedImage?
     @State private var failed = false
 
     init(url: String, name: String, height: CGFloat = 24,
-         showsNameFallback: Bool = true, animated: Bool = true, maxWidth: CGFloat? = nil) {
+         showsNameFallback: Bool = true, animated: Bool = true, maxWidth: CGFloat? = nil,
+         fallbackURL: String? = nil) {
         self.maxWidth = maxWidth
+        self.fallbackURL = fallbackURL
         self.url = url
         self.name = name
         self.height = height
@@ -100,11 +104,21 @@ struct CachedEmoteImage: View {
                 Color.clear.frame(width: height, height: height)
             }
         }
+        // VoiceOver lit le nom de l'emote au lieu de « image ».
+        .accessibilityLabelIfAny(name)
         .task(id: url) {
             if img != nil { return }
             if let hit = ImageCache.shared.cached(url) { img = hit; return }
             if let loaded = await ImageCache.shared.image(for: url) { img = loaded }
+            else if let fb = fallbackURL, fb != url, let loaded = await ImageCache.shared.image(for: fb) { img = loaded }
             else { failed = true }
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func accessibilityLabelIfAny(_ label: String) -> some View {
+        if label.isEmpty { self } else { accessibilityLabel(Text(label)) }
     }
 }

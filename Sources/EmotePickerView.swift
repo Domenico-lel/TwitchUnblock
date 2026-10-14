@@ -3,7 +3,10 @@ import SwiftUI
 struct EmotePickerView: View {
     let channelId: String?
     let onSelect: (TwitchEmote) -> Void
+    /// Appui long → « Voir la fiche » (nil : entrée absente du menu).
+    var onInfo: ((TwitchEmote) -> Void)? = nil
 
+    @EnvironmentObject private var store: AppStore
     @State private var groups:      [(label: String, emotes: [TwitchEmote])] = []
     @State private var selectedTab  = 0
     @State private var searchText   = ""
@@ -44,7 +47,7 @@ struct EmotePickerView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.tMuted)
                     .font(.system(size: 13))
-                TextField("Chercher une emote…", text: $searchText)
+                TextField(store.t("emote_search_ph"), text: $searchText)
                     .foregroundColor(.tText)
                     .font(.system(size: 13))
                     .autocorrectionDisabled()
@@ -71,7 +74,7 @@ struct EmotePickerView: View {
                     HStack(spacing: 6) {
                         ForEach(groups.indices, id: \.self) { i in
                             Button { withAnimation(.easeInOut(duration: 0.15)) { selectedTab = i } } label: {
-                                Text(groups[i].label)
+                                Text(tabLabel(groups[i].label))
                                     .font(.system(size: 12, weight: .semibold))
                                     .foregroundColor(selectedTab == i ? .white : .tMuted)
                                     .padding(.horizontal, 12)
@@ -91,7 +94,9 @@ struct EmotePickerView: View {
             } else if !searchText.isEmpty && !isLoading {
                 // Compteur résultats
                 HStack {
-                    Text("\(displayed.count) résultat(s) pour « \(searchText) »")
+                    Text(store.t("emote_results")
+                            .replacingOccurrences(of: "{q}", with: searchText)
+                            .replacingOccurrences(of: "{n}", with: "\(displayed.count)"))
                         .font(.system(size: 11))
                         .foregroundColor(.tMuted)
                     Spacer()
@@ -107,7 +112,7 @@ struct EmotePickerView: View {
                 Spacer()
                 VStack(spacing: 10) {
                     ProgressView().tint(.tPrimary)
-                    Text("Chargement des emotes…")
+                    Text(store.t("emotes_loading"))
                         .font(.system(size: 12))
                         .foregroundColor(.tMuted)
                 }
@@ -116,11 +121,11 @@ struct EmotePickerView: View {
             } else if displayed.isEmpty {
                 Spacer()
                 VStack(spacing: 8) {
-                    Text(searchText.isEmpty ? "Aucune emote disponible" : "Aucun résultat")
+                    Text(store.t(searchText.isEmpty ? "emotes_none" : "emotes_no_result"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.tMuted)
                     if searchText.isEmpty {
-                        Text("Ouvre un live pour charger les emotes du canal")
+                        Text(store.t("emotes_open_live"))
                             .font(.system(size: 11))
                             .foregroundColor(.tMuted)
                             .multilineTextAlignment(.center)
@@ -133,7 +138,9 @@ struct EmotePickerView: View {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 2) {
                         ForEach(displayed) { emote in
-                            EmoteCell(emote: emote) { onSelect(emote) }
+                            // Toucher : insère ; appui long : fiche ou copie du nom.
+                            EmoteCell(emote: emote, onTap: { onSelect(emote) },
+                                      onInfo: onInfo.map { open in { open(emote) } })
                         }
                     }
                     .padding(.horizontal, 8)
@@ -155,12 +162,19 @@ struct EmotePickerView: View {
             isLoading   = false
         }
     }
+
+    /// Onglets : noms de marque (7TV, BTTV, FFZ), sauf celui de la chaîne.
+    private func tabLabel(_ label: String) -> String {
+        label == "emotes_channel" ? "⭐ " + store.t("emotes_channel") : label
+    }
 }
 
 // MARK: – Cellule emote
 private struct EmoteCell: View {
     let emote: TwitchEmote
     let onTap: () -> Void
+    var onInfo: (() -> Void)? = nil
+    @EnvironmentObject private var store: AppStore
 
     var body: some View {
         Button(action: onTap) {
@@ -186,5 +200,18 @@ private struct EmoteCell: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(emote.name))
+        .contextMenu {
+            if let onInfo {
+                Button(action: onInfo) {
+                    Label(store.t("chat_info_open"), systemImage: "info.circle")
+                }
+            }
+            Button {
+                UIPasteboard.general.string = emote.name
+            } label: {
+                Label(store.t("chat_info_copy"), systemImage: "doc.on.doc")
+            }
+        }
     }
 }
