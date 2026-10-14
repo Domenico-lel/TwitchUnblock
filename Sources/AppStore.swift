@@ -355,12 +355,19 @@ final class AppStore: ObservableObject {
     func isCategoryFollowed(_ id: String) -> Bool { followedCategories.contains { $0.id == id } }
     func toggleCategoryFollow(_ c: TwitchCategory) {
         if let i = followedCategories.firstIndex(where: { $0.id == c.id }) { followedCategories.remove(at: i) }
-        else { followedCategories.insert(TwitchCategory(id: c.id, name: c.name, boxArtURL: c.boxArtURL), at: 0) }
+        else {
+            followedCategories.insert(TwitchCategory(id: c.id, name: c.name, boxArtURL: c.boxArtURL), at: 0)
+            // Suivre une catégorie masquée la réaffiche.
+            if hidden.hides(category: c.id) { hidden.unhide(category: c.id) }
+        }
     }
 
     /// Chaînes suivies par le compte Twitch, telles que lues par l'accueil
     /// (non enregistrées) : l'export les ajoute aux suivis de l'appareil.
     var accountFollowLogins: [String] = []
+    /// Catégories suivies sur Twitch (session web), telles que lues par
+    /// l'onglet Catégories (non enregistrées) : jamais masquées.
+    var accountFollowedCategoryIds: Set<String> = []
 
     /// Chaînes suivies sans compte Twitch (sur cet appareil), en minuscules.
     @Published var localFollows: [String] = [] {
@@ -370,7 +377,10 @@ final class AppStore: ObservableObject {
     func toggleLocalFollow(_ login: String) {
         let l = login.lowercased()
         if let i = localFollows.firstIndex(of: l) { localFollows.remove(at: i) }
-        else if !l.isEmpty { localFollows.insert(l, at: 0) }
+        else if !l.isEmpty {
+            localFollows.insert(l, at: 0)
+            unhideChannel(l)
+        }
     }
 
     /// Streamers épinglés (en minuscules) : en tête des suivis, en live comme
@@ -385,6 +395,62 @@ final class AppStore: ObservableObject {
         let l = login.lowercased()
         if let i = pinnedStreamers.firstIndex(of: l) { pinnedStreamers.remove(at: i) }
         else if !l.isEmpty { pinnedStreamers.append(l) }
+    }
+
+    // MARK: – Chaînes et catégories masquées (découverte)
+    /// Masquées du top, de la grille des catégories et des lives d'une
+    /// catégorie ; la recherche et les pages ouvertes directement montrent
+    /// tout. Sur cet appareil, dans la sauvegarde (clé « hidden »).
+    @Published var hidden = HiddenContent.load() {
+        didSet { if hidden != oldValue { hidden.save() } }
+    }
+
+    /// Chaîne suivie (compte ou appareil) ou épinglée : jamais masquée.
+    func isFollowedOrPinned(_ login: String) -> Bool {
+        let l = login.lowercased()
+        return isLocallyFollowed(l) || isPinned(l) || accountFollowLogins.contains(l)
+    }
+    /// Catégorie suivie, sur cet appareil ou sur Twitch : jamais masquée.
+    func followsCategory(_ id: String) -> Bool {
+        !id.isEmpty && (isCategoryFollowed(id) || accountFollowedCategoryIds.contains(id))
+    }
+    /// La chaîne passe le filtre, quelle que soit sa catégorie (lives d'une
+    /// catégorie ouverte : elle est consultable même masquée).
+    func showsChannel(_ login: String) -> Bool {
+        isFollowedOrPinned(login) || !hidden.hides(channel: login)
+    }
+    /// Un live du top : ni sa chaîne ni sa catégorie ne sont masquées, sauf
+    /// si on suit l'une ou l'autre.
+    func showsStream(_ s: TwitchStream) -> Bool {
+        isFollowedOrPinned(s.userLogin)
+            || (!hidden.hides(channel: s.userLogin) && (followsCategory(s.gameId) || !hidden.hides(category: s.gameId)))
+    }
+    /// Une carte de la grille « Toutes » des catégories.
+    func showsCategory(_ c: TwitchCategory) -> Bool {
+        followsCategory(c.id) || !hidden.hides(category: c.id)
+    }
+
+    func hideChannel(login: String, name: String) {
+        guard !isFollowedOrPinned(login) else { return }
+        hidden.hide(channel: login, name: name)
+        logger.info("MASQUÉS", "Chaîne masquée @\(login.lowercased())", nil)
+    }
+    func hideCategory(id: String, name: String, box: String) {
+        guard !followsCategory(id) else { return }
+        hidden.hide(category: id, name: name, box: box)
+        logger.info("MASQUÉS", "Catégorie masquée \(id) (\(name))", nil)
+    }
+    func unhideChannel(_ login: String) {
+        guard hidden.hides(channel: login) else { return }
+        hidden.unhide(channel: login)
+    }
+    func unhideCategory(_ id: String) {
+        guard hidden.hides(category: id) else { return }
+        hidden.unhide(category: id)
+    }
+    func unhideAll() {
+        hidden.unhideAll()
+        logger.info("MASQUÉS", "Tout réaffiché", nil)
     }
 
     /// Accueil : chaînes en grille (cartes) ou en liste (façon Twitch).

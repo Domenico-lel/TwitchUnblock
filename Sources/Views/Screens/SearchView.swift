@@ -307,7 +307,16 @@ struct SearchView: View {
                         .overlay(Circle().stroke(s.isLive ? Color.tLive : .clear, lineWidth: 2).padding(-2))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(s.name).font(.tCardTitle).foregroundColor(.tText).lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text(s.name).font(.tCardTitle).foregroundColor(.tText).lineLimit(1)
+                                // Masquée des listes : la recherche la trouve quand même.
+                                if store.hidden.hides(channel: s.login) {
+                                    Image(systemName: "eye.slash")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(.tMuted)
+                                        .accessibilityLabel(store.t("hidden_badge"))
+                                }
+                            }
                             if let viewers = s.viewers {
                                 HStack(spacing: 5) {
                                     Text("LIVE")
@@ -415,7 +424,13 @@ struct SearchView: View {
                 let local = store.twitchWebToken == nil
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    Task { await follow.toggle(token: store.twitchWebToken) }
+                    let login = channelName
+                    Task { @MainActor in
+                        await follow.toggle(token: store.twitchWebToken)
+                        // Suivie (aussi sur Twitch, sans passer par AppStore) :
+                        // elle n'a plus à être masquée.
+                        if follow.isFollowing == true { store.unhideChannel(login) }
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: on ? "heart.fill" : "heart")
@@ -433,6 +448,25 @@ struct SearchView: View {
                 .buttonStyle(.plain)
                 .disabled(follow.busy)
                 .opacity(follow.busy ? 0.5 : 1)
+                .padding(.horizontal, TSpace.lg)
+            }
+
+            // Chaîne masquée des listes de découverte : la réafficher d'ici.
+            if !channelName.isEmpty, store.hidden.hides(channel: channelName) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { store.unhideChannel(channelName) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "eye")
+                        Text("\(store.t("hidden_badge")) · \(store.t("unhide"))")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundColor(.tMuted)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Color.tSurface)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
                 .padding(.horizontal, TSpace.lg)
             }
         }

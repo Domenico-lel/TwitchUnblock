@@ -40,6 +40,7 @@ struct SettingsView: View {
     @ObservedObject private var usage      = UsageService.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showSleepSheet  = false
+    @State private var showHidden      = false   // chaînes et catégories masquées
     // Sauvegarde (export / import)
     @State private var exportDoc: BackupDocument? = nil
     @State private var showExporter    = false
@@ -143,6 +144,10 @@ struct SettingsView: View {
         .sheet(isPresented: $showSleepSheet) {
             SleepTimerSheet()
                 .presentationDetents([.medium, .large])
+        }
+        // ── Chaînes et catégories masquées ───────────────────────────
+        .sheet(isPresented: $showHidden) {
+            HiddenContentSheet().environmentObject(store)
         }
         // ── Logs sheet ───────────────────────────────────────────────
         .sheet(isPresented: $showLogs) {
@@ -475,6 +480,7 @@ struct SettingsView: View {
                     usageCard
                 case .general:
                     langueCard
+                    hiddenCard
                     apparenceCard
                     autoclaimCard
                     veilleCard
@@ -628,6 +634,45 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("show_recent"), store.t("show_recent_sub"),
                           $store.showRecentChannels, log: "Streamers récents")
+            }
+        }
+    }
+
+    /// Chaînes et catégories masquées du top et des catégories : combien, et
+    /// la feuille pour les réafficher.
+    @ViewBuilder private var hiddenCard: some View {
+        settingCard {
+            VStack(alignment: .leading, spacing: 12) {
+                label("eye.slash", store.t("hidden_title"))
+                Text(store.t("hidden_sub"))
+                    .font(.tMeta).foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if store.hidden.isEmpty {
+                    Text(store.t("hidden_empty"))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    let channels = store.t("hidden_channels_n")
+                        .replacingOccurrences(of: "{n}", with: "\(store.hidden.channels.count)")
+                    let categories = store.t("hidden_categories_n")
+                        .replacingOccurrences(of: "{n}", with: "\(store.hidden.categories.count)")
+                    Button { showHidden = true } label: {
+                        HStack(spacing: 8) {
+                            Text("\(channels) · \(categories)")
+                                .font(.tCardTitle).foregroundColor(.tText)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.tMuted)
+                        }
+                        .padding(12)
+                        .background(Color.tSurface)
+                        .cornerRadius(10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }

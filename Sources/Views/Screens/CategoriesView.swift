@@ -109,6 +109,8 @@ struct CategoriesView: View {
     @State private var twitchFollowed: [TwitchCategory] = []
     @State private var followedViewers: [String: Int] = [:]
     @State private var loadingFollowed = false
+    /// Feuille des chaînes et catégories masquées (ligne « N masqués · Gérer »).
+    @State private var showHidden = false
 
     /// Suivies : Twitch puis appareil, sans doublon.
     private var followedList: [TwitchCategory] {
@@ -136,13 +138,20 @@ struct CategoriesView: View {
             Task { await loadFollowed() }
         }
         .onChange(of: store.followedCategories.map(\.id)) { _ in Task { await loadFollowed() } }
+        .sheet(isPresented: $showHidden) {
+            HiddenContentSheet().environmentObject(store)
+        }
     }
 
     /// Catégories suivies : Twitch (si session web) + appareil, avec audience.
     @MainActor private func loadFollowed() async {
         if let web = store.twitchWebToken {
             if twitchFollowed.isEmpty { loadingFollowed = true }
-            if let list = await getFollowedCategoriesGQL(webToken: web) { twitchFollowed = list }
+            if let list = await getFollowedCategoriesGQL(webToken: web) {
+                twitchFollowed = list
+                // Suivies sur Twitch : jamais masquées (règle d'AppStore).
+                store.accountFollowedCategoryIds = Set(list.map(\.id))
+            }
             loadingFollowed = false
         }
         let missing = store.followedCategories.map(\.id)
@@ -218,14 +227,22 @@ struct CategoriesView: View {
                 TEmptyState(icon: "magnifyingglass", title: store.t("no_result"))
                 Spacer()
             } else {
+                // Sans recherche, les catégories masquées sont écartées ; une
+                // recherche les montre toutes, les masquées atténuées.
+                let shown = search.isEmpty ? categories.filter { store.showsCategory($0) } : categories
+                let hiddenCount = categories.count - shown.count
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: TSpace.md) {
-                        ForEach(categories) { cat in
-                            CategoryCardView(category: cat) { selected = cat }
+                        ForEach(shown) { cat in
+                            CategoryCardView(category: cat, hideable: true) { selected = cat }
                         }
                     }
                     .padding(.horizontal, TSpace.lg)
                     .padding(.top, TSpace.md)
+
+                    if hiddenCount > 0 {
+                        HiddenFooter(count: hiddenCount) { showHidden = true }
+                    }
 
                     // Pagination : uniquement sur le Top (la recherche n'en a pas).
                     if search.isEmpty {
@@ -370,10 +387,13 @@ struct CategoryStreamsView: View {
     @State private var loadingMore = false
     @State private var errorMsg: String? = nil
     @State private var sort: StreamSort = .viewersDesc
+    @State private var showHidden = false
 
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
-    private var sorted: [TwitchStream] { sort.apply(streams) }
+    /// Chaînes masquées écartées ; la catégorie, elle, reste consultable
+    /// même masquée (on l'a ouverte exprès).
+    private var sorted: [TwitchStream] { sort.apply(streams.filter { store.showsChannel($0.userLogin) }) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -394,6 +414,7 @@ struct CategoryStreamsView: View {
                     .foregroundColor(.tText)
                     .lineLimit(1)
                 Spacer(minLength: 0)
+                hideButton
                 // Suivre la catégorie (gardé sur cet appareil).
                 let on = store.isCategoryFollowed(category.id)
                 Button {
@@ -441,13 +462,24 @@ struct CategoryStreamsView: View {
                             title: store.t("no_live"))
                 Spacer()
             } else {
+                let shown = sorted
                 ScrollView {
+                    if shown.isEmpty {
+                        TEmptyState(icon: "antenna.radiowaves.left.and.right",
+                                    title: store.t("no_live"))
+                    }
                     LazyVGrid(columns: columns, spacing: TSpace.md) {
-                        ForEach(sorted) { stream in
-                            StreamCardView(stream: stream) { onPlayStream(stream.userLogin) }
+                        ForEach(shown) { stream in
+                            StreamCardView(stream: stream, hideable: true, hideCategory: false) {
+                                onPlayStream(stream.userLogin)
+                            }
                         }
                     }
                     .padding(.horizontal, TSpace.lg)
+
+                    if streams.count > shown.count {
+                        HiddenFooter(count: streams.count - shown.count) { showHidden = true }
+                    }
 
                     if cursor != nil {
                         TLoadMoreButton(busy: loadingMore) { Task { await loadMore() } }
@@ -471,11 +503,45 @@ struct CategoryStreamsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.tDark)
         .onAppear { if streams.isEmpty { Task { await load() } } }
+        .sheet(isPresented: $showHidden) {
+            HiddenContentSheet().environmentObject(store)
+        }
         .onChange(of: store.categoryLang) { _ in
             streams = []
             cursor = nil
             locked = false
             Task { await load() }
+        }
+    }
+
+    /// Masquer la catégorie (œil barré), ou la réafficher si elle l'est ;
+    /// rien si elle est suivie : une catégorie suivie n'est jamais masquée.
+    @ViewBuilder private var hideButton: some View {
+        if !store.followsCategory(category.id) {
+            if store.hidden.hides(category: category.id) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { store.unhideCategory(category.id) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "eye")
+                        Text("\(store.t("hidden_badge")) · \(store.t("unhide"))")
+                            .font(.system(size: 13, weight: .bold)).lineLimit(1)
+                    }
+                    .foregroundColor(.tMuted)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(Color.tSurface)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            } else {
+                TIconButton(icon: "eye.slash", size: 30) {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        store.hideCategory(id: category.id, name: category.name, box: category.boxArtURL)
+                    }
+                }
+                .accessibilityLabel(store.t("hide_this_category"))
+            }
         }
     }
 

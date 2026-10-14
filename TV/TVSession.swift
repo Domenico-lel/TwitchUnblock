@@ -34,6 +34,11 @@ final class TVSession: ObservableObject {
     @Published var qualityPref: String {
         didSet { UserDefaults.standard.set(qualityPref, forKey: "tv_quality_pref") }
     }
+    /// Chaînes et catégories masquées du top et des catégories, propres à
+    /// cette Apple TV (même fichier partagé que l'iPhone, HiddenContent).
+    @Published var hidden = HiddenContent.load() {
+        didSet { if hidden != oldValue { hidden.save() } }
+    }
 
     private static let scopes = "user:read:follows"
     private static let tokenKey = "tv_token"

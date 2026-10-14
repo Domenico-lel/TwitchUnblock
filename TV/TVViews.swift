@@ -93,10 +93,19 @@ struct TVTopTab: View {
     let play: (TVPlayback) -> Void
     @EnvironmentObject private var session: TVSession
     @State private var worldwide = false
+    /// 1ʳᵉ page du top (30), telle que Twitch l'envoie.
     @State private var streams: [TwitchStream] = []
+    /// Sa suite (page 2, Client-ID d'Android), chargée seulement quand des
+    /// lives masqués laissent moins de 24 cartes ; `next` : son curseur.
+    @State private var extra: [TwitchStream] = []
+    @State private var next: String? = nil
     @State private var loading = false
 
     var body: some View {
+        // Masqués écartés, dans l'ordre de Twitch, 30 au plus comme avant.
+        // L'Apple TV ne connaît pas les suivis ici : pas d'exception pour eux.
+        let top = HiddenContent.fill(top: streams, extra: extra,
+                                     keep: { session.hidden.allows($0) }, limit: 30)
         NavigationStack {
             ScrollView {
                 Picker("", selection: $worldwide) {
@@ -107,18 +116,38 @@ struct TVTopTab: View {
                 .frame(maxWidth: 800)
                 .padding(.top, 24)
 
-                if streams.isEmpty {
+                if top.streams.isEmpty {
                     TVMessage(text: loading ? session.t("loading") : session.t("tv_no_live"))
                 } else {
-                    TVStreamGrid(streams: streams, play: play)
+                    TVStreamGrid(streams: top.streams, play: play, hideable: true)
                 }
             }
         }
         .task(id: worldwide) {
             loading = true
-            streams = await getTopStreamsGQL(lang: worldwide ? nil : TopLanguage.device)
+            extra = []
+            next = nil
+            let page = await getTopStreamsPageGQL(lang: worldwide ? nil : TopLanguage.device, after: nil)
+            streams = page?.streams ?? []
+            next = page?.next
             loading = false
+            await refill()
         }
+        .onChange(of: session.hidden) { _ in Task { await refill() } }
+    }
+
+    /// Moins de 24 lives visibles une fois les masqués écartés : la page 2
+    /// du top, exacte et dans l'ordre de Twitch. Une seule fois par top.
+    private func refill() async {
+        guard extra.isEmpty, let after = next, !session.hidden.isEmpty else { return }
+        let visible = HiddenContent.fill(top: streams, keep: { session.hidden.allows($0) }).streams.count
+        guard visible < 24 else { return }
+        let w = worldwide
+        guard let page = await getTopStreamsPageGQL(lang: w ? nil : TopLanguage.device, after: after),
+              !page.refused else { return }
+        // Top rechargé entre-temps (autre langue) : cette suite n'est plus la sienne.
+        guard w == worldwide, next == after else { return }
+        extra = page.streams
     }
 }
 
@@ -137,11 +166,19 @@ struct TVCategoriesTab: View {
                     TVMessage(text: loaded ? session.t("tv_error") : session.t("loading"))
                 } else {
                     LazyVGrid(columns: columns, spacing: 48) {
-                        ForEach(categories) { c in
+                        ForEach(categories.filter { !session.hidden.hides(category: $0.id) }) { c in
                             NavigationLink(value: c) {
                                 TVCategoryCard(category: c)
                             }
                             .tvCard()
+                            // Bouton central maintenu : masquer la catégorie.
+                            .contextMenu {
+                                Button(role: .destructive) {
+                                    session.hidden.hide(category: c.id, name: c.name, box: c.boxArtURL)
+                                } label: {
+                                    Label(session.t("hide_this_category"), systemImage: "eye.slash")
+                                }
+                            }
                         }
                     }
                     .padding(.horizontal, 64)
@@ -191,10 +228,13 @@ struct TVCategoryStreams: View {
                 .font(.title2.bold())
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 64)
-            if streams.isEmpty {
+            // Chaînes masquées écartées ; la catégorie, ouverte exprès, reste
+            // consultable même masquée.
+            let shown = streams.filter { !session.hidden.hides(channel: $0.userLogin) }
+            if shown.isEmpty {
                 TVMessage(text: loaded ? session.t("tv_no_live") : session.t("loading"))
             } else {
-                TVStreamGrid(streams: streams, play: play)
+                TVStreamGrid(streams: shown, play: play, hideable: true, hideCategory: false)
             }
         }
         .task {
@@ -363,6 +403,8 @@ struct TVAccountTab: View {
                                 },
                                 selection: $session.qualityPref)
                 }
+
+                hiddenSection
             }
             .padding(64)
         }
@@ -370,6 +412,39 @@ struct TVAccountTab: View {
             loginTask?.cancel()
             loginTask = nil
             code = nil
+        }
+    }
+
+    /// Chaînes et catégories masquées : un bouton par élément pour le
+    /// réafficher (les 50 plus récents), et « Tout réafficher ».
+    @ViewBuilder private var hiddenSection: some View {
+        let hidden = session.hidden
+        VStack(alignment: .leading, spacing: 24) {
+            Text(session.t("hidden_title")).font(.title3.bold())
+            Text(session.t("tv_hidden_hint")).foregroundColor(.secondary)
+            if !hidden.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 24) {
+                        ForEach(hidden.channels.prefix(50)) { c in
+                            Button {
+                                session.hidden.unhide(channel: c.login)
+                            } label: {
+                                Label("\(c.name) · \(session.t("unhide"))", systemImage: "person.fill")
+                            }
+                        }
+                        ForEach(hidden.categories.prefix(50)) { c in
+                            Button {
+                                session.hidden.unhide(category: c.id)
+                            } label: {
+                                Label("\(c.name.isEmpty ? c.id : c.name) · \(session.t("unhide"))",
+                                      systemImage: "square.grid.2x2")
+                            }
+                        }
+                    }
+                    .padding(.vertical, 20)
+                }
+                Button(session.t("unhide_all")) { session.hidden.unhideAll() }
+            }
         }
     }
 
@@ -444,6 +519,11 @@ struct TVChoiceRow: View {
 struct TVStreamGrid: View {
     let streams: [TwitchStream]
     let play: (TVPlayback) -> Void
+    /// Listes de découverte : bouton central maintenu pour masquer la chaîne
+    /// et, si `hideCategory`, sa catégorie.
+    var hideable = false
+    var hideCategory = true
+    @EnvironmentObject private var session: TVSession
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 4)
 
     var body: some View {
@@ -455,6 +535,23 @@ struct TVStreamGrid: View {
                     TVStreamCard(stream: s)
                 }
                 .tvCard()
+                .contextMenu {
+                    if hideable {
+                        Button(role: .destructive) {
+                            session.hidden.hide(channel: s.userLogin, name: s.userName)
+                        } label: {
+                            Label(session.t("hide_channel"), systemImage: "eye.slash")
+                        }
+                        if hideCategory, !s.gameId.isEmpty, !s.gameName.isEmpty {
+                            Button(role: .destructive) {
+                                session.hidden.hide(category: s.gameId, name: s.gameName, box: "")
+                            } label: {
+                                Label(session.t("hide_category").replacingOccurrences(of: "{c}", with: s.gameName),
+                                      systemImage: "eye.slash")
+                            }
+                        }
+                    }
+                }
             }
         }
         .padding(.horizontal, 64)

@@ -769,8 +769,10 @@ func getFollowedStreams(token: String, userId: String) async throws -> [TwitchSt
     return arr.map { streamFromDict($0) }
 }
 
-func getTopStreams(token: String, lang: String? = nil) async throws -> [TwitchStream] {
-    var urlStr = "https://api.twitch.tv/helix/streams?first=50"
+/// `count` : 50 d'habitude, 100 (le plafond de Helix) quand des chaînes ou
+/// des catégories sont masquées, pour que le top reste plein une fois filtré.
+func getTopStreams(token: String, lang: String? = nil, count: Int = 50) async throws -> [TwitchStream] {
+    var urlStr = "https://api.twitch.tv/helix/streams?first=\(min(max(count, 1), 100))"
     if let lang { urlStr += "&language=\(lang)" }
     guard let url = URL(string: urlStr) else { return [] }
     var req = URLRequest(url: url)
@@ -922,7 +924,8 @@ private func streamFromDict(_ d: [String: Any]) -> TwitchStream {
         gameName:  d["game_name"]  as? String ?? "",
         viewerCount: d["viewer_count"] as? Int ?? 0,
         thumbnailURL: d["thumbnail_url"] as? String ?? "",
-        tags: d["tags"] as? [String] ?? []
+        tags: d["tags"] as? [String] ?? [],
+        gameId: d["game_id"] as? String ?? ""
     )
 }
 
@@ -1294,7 +1297,8 @@ private func streamFromGQL(user u: [String: Any], stream s: [String: Any]) -> Tw
         gameName: (s["game"] as? [String: Any])?["displayName"] as? String ?? "",
         viewerCount: s["viewersCount"] as? Int ?? 0,
         thumbnailURL: s["previewImageURL"] as? String ?? "",
-        tags: (s["freeformTags"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String })
+        tags: (s["freeformTags"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String },
+        gameId: (s["game"] as? [String: Any])?["id"] as? String ?? "")
 }
 
 /// Lesquelles de ces chaînes sont en live (suivis sans compte). 100 max par requête.
@@ -1485,7 +1489,7 @@ func getStreamsByCategoryPageGQL(gameId: String, lang: String?,
     query($id: ID!, $langs: [Language!], $after: Cursor) { game(id: $id) {
       streams(first: 100, after: $after, options: { broadcasterLanguages: $langs }) {
         edges { cursor node {
-          title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
+          title viewersCount previewImageURL(width: 440, height: 248) game { id displayName } freeformTags { name }
           broadcaster { id login displayName } } }
         pageInfo { hasNextPage }
     } } }
@@ -1511,7 +1515,7 @@ func getTopStreamsPageGQL(lang: String?,
                           after: String?) async -> (streams: [TwitchStream], next: String?, refused: Bool)? {
     let q = """
     query($langs: [Language!], $after: Cursor) { streams(first: 30, after: $after, options: { broadcasterLanguages: $langs }) {
-      edges { cursor node { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
+      edges { cursor node { title viewersCount previewImageURL(width: 440, height: 248) game { id displayName } freeformTags { name }
         broadcaster { id login displayName } } }
       pageInfo { hasNextPage }
     } }

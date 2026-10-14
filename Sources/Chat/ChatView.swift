@@ -120,7 +120,11 @@ struct ChatView: View {
                 // Bouton Suivre / Ne plus suivre
                 if store.showFollowButton, let following = follow.isFollowing {
                     Button {
-                        Task { await follow.toggle(token: store.twitchWebToken) }
+                        Task { @MainActor in
+                            await follow.toggle(token: store.twitchWebToken)
+                            // Suivie (aussi sur Twitch) : plus masquée des listes.
+                            if follow.isFollowing == true { store.unhideChannel(channelName) }
+                        }
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: following ? "heart.fill" : "heart")

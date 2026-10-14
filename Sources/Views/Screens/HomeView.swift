@@ -30,6 +30,11 @@ struct HomeView: View {
     @State private var topNext: String? = nil
     @State private var topRefused     = false
     @State private var loadingMoreTop = false
+    /// Avec le compte : taille du dernier top Helix (50, ou 100 quand des
+    /// chaînes ou des catégories sont masquées, pour qu'il reste plein).
+    @State private var topFetchCount  = 50
+    /// Feuille des chaînes et catégories masquées (ligne « N masqués · Gérer »).
+    @State private var showHidden     = false
     @State private var topLang: TopLang = .local
     @State private var loadingFollowed = false
     @State private var loadingTop      = false
@@ -102,6 +107,12 @@ struct HomeView: View {
             topStreams = []
             Task { await loadTopStreams(.local) }
         }
+        // Chaîne ou catégorie masquée : le top se filtre tout seul ; il ne
+        // reste qu'à le compléter s'il devient trop court.
+        .onChange(of: store.hidden) { _ in Task { await refillTopIfNeeded() } }
+        .sheet(isPresented: $showHidden) {
+            HiddenContentSheet().environmentObject(store)
+        }
     }
 
     // MARK: – Accueil (avec ou sans compte)
@@ -135,19 +146,21 @@ struct HomeView: View {
     }
 
     /// Grille de cartes ou liste, selon le réglage. `pinnable` : chaînes
-    /// suivies, qu'on peut épingler en tête (appui long).
-    @ViewBuilder private func streamsBlock(_ streams: [TwitchStream], pinnable: Bool = false) -> some View {
+    /// suivies, qu'on peut épingler en tête (appui long). `hideable` : top,
+    /// où l'appui long propose de masquer la chaîne ou sa catégorie.
+    @ViewBuilder private func streamsBlock(_ streams: [TwitchStream], pinnable: Bool = false,
+                                           hideable: Bool = false) -> some View {
         if store.homeListLayout {
             LazyVStack(spacing: TSpace.md) {
                 ForEach(streams) { stream in
-                    StreamRowView(stream: stream, pinnable: pinnable) { onPlayStream(stream.userLogin) }
+                    StreamRowView(stream: stream, pinnable: pinnable, hideable: hideable) { onPlayStream(stream.userLogin) }
                 }
             }
             .padding(.horizontal, TSpace.lg)
         } else {
             LazyVGrid(columns: columns, spacing: TSpace.md) {
                 ForEach(streams) { stream in
-                    StreamCardView(stream: stream, pinnable: pinnable) { onPlayStream(stream.userLogin) }
+                    StreamCardView(stream: stream, pinnable: pinnable, hideable: hideable) { onPlayStream(stream.userLogin) }
                 }
             }
             .padding(.horizontal, TSpace.lg)
@@ -410,13 +423,27 @@ struct HomeView: View {
         }
         .padding(.horizontal, TSpace.lg)
 
+        // Chaînes et catégories masquées écartées, dans l'ordre de Twitch.
+        // Avec le compte, 50 au plus (Helix en donne 100 quand il y a des
+        // masqués) ; sans, tout ce qui a été chargé, page après page.
+        let top = HiddenContent.fill(top: topStreams, keep: store.showsStream,
+                                     limit: store.twitchToken == nil ? nil : 50)
         if loadingTop {
             TLoader()
         } else if topStreams.isEmpty {
             TEmptyState(icon: "antenna.radiowaves.left.and.right",
                         title: store.t("no_live"))
         } else {
-            streamsBlock(topStreams)
+            if top.streams.isEmpty {
+                TEmptyState(icon: "antenna.radiowaves.left.and.right",
+                            title: store.t("no_live"))
+            } else {
+                streamsBlock(top.streams, hideable: true)
+            }
+            // Visible même si tout est masqué : sinon on croirait à une panne.
+            if top.hidden > 0 {
+                HiddenFooter(count: top.hidden) { showHidden = true }
+            }
             if topNext != nil {
                 TLoadMoreButton(busy: loadingMoreTop) { Task { await loadMoreTop() } }
             } else if topRefused {
@@ -515,13 +542,19 @@ struct HomeView: View {
                 topNext = page.next
             }
             loadingTop = false
+            await refillTopIfNeeded()
             return
         }
-        // Avec le compte : Helix, 50 lives d'un coup, sans suite.
+        // Avec le compte : Helix, 50 lives d'un coup (100 s'il y a des
+        // masqués, filtrés à l'affichage), sans suite.
+        let count = store.hidden.isEmpty ? 50 : 100
         do {
-            let fetched = try await getTopStreams(token: token, lang: lang)
+            let fetched = try await getTopStreams(token: token, lang: lang, count: count)
             // Réseau capricieux : on ne vide jamais une liste déjà affichée.
-            if !fetched.isEmpty { topStreams = fetched }
+            if !fetched.isEmpty {
+                topStreams = fetched
+                topFetchCount = count
+            }
         } catch is CancellationError {
             loadingTop = false
             return
@@ -551,6 +584,21 @@ struct HomeView: View {
         topStreams += result.fresh
         if case .gql(let next)? = result.cursor { topNext = next } else { topNext = nil }
         topRefused = result.locked
+    }
+
+    /// Des lives du top sont masqués : de quoi le garder plein. Sans compte,
+    /// la page suivante du top (Client-ID d'Android, exacte et dans l'ordre
+    /// de Twitch) quand il en reste moins de 24 ; avec le compte, Helix à
+    /// 100 au lieu de 50, une fois.
+    @MainActor private func refillTopIfNeeded() async {
+        guard !topStreams.isEmpty, !loadingTop, !store.hidden.isEmpty else { return }
+        if store.twitchToken == nil {
+            let visible = HiddenContent.fill(top: topStreams, keep: store.showsStream).streams.count
+            guard visible < 24, topNext != nil, !loadingMoreTop else { return }
+            await loadMoreTop()
+        } else if topFetchCount < 100 {
+            await loadTopStreams(topLang, isRefresh: true)
+        }
     }
 
     private func loadAll(isRefresh: Bool = false) async {

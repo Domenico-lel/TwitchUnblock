@@ -190,6 +190,13 @@ no key to paste. The backend is already hosted and shared by every install.
   categories, lives and clips, or a short note says so.
 * 📍 **Pinned streamers** — long-press a followed channel (live or offline) →
   **Pin to the top of Following**: pinned ones come first, with a small pin.
+* 🙈 **Hide channels and categories** — long-press a stream in Top or in a
+  category → **Hide this channel** or **Hide the "…" category** (or
+  long-press a category card). They leave Top, the category grid and category
+  pages; Top tops itself up so it doesn't get shorter. What you follow or pin
+  is never hidden, search still finds everything (with **Hidden · Show
+  again**), and Settings → General lists them to show them again. Kept on the
+  device and in the backup file (same format as the website).
 * 🎮 **Categories** — browse by game, then the live channels in it, filtered
   by language if you like (all, or a single one — kept for every category).
   Search puts the exact match first ("valorant" → VALORANT), with sharp box
@@ -318,6 +325,9 @@ unsigned `tv-test-N` pre-release:
 * A preferred quality (Account → Settings), same rule as the iPhone: the
   closest one below when the channel doesn't have it; picking a quality in the
   player's bar replaces it.
+* Hide a channel or a category from Top and Categories: press and hold the
+  center button on a card; Account lists them to show them again (kept on
+  this Apple TV).
 * Cards that grow when focused stay above their neighbours; the app has its
   own layered icon and Top Shelf banners (`TV/make_tv_icons.py`, drawn from
   the iPhone app's logo).

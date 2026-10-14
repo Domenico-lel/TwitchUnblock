@@ -141,6 +141,10 @@ struct TwitchStream: Identifiable {
     let thumbnailURL: String
     /// Tags de la chaîne, langue comprise (« English », « DropsEnabled »…).
     var tags: [String] = []
+    /// Identifiant de la catégorie (game_id) : le nom vient de Helix ou de
+    /// GQL selon le compte, seul l'identifiant sert à masquer une catégorie.
+    /// Vide si la requête ne le demande pas (listes des suivis).
+    var gameId: String = ""
 }
 
 /// Catégorie / jeu Twitch (onglet Catégories).

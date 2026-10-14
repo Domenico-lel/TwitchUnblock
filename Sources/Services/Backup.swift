@@ -83,6 +83,9 @@ enum Backup {
             "follows": store.localFollows,
             "accountFollows": store.accountFollowLogins,
             "followedCategories": store.followedCategories.map { ["id": $0.id, "name": $0.name, "box": $0.boxArtURL] },
+            // Chaînes et catégories masquées, même format que le site (`at`
+            // en millisecondes). Clé ignorée par les versions d'avant.
+            "hidden": store.hidden.backupJSON(),
             "settings": settings,
         ]
         return (try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])) ?? Data()
@@ -112,6 +115,11 @@ enum Backup {
             cats.append(TwitchCategory(id: id, name: name, boxArtURL: c["box"] as? String ?? ""))
         }
         store.followedCategories = Array(cats.prefix(200))
+
+        // Masqués : ajoutés aux nôtres, validés (pseudo, identifiant).
+        var hidden = store.hidden
+        hidden.merge(backup: root["hidden"])
+        store.hidden = hidden
 
         guard let s = root["settings"] as? [String: Any] else { return added }
         func bool(_ k: String, _ apply: (Bool) -> Void) { if let v = s[k] as? Bool { apply(v) } }

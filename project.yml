@@ -76,6 +76,7 @@ targets:
       - path: Sources/Services/LivePlaylistLoader.swift
       - path: Sources/Services/VodUnmute.swift
       - path: Sources/Services/SpatialAudio.swift
+      - path: Sources/Services/HiddenContent.swift
 
     # Signature automatique : en local, il suffit de choisir son équipe dans
     # Xcode. La CI construit sans signer (réglages passés à xcodebuild).

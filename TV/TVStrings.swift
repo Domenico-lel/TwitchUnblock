@@ -36,6 +36,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat": "Chat",
         "tv_chat_waiting": "Connexion au chat…",
         "tv_chat_loading": "Chargement du chat…",
+        "tv_hidden_hint": "Maintiens le bouton central sur une carte du top ou d'une catégorie, puis « Masquer ».",
     ],
     .en: [
         "tv_following": "Following",
@@ -70,6 +71,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat": "Chat",
         "tv_chat_waiting": "Connecting to chat…",
         "tv_chat_loading": "Loading chat…",
+        "tv_hidden_hint": "Press and hold the center button on a Top or category card, then “Hide”.",
     ],
     .es: [
         "tv_following": "Seguidos",
@@ -104,6 +106,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat": "Chat",
         "tv_chat_waiting": "Conectando al chat…",
         "tv_chat_loading": "Cargando el chat…",
+        "tv_hidden_hint": "Mantén pulsado el botón central sobre una tarjeta del top o de una categoría y elige «Ocultar».",
     ],
     .ru: [
         "tv_following": "Подписки",
@@ -138,6 +141,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat": "Чат",
         "tv_chat_waiting": "Подключение к чату…",
         "tv_chat_loading": "Загрузка чата…",
+        "tv_hidden_hint": "Удерживайте центральную кнопку на карточке в топе или в категории, затем выберите «Скрыть».",
     ],
 ]
 
