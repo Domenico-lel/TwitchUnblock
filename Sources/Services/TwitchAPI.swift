@@ -1075,19 +1075,20 @@ func preferredQualityKey(_ keys: [String], pref: String, variants: [String: Vari
 }
 
 /// Préférence déduite d'une qualité choisie dans le lecteur : « audio »,
-/// « source » (Source, ou la vidéo la plus haute quand il n'y a pas de
-/// Source), sinon le palier standard le plus proche (une 936p devient
-/// « 1080 », qui la reprendra faute de 1080p). nil pour « Auto », que l'app
-/// ne retient pas, et pour une qualité dont on ne sait rien.
+/// « source » pour une vraie Source (comme le site) ou une vidéo au-dessus
+/// de 1080p, sinon le palier standard le plus proche (une 936p devient
+/// « 1080 », qui la reprendra faute de 1080p). La plus haute d'une liste
+/// sans Source (clip, multi-encodage) donne son palier, pas « source » :
+/// sinon toucher la 720p d'un clip ferait partir les directs en Source.
+/// nil pour « Auto », que l'app ne retient pas, et pour une qualité dont
+/// on ne sait rien.
 func qualityPreference(for key: String, among keys: [String], variants: [String: VariantInfo] = [:]) -> String? {
     if isAudioQuality(key) { return "audio" }
     if isAutoQuality(key) { return nil }
-    if isSourceQuality(key)
-        || (!keys.contains(where: isSourceQuality) && preferredQualityKey(keys, pref: "source", variants: variants) == key) {
-        return "source"
-    }
+    if isSourceQuality(key) { return "source" }
     let height = qualityHeight(key, among: keys, variants: variants)
     guard height > 0 else { return nil }
+    if height > 1080 { return "source" }
     let tier = [1080, 720, 480, 360, 160].min { abs($0 - height) < abs($1 - height) } ?? 1080
     return String(tier)
 }

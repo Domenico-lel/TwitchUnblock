@@ -322,8 +322,11 @@ struct MainTabView: View {
                 canRewind: liveDvrVideoId != nil,
                 isDvr: dvrSourceChannel != nil,
                 onSelectQuality: { q in
+                    // Toucher la qualité déjà cochée ne change pas la préférence.
+                    if q != currentQuality(qualityLinks ?? [:]) {
+                        store.rememberQualityChoice(q, among: Array((qualityLinks ?? [:]).keys), variants: qualityVariants)
+                    }
                     immersiveQuality = q
-                    store.rememberQualityChoice(q, among: Array((qualityLinks ?? [:]).keys), variants: qualityVariants)
                     showPlayerMenu = false
                 },
                 // Pas sur le direct lui-même ; son rembobinage (enregistrement)

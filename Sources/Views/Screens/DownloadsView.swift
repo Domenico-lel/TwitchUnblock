@@ -294,7 +294,8 @@ struct DownloadRow: View {
                         .font(.tCardTitle).foregroundColor(.tText)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
-                    Text([item.streamer, item.quality].filter { !$0.isEmpty }.joined(separator: " · "))
+                    Text([item.streamer, item.quality.isEmpty ? "" : qualityText(item.quality, store.lang)]
+                            .filter { !$0.isEmpty }.joined(separator: " · "))
                         .font(.tMeta).foregroundColor(.tPurple).lineLimit(1)
                     Text(detail)
                         .font(.tMeta).foregroundColor(item.state == .failed ? .tDanger : .tMuted).lineLimit(3)

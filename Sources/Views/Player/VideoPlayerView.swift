@@ -447,9 +447,12 @@ struct VideoPlayerView: View {
                 VStack(spacing: 0) {
                     ForEach(qualities, id: \.self) { q in
                         Button {
+                            // Toucher la qualité déjà cochée ne change pas la préférence.
+                            if q != selectedQuality {
+                                store.rememberQualityChoice(q, among: qualities, variants: variants)
+                            }
                             currentTime = 0
                             selectedQuality = q
-                            store.rememberQualityChoice(q, among: qualities, variants: variants)
                             showQualityPicker = false
                         } label: {
                             HStack {
