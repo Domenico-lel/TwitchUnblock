@@ -166,6 +166,14 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(lowLatency, forKey: "cfg_low_latency") }
     }
 
+    /// Vitesse de lecture des VODs (pas des directs, ni des clips qui partent
+    /// à 1×), gardée d'une VOD à l'autre. Seule source de vérité : une vitesse
+    /// imposée par le lecteur (refus, AirPlay, bord du DVR rattrapé) y est
+    /// réécrite. Même nom que le site dans la sauvegarde (« vodSpeed »).
+    @Published var vodSpeed: Double = 1 {
+        didSet { UserDefaults.standard.set(vodSpeed, forKey: "cfg_vod_speed") }
+    }
+
     /// Multi-live : le chat du direct qui a le son, à droite de la mosaïque
     /// (écran assez large : iPad, grand iPhone en paysage).
     @Published var multiLiveChat: Bool = true {
@@ -517,6 +525,7 @@ final class AppStore: ObservableObject {
         // Actif par défaut depuis la 1.2.21 (direct à quelques secondes au lieu
         // d'une vingtaine) ; qui l'a coupé à la main le garde coupé.
         lowLatency         = ud.object(forKey: "cfg_low_latency") as? Bool ?? true
+        vodSpeed           = VodSpeed.nearest(ud.object(forKey: "cfg_vod_speed") as? Double ?? 1)
         multiLiveChat      = ud.object(forKey: "cfg_multi_chat") as? Bool ?? true
         immersivePlayer    = ud.object(forKey: "cfg_immersive")   as? Bool ?? true
         // Ordre des sources ; avant lui, une seule source préférée
@@ -800,5 +809,25 @@ final class BackgroundTaskBox {
         guard id != .invalid else { return }
         UIApplication.shared.endBackgroundTask(id)
         id = .invalid
+    }
+}
+
+/// Vitesses de lecture proposées pour les VODs : la même liste que le site.
+/// Plafond à 2× : sans playlist I-frame (Twitch n'en publie pas), AVPlayer ne
+/// garantit pas mieux.
+enum VodSpeed {
+    static let all: [Double] = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
+
+    /// Cran le plus proche (valeur venue d'une sauvegarde, d'AirPlay…).
+    static func nearest(_ v: Double) -> Double {
+        guard v.isFinite, v > 0 else { return 1 }
+        return all.min { abs($0 - v) < abs($1 - v) } ?? 1
+    }
+
+    /// « 1,5× » : virgule en français, espagnol et russe, point en anglais.
+    static func label(_ v: Double, _ lang: Lang) -> String {
+        var s = String(format: "%g", v)
+        if lang != .en { s = s.replacingOccurrences(of: ".", with: ",") }
+        return s + "×"
     }
 }

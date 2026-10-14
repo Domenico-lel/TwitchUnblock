@@ -73,7 +73,16 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         }
         // Réglage « Audio spatial » : tous les lecteurs passent par ici.
         SpatialAudio.apply(to: item)
+        keepPitch(item)
         return item
+    }
+
+    /// Vitesse ≠ 1× (VODs) : voix à la bonne hauteur. C'est le défaut documenté
+    /// sur iPhone depuis iOS 15 ; l'écrire le fige, tvOS compris. Ni
+    /// `.varispeed` (voix aiguë), ni `.lowQualityZeroLatency` (vitesses
+    /// arrondies).
+    static func keepPitch(_ item: AVPlayerItem) {
+        item.audioTimePitchAlgorithm = .timeDomain
     }
 
     /// AirPlay en cours : on repasse sur la playlist du CDN, à la même position.
@@ -91,6 +100,7 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         let t = player.currentTime()
         let item = AVPlayerItem(url: plain)
         SpatialAudio.apply(to: item)
+        keepPitch(item)
         var obs: NSKeyValueObservation?
         obs = item.observe(\.status, options: [.new]) { item, _ in
             guard item.status == .readyToPlay else { return }

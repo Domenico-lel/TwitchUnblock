@@ -101,6 +101,9 @@ struct MainTabView: View {
     /// Clip en cours : VOD d'origine et position, pour en rejouer le chat.
     @State private var clipVodId: String? = nil
     @State private var clipOffset: Double = 0
+    /// Vitesse du clip en cours : un clip part toujours à 1×, et celle qu'on
+    /// y choisit n'est pas retenue pour les VODs.
+    @State private var clipSpeed: Double = 1
     /// Chapitres de la VOD en cours (changements de jeu).
     @State private var vodChapters: [VodChapter] = []
     /// Passages de la VOD dont Twitch a coupé le son (et que l'app n'a pas pu
@@ -193,6 +196,7 @@ struct MainTabView: View {
         }
         if let source = menuLiveSource { details.append(source) }
         if isLivePlaying { details.append("ll=\(store.lowLatency ? 1 : 0)") }
+        else if playbackSpeed != 1 { details.append(String(format: "×%g", playbackSpeed)) }
         details.append("imm=\(store.immersivePlayer ? 1 : 0)")
         return ([parts.compactMap { $0 }.joined(separator: " ")] + details).joined(separator: " · ")
     }
@@ -315,6 +319,10 @@ struct MainTabView: View {
                 canRewind: liveDvrVideoId != nil,
                 isDvr: dvrSourceChannel != nil,
                 onSelectQuality: { q in immersiveQuality = q; store.rememberQualityChoice(q); showPlayerMenu = false },
+                // Pas sur le direct lui-même ; son rembobinage (enregistrement)
+                // l'a, de quoi rattraper le bord.
+                speed: isLivePlaying ? nil : playbackSpeed,
+                onSelectSpeed: { setPlaybackSpeed($0); showPlayerMenu = false },
                 onRewind: { showPlayerMenu = false; rewindAction?() },
                 onBackToLive: { showPlayerMenu = false; backToLiveAction?() },
                 onSleepTimer: { showPlayerMenu = false
@@ -763,6 +771,8 @@ struct MainTabView: View {
                 mutedRanges: vodMuted,
                 unmutedCount: vodUnmuted,
                 nowPlaying: nowPlayingMeta,
+                speed: playbackSpeed,
+                onSpeedChange: { setPlaybackSpeed($0) },
                 onProgress: { time in
                     // Pendant une bascule, `playerMode` désigne déjà la
                     // nouvelle source alors que le lecteur en place joue encore
@@ -804,6 +814,8 @@ struct MainTabView: View {
                 compact: false,  // garde qualité / rembobiner ; le bouton Chat, lui,
                                  // n'a plus lieu d'être (le chat est toujours affiché)
                 nowPlaying: nowPlayingMeta,
+                speed: playbackSpeed,
+                onSpeedChange: { setPlaybackSpeed($0) },
                 onTime: { vodPlaybackTime = $0 },
                 onLatency: { updateLatency($0) },
                 onBehind: { updateBehind($0) },
@@ -1058,6 +1070,25 @@ struct MainTabView: View {
         return false
     }
 
+    private var isClipPlaying: Bool {
+        if case .clip? = playerMode { return true }
+        return false
+    }
+
+    /// Vitesse de ce qui se lit hors direct : celle des VODs (retenue d'une
+    /// VOD à l'autre, seule source de vérité), ou celle du clip en cours.
+    private var playbackSpeed: Double { isClipPlaying ? clipSpeed : store.vodSpeed }
+
+    private func setPlaybackSpeed(_ v: Double) {
+        let speed = VodSpeed.nearest(v)
+        if isClipPlaying {
+            clipSpeed = speed
+        } else if speed != store.vodSpeed {
+            store.vodSpeed = speed
+            logger.settingChanged("Vitesse des VODs", value: String(format: "×%g", speed))
+        }
+    }
+
     // MARK: – Mini-barre (lecteur réduit)
     @ViewBuilder
     private var miniBar: some View {
@@ -1231,7 +1262,7 @@ struct MainTabView: View {
 
         loadGeneration += 1
         let gen = loadGeneration
-        clipVodId = nil; clipOffset = 0
+        clipVodId = nil; clipOffset = 0; clipSpeed = 1
         vodChapters = []
         vodMuted = []
         vodUnmuted = 0

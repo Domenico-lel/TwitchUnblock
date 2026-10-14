@@ -25,6 +25,15 @@ struct PlayerActivityAttributes: ActivityAttributes {
         var position: Double
         /// VOD : durée totale ; 0 pour un direct.
         var duration: Double
+        /// VOD lue à une autre vitesse que 1× (nil sinon). Facultatif : une
+        /// activité lancée par une version précédente doit encore se décoder.
+        var rate: Double? = nil
+
+        /// Vitesse de lecture effective (1 par défaut).
+        var playbackRate: Double {
+            guard let rate, rate.isFinite, rate > 0 else { return 1 }
+            return rate
+        }
     }
 
     /// Chaîne regardée. Changer de chaîne crée une nouvelle activité.

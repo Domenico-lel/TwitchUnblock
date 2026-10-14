@@ -13,6 +13,9 @@ struct PlayerMenuSheet: View {
     let isDvr: Bool
 
     var onSelectQuality: (String) -> Void = { _ in }
+    /// Vitesse de lecture en cours ; nil masque la section (direct).
+    var speed: Double? = nil
+    var onSelectSpeed: (Double) -> Void = { _ in }
     var onRewind:      () -> Void = {}
     var onBackToLive:  () -> Void = {}
     var onSleepTimer:  () -> Void = {}
@@ -69,6 +72,40 @@ struct PlayerMenuSheet: View {
                                 }
                             }
                             .padding(.horizontal, TSpace.lg)
+                        }
+                        .padding(.vertical, TSpace.sm)
+
+                        divider
+                    }
+
+                    // Vitesse : VODs et clips. Un direct reste à 1×.
+                    if let speed {
+                        HStack(spacing: TSpace.md) {
+                            Image(systemName: "speedometer")
+                                .font(.system(size: 15)).foregroundColor(.tPrimary)
+                                .frame(width: 24)
+                            Text(store.t("speed")).font(.tCardTitle).foregroundColor(.tText)
+                            Spacer()
+                        }
+                        .padding(.horizontal, TSpace.lg)
+                        .padding(.top, TSpace.md)
+
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: TSpace.sm) {
+                                    ForEach(VodSpeed.all, id: \.self) { s in
+                                        TChip(title: s == 1 ? store.t("speed_normal") : VodSpeed.label(s, store.lang),
+                                              isOn: abs(s - speed) < 0.01) {
+                                            onSelectSpeed(s)
+                                        }
+                                        .id(s)
+                                    }
+                                }
+                                .padding(.horizontal, TSpace.lg)
+                            }
+                            // Les crans lents sont à gauche : la vitesse en
+                            // cours (souvent « Normale ») reste en vue.
+                            .onAppear { proxy.scrollTo(VodSpeed.nearest(speed), anchor: .center) }
                         }
                         .padding(.vertical, TSpace.sm)
 

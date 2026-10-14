@@ -22,6 +22,11 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
     var isLive: Bool = false
     /// Titre, chaîne et image affichés sur l'écran verrouillé.
     var nowPlaying = NowPlayingMeta()
+    /// Vitesse hors direct, et crans du menu système (vides en direct).
+    var speed: Double = 1
+    var speedOptions: [AVPlaybackSpeed] = []
+    /// Vitesse choisie dans le menu d'Apple (ou imposée) : retenue par le parent.
+    var onSpeedChange: (Double) -> Void = { _ in }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let player = AVPlayer(playerItem: VodUnmuteLoader.playerItem(url: url))
@@ -36,6 +41,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         context.coordinator.playerVC = vc
         context.coordinator.isLive = isLive
         context.coordinator.lowLatency = lowLatency && isLive
+        context.coordinator.onSpeedChange = onSpeedChange
         context.coordinator.configureLatency(player)
         context.coordinator.setupObserver(player: player, onProgress: onProgress,
                                           onLatency: onLatency, onBehind: onBehind)
@@ -44,8 +50,22 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         if savedTime > 5 {
             player.seek(to: CMTime(seconds: savedTime, preferredTimescale: 600))
         }
+        applySpeed(vc, player: player, context: context)
         player.play()
         return vc
+    }
+
+    /// Menu de vitesse d'Apple hors direct seulement : en direct, il se
+    /// battrait avec la tenue du direct. play() rend la vitesse par défaut,
+    /// d'où `defaultRate` (1× en direct, même après une VOD en accéléré).
+    private func applySpeed(_ vc: AVPlayerViewController, player: AVPlayer, context: Context) {
+        vc.speeds = isLive ? [] : speedOptions
+        let rate = isLive ? 1 : VodSpeed.nearest(speed)
+        context.coordinator.speed = rate
+        player.defaultRate = Float(rate)
+        if let option = vc.speeds.first(where: { abs(Double($0.rate) - rate) < 0.01 }) {
+            vc.selectSpeed(option)
+        }
     }
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
@@ -66,8 +86,12 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             if savedTime > 5 {
                 player.seek(to: CMTime(seconds: savedTime, preferredTimescale: 600))
             }
+            // Nouvel AVPlayer (qualité, bascule direct ↔ enregistrement) : sa
+            // vitesse par défaut repartirait à 1×.
+            applySpeed(vc, player: player, context: context)
             player.play()
         }
+        context.coordinator.onSpeedChange = onSpeedChange
         if let player = vc.player { context.coordinator.applyMetadata(nowPlaying, isLive: isLive, to: player) }
     }
 
@@ -90,6 +114,10 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         var isLive = false
         /// Mode faible latence actif (direct uniquement).
         var lowLatency = false
+        /// Vitesse retenue hors direct, et qui la reçoit quand elle change.
+        var speed: Double = 1
+        var onSpeedChange: (Double) -> Void = { _ in }
+        private var rateObserver: NSObjectProtocol?
         private var lastCatchUp = Date.distantPast
         private var latency = LiveLatencyController()
         private var sync = LiveSyncEstimator()
@@ -222,6 +250,20 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             externalObs = player.observe(\.isExternalPlaybackActive, options: [.new]) { p, _ in
                 DispatchQueue.main.async { VodUnmuteLoader.fallBackForAirPlay(p) }
             }
+            // Vitesse choisie dans le menu d'Apple, ou imposée (AirPlay) : elle
+            // devient la vitesse par défaut (play() la rend après une pause) et
+            // la vitesse retenue. Rien en direct, ni en pause.
+            if let rateObserver { NotificationCenter.default.removeObserver(rateObserver) }
+            rateObserver = NotificationCenter.default.addObserver(
+                forName: AVPlayer.rateDidChangeNotification, object: player, queue: .main
+            ) { [weak self, weak player] _ in
+                guard let self, let player, !self.isLive, player.rate > 0 else { return }
+                let v = VodSpeed.nearest(Double(player.rate))
+                guard abs(v - self.speed) > 0.01 else { return }
+                self.speed = v
+                player.defaultRate = Float(v)
+                self.onSpeedChange(v)
+            }
             // 1 s : assez fin pour synchroniser le chat des VODs.
             let interval = CMTime(seconds: 1, preferredTimescale: 600)
             timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self, weak player] time in
@@ -302,6 +344,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             if let obs = timeObserver { playerRef?.removeTimeObserver(obs) }
             if let stopObserver { NotificationCenter.default.removeObserver(stopObserver) }
             if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
+            if let rateObserver { NotificationCenter.default.removeObserver(rateObserver) }
             artworkTask?.cancel()
         }
     }
@@ -322,6 +365,10 @@ struct VideoPlayerView: View {
     var compact: Bool = false
     /// Titre, chaîne et image affichés sur l'écran verrouillé.
     var nowPlaying = NowPlayingMeta()
+    /// Vitesse hors direct (VODs : retenue ; clip : 1× au départ), et qui la
+    /// reçoit quand on la change dans le menu d'Apple.
+    var speed: Double = 1
+    var onSpeedChange: (Double) -> Void = { _ in }
     /// Position de lecture remontee au parent (utilisee par le chat des VODs).
     var onTime: (Double) -> Void = { _ in }
     /// Latence du direct remontee au parent (affichage).
@@ -459,7 +506,13 @@ struct VideoPlayerView: View {
             onBehind: { value in onBehind(isLive ? value : nil) },
             lowLatency: store.lowLatency,
             isLive: isLive,
-            nowPlaying: nowPlaying
+            nowPlaying: nowPlaying,
+            speed: speed,
+            speedOptions: VodSpeed.all.map {
+                AVPlaybackSpeed(rate: Float($0),
+                                localizedName: $0 == 1 ? store.t("speed_normal") : VodSpeed.label($0, store.lang))
+            },
+            onSpeedChange: onSpeedChange
         )
         .aspectRatio(16/9, contentMode: .fit)
         .background(Color.black)

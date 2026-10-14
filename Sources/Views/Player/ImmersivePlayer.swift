@@ -97,6 +97,20 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// Rattrape le bord du direct quand la lecture a dérivé (mode faible latence).
     var lowLatency = false
 
+    /// Vitesse de lecture hors direct (cran de VodSpeed). Un direct joue
+    /// toujours à 1× : en direct, elle est seulement retenue pour la bascule
+    /// sur l'enregistrement.
+    @Published private(set) var speed: Double = 1
+    /// Vitesse imposée par le lecteur (refus, AirPlay, bord du DVR rattrapé) :
+    /// la vue la réécrit dans la préférence et annonce `notice`.
+    struct SpeedChange: Equatable {
+        let value: Double
+        let notice: String
+        let id: Int
+    }
+    @Published private(set) var forcedSpeed: SpeedChange?
+    private var rateObs: NSObjectProtocol?
+
     private let onProgress: (Double) -> Void
     private let onLatency:  (Double?) -> Void
     /// Distance au bord du direct (s), base de la synchro du chat.
@@ -152,16 +166,26 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         ) { [weak self] t in self?.tick(t) }
         // Pause venue d'ailleurs (appel, casque débranché, fin de la VOD) : le
         // bouton et l'écran verrouillé doivent la refléter, sinon il fallait
-        // appuyer deux fois sur lecture.
+        // appuyer deux fois sur lecture. Et l'inverse : une reprise depuis le
+        // PiP ne passe pas par setPlaying, le bouton restait sur « lecture ».
         timeControlObs = player.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
             DispatchQueue.main.async {
-                guard let self, p.timeControlStatus == .paused, self.isPlaying,
-                      self.player.currentItem != nil else { return }
-                self.isPlaying = false
+                guard let self, self.player.currentItem != nil else { return }
+                switch p.timeControlStatus {
+                case .paused where self.isPlaying:   self.isPlaying = false
+                case .playing where !self.isPlaying: self.isPlaying = true
+                default: return
+                }
                 self.refreshNowPlaying(force: true)
                 self.updateActivity()
             }
         }
+        // Vitesse changée sans nous (récepteur AirPlay qui la refuse, bord d'un
+        // enregistrement en cours atteint) : elle devient la vitesse retenue,
+        // sinon le menu montrerait une vitesse qui ne joue pas.
+        rateObs = NotificationCenter.default.addObserver(
+            forName: AVPlayer.rateDidChangeNotification, object: player, queue: .main
+        ) { [weak self] _ in self?.rateChanged() }
         // AirPlay ne lit pas les playlists réécrites : retour à celle du CDN.
         externalObs = player.observe(\.isExternalPlaybackActive, options: [.new]) { p, _ in
             DispatchQueue.main.async { VodUnmuteLoader.fallBackForAirPlay(p) }
@@ -200,6 +224,10 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
             DispatchQueue.main.async { self?.applyPendingSeek(on: item) }
         }
         player.replaceCurrentItem(with: item)
+        // play() rend à la lecture la vitesse par défaut, qui survit au
+        // changement d'élément : 1× pour un direct, même après une VOD en
+        // accéléré (retour au direct sur le même lecteur).
+        player.defaultRate = self.isLive ? 1 : Float(speed)
         player.play()
         isPlaying = true
         lastCatchUp = Date()   // laisse le flux démarrer avant tout rattrapage
@@ -259,6 +287,12 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
                  ? sync.offset(latency: total, behind: endTime - position) : nil)
         if isLive { diagnostics?.tick(item: item) }
 
+        // Enregistrement d'un direct en cours lu en accéléré : près de son bord,
+        // retour à 1× (rien ne le garantit avant iOS 26.4).
+        if speed > 1, player.rate > 1, nearRecordingEdge {
+            force(speed: 1, notice: "speed_caught_up", why: "bord de l'enregistrement rattrapé")
+        }
+
         catchUpIfNeeded(item)
     }
 
@@ -314,6 +348,60 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         if !isPlaying { togglePlay() }
     }
 
+    // MARK: Vitesse (VODs)
+    /// Vitesse voulue, ramenée au cran le plus proche. `defaultRate` d'abord :
+    /// play() le restaure (écran verrouillé, PiP, repli AirPlay). L'état réel
+    /// du lecteur (`rate ≠ 0`) plutôt que `isPlaying` pour l'appliquer tout de
+    /// suite, qui peut être en retard d'un événement.
+    func setSpeed(_ value: Double) {
+        let v = VodSpeed.nearest(value)
+        // Sous 1× : un élément prêt peut dire qu'il ne sait pas ralentir. Avant
+        // qu'il le soit, la propriété n'a pas de sens : le refus éventuel
+        // arrivera alors par rateDidChange.
+        if !isLive, v < 1, let item = player.currentItem, item.status == .readyToPlay,
+           !item.canPlaySlowForward {
+            force(speed: 1, notice: "speed_unavailable", why: "lecture lente refusée par l'élément")
+            return
+        }
+        speed = v
+        guard !isLive else { return }
+        player.defaultRate = Float(v)
+        if player.rate != 0 { player.rate = Float(v) }
+        refreshNowPlaying(force: true)
+        updateActivity()
+    }
+
+    /// Changement de vitesse venu du lecteur. Les nôtres (setSpeed, play())
+    /// donnent la vitesse retenue et ne font rien ici.
+    private func rateChanged() {
+        let rate = Double(player.rate)
+        guard !isLive, player.currentItem != nil, rate > 0, abs(rate - speed) > 0.01 else { return }
+        force(speed: VodSpeed.nearest(rate),
+              notice: nearRecordingEdge ? "speed_caught_up" : "speed_unavailable",
+              why: String(format: "×%.2f imposé par le lecteur", rate))
+    }
+
+    /// Enregistrement d'un direct en cours (pas de fin déclarée) lu près de
+    /// son bord : en accéléré, on finit par le rattraper.
+    private var nearRecordingEdge: Bool {
+        guard !isLive, let item = player.currentItem, !item.duration.seconds.isFinite,
+              endTime > 0 else { return false }
+        return endTime - position < 20
+    }
+
+    /// Vitesse imposée : elle devient la vitesse retenue (la vue la réécrit
+    /// dans la préférence), sinon re-choisir la vitesse affichée dans le menu
+    /// ne ferait rien.
+    private func force(speed v: Double, notice: String, why: String) {
+        speed = v
+        player.defaultRate = Float(v)
+        if player.rate != 0, abs(Double(player.rate) - v) > 0.01 { player.rate = Float(v) }
+        forcedSpeed = SpeedChange(value: v, notice: notice, id: (forcedSpeed?.id ?? 0) + 1)
+        logger.info("LECTEUR", "Vitesse ramenée à " + String(format: "×%g", v), why)
+        refreshNowPlaying(force: true)
+        updateActivity()
+    }
+
     // MARK: PiP
     func attachPiP(layer: AVPlayerLayer) {
         guard pip == nil, AVPictureInPictureController.isPictureInPictureSupported(),
@@ -339,12 +427,14 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         player.replaceCurrentItem(with: nil)
         pip = nil
         if let o = spatialObs { NotificationCenter.default.removeObserver(o); spatialObs = nil }
+        if let o = rateObs { NotificationCenter.default.removeObserver(o); rateObs = nil }
         clearNowPlaying()
     }
 
     deinit {
         if let o = timeObs { player.removeTimeObserver(o) }
         if let o = spatialObs { NotificationCenter.default.removeObserver(o) }
+        if let o = rateObs { NotificationCenter.default.removeObserver(o) }
         for (command, target) in remoteTargets { command.removeTarget(target) }
     }
 
@@ -388,7 +478,8 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     private func updateActivity() {
         activityDuration = isLive ? 0 : endTime
         PlayerActivity.update(nowPlaying, isLive: isLive, isPlaying: isPlaying,
-                              position: position, duration: activityDuration)
+                              position: position, duration: activityDuration,
+                              rate: isLive ? 1 : speed)
     }
 
     private func loadArtwork(_ address: String?) {
@@ -406,8 +497,9 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         }
     }
 
-    /// iOS fait avancer seul le temps affiché à partir de la vitesse : on ne
-    /// réécrit qu'aux changements d'état, et toutes les 5 s contre la dérive.
+    /// iOS fait avancer seul le temps affiché à partir de la vitesse (celle de
+    /// la VOD, pas toujours 1×) : on ne réécrit qu'aux changements d'état, et
+    /// toutes les 5 s contre la dérive.
     ///
     /// Publié dès qu'un élément se lit, titre connu ou non : sans « À
     /// l'écoute », iOS ne tient pas l'app pour celle qui joue, et le Centre de
@@ -418,10 +510,12 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         lastNowPlayingUpdate = Date()
         Self.nowPlayingOwner = self
         let untitled = nowPlaying.title.isEmpty && nowPlaying.artist.isEmpty
+        let rate = isLive ? 1.0 : speed
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: untitled ? "TwitchUnblock" : nowPlaying.title,
             MPMediaItemPropertyArtist: nowPlaying.artist,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? rate : 0.0,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate: rate,
             MPNowPlayingInfoPropertyIsLiveStream: isLive,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.video.rawValue,
         ]
@@ -501,6 +595,12 @@ struct ImmersivePlayer: View {
     var onSeekToArchive: (Double) -> Void = { _ in }
     /// Titre, chaîne et image affichés sur l'écran verrouillé.
     var nowPlaying = NowPlayingMeta()
+    /// Vitesse voulue hors direct : celle des VODs, retenue (store.vodSpeed),
+    /// ou celle du clip en cours. Ignorée en direct.
+    var speed: Double = 1
+    /// Vitesse imposée par le lecteur (refus, AirPlay, bord du DVR) : le parent
+    /// la réécrit dans la préférence, seule source de vérité.
+    var onSpeedChange: (Double) -> Void = { _ in }
 
     var onProgress: (Double) -> Void = { _ in }
     var onLatency:  (Double?) -> Void = { _ in }
@@ -577,6 +677,8 @@ struct ImmersivePlayer: View {
          mutedRanges: [MutedRange] = [],
          unmutedCount: Int = 0,
          nowPlaying: NowPlayingMeta = NowPlayingMeta(),
+         speed: Double = 1,
+         onSpeedChange: @escaping (Double) -> Void = { _ in },
          onProgress: @escaping (Double) -> Void = { _ in },
          onLatency:  @escaping (Double?) -> Void = { _ in },
          onBehind:   @escaping (Double?) -> Void = { _ in },
@@ -600,6 +702,7 @@ struct ImmersivePlayer: View {
         self.fillScreen = fillScreen; self.canReturnToLive = canReturnToLive
         self.streamStartedAt = streamStartedAt; self.archiveAvailable = archiveAvailable
         self.chapters = chapters; self.nowPlaying = nowPlaying
+        self.speed = speed; self.onSpeedChange = onSpeedChange
         self.mutedRanges = mutedRanges; self.unmutedCount = unmutedCount
         self.onReduce = onReduce; self.onClose = onClose
         self.onMenu = onMenu; self.onRefresh = onRefresh
@@ -763,13 +866,33 @@ struct ImmersivePlayer: View {
         // et la nature du flux doivent suivre. Sans elles, basculer sur
         // l'enregistrement rouvrait la VOD à 0:00 — il fallait re-balayer la
         // barre — et le modèle continuait de se croire en direct.
-        .onChange(of: url) { model.load(url: $0, seek: savedTime, isLive: isLive) }
+        .onChange(of: url) {
+            model.load(url: $0, seek: savedTime, isLive: isLive)
+            // Bascule sur l'enregistrement : la vitesse retenue s'y applique.
+            if !isLive, model.speed != 1 { flash(speedFlash) }
+        }
         // La boîte change du tout au tout : on repart de l'image entière.
         .onChange(of: isLandscape) { _ in resetZoom() }
         .onAppear {
             model.lowLatency = store.lowLatency && isLive
             model.setNowPlaying(nowPlaying)
+            // L'élément se charge encore : rien n'a joué à 1×. Une vitesse
+            // retenue est annoncée, elle ne doit pas surprendre.
+            model.setSpeed(speed)
+            if !isLive, model.speed != 1 { flash(speedFlash, duration: 1_500_000_000) }
             scheduleAutoHide()
+        }
+        // Vitesse choisie dans le menu ⋯. Égale à celle du modèle : c'est la
+        // réécriture d'une vitesse imposée, déjà annoncée.
+        .onChange(of: speed) { v in
+            let echo = VodSpeed.nearest(v) == model.speed
+            model.setSpeed(v)
+            if !echo, !isLive { flash(speedFlash) }
+        }
+        .onChange(of: model.forcedSpeed) { change in
+            guard let change else { return }
+            onSpeedChange(change.value)
+            flash(store.t(change.notice), duration: 2_500_000_000)
         }
         .onChange(of: nowPlaying) { model.setNowPlaying($0) }
         // Son rétabli sur des passages coupés : on le signale une fois.
@@ -1116,9 +1239,18 @@ struct ImmersivePlayer: View {
                 } else {
                     // Pendant un glissement, l'instant visé plutôt que la
                     // position courante (en violet : ce n'est pas encore lu).
-                    Text("\(timeLabel(dragging ? dragValue : model.position)) / \(timeLabel(model.endTime))")
-                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
-                        .foregroundColor(dragging ? .tPurple : .white)
+                    HStack(spacing: 0) {
+                        Text("\(timeLabel(dragging ? dragValue : model.position)) / \(timeLabel(model.endTime))")
+                            .foregroundColor(dragging ? .tPurple : .white)
+                        // Vitesse retenue d'une VOD à l'autre : toujours visible
+                        // quand elle n'est pas normale.
+                        if model.speed != 1 {
+                            Text(" · " + VodSpeed.label(model.speed, store.lang))
+                                .foregroundColor(.white)
+                                .accessibilityLabel(store.t("speed") + " " + VodSpeed.label(model.speed, store.lang))
+                        }
+                    }
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
                     // Chapitre en cours ; un appui liste les chapitres pour y sauter.
                     if chapters.count > 1 {
                         Button {
@@ -1413,6 +1545,11 @@ struct ImmersivePlayer: View {
             guard !Task.isCancelled else { return }
             seekTotal = 0
         }
+    }
+
+    /// « Vitesse 1,5× », annoncé au changement et à l'ouverture.
+    private var speedFlash: String {
+        store.t("speed") + " " + VodSpeed.label(model.speed, store.lang)
     }
 
     /// Bandeau fugace au centre de l'image (±10 s, changement de mode du chat).

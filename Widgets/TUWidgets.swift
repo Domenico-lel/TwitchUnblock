@@ -177,6 +177,10 @@ private struct Footer: View {
                 HStack {
                     ElapsedText(state: state)
                     Spacer(minLength: 4)
+                    // Autre vitesse que 1× : elle est rappelée devant la durée.
+                    if state.playbackRate != 1 {
+                        Text(speedLabel(state.playbackRate) + " · ")
+                    }
                     Text(clock(state.duration))
                 }
                 .font(.caption.monospacedDigit())
@@ -187,13 +191,13 @@ private struct Footer: View {
 }
 
 /// Barre d'une VOD : elle avance seule pendant la lecture (bornes en dates),
-/// et reste figée en pause.
+/// et reste figée en pause. À 1,5×, elle va au bout en durée / 1,5.
 private struct ProgressBar: View {
     let state: PlayerActivityAttributes.ContentState
 
     var body: some View {
         if state.isPlaying, let start = state.startedAt {
-            ProgressView(timerInterval: start...start.addingTimeInterval(max(state.duration, 1)),
+            ProgressView(timerInterval: start...start.addingTimeInterval(max(state.duration / state.playbackRate, 1)),
                          countsDown: false) {
                 EmptyView()
             } currentValueLabel: {
@@ -209,16 +213,28 @@ private struct ProgressBar: View {
 }
 
 /// Temps écoulé d'une VOD : compteur qui tourne seul pendant la lecture.
+/// Un compteur du système suit l'horloge, pas la vidéo : à une autre vitesse
+/// que 1×, il affiche le temps réel qui reste avant la fin (« −40:00 »).
 private struct ElapsedText: View {
     let state: PlayerActivityAttributes.ContentState
 
     var body: some View {
         if state.isPlaying, let start = state.startedAt, state.duration > 0 {
-            Text(timerInterval: start...start.addingTimeInterval(state.duration), countsDown: false)
+            if state.playbackRate != 1 {
+                Text("−") + Text(timerInterval: start...start.addingTimeInterval(state.duration / state.playbackRate),
+                                 countsDown: true)
+            } else {
+                Text(timerInterval: start...start.addingTimeInterval(state.duration), countsDown: false)
+            }
         } else {
             Text(clock(state.position))
         }
     }
+}
+
+/// « 1,5× », dans la langue de l'appareil (l'extension n'a pas celle de l'app).
+private func speedLabel(_ rate: Double) -> String {
+    rate.formatted(.number.precision(.fractionLength(0...2))) + "×"
 }
 
 private func clock(_ seconds: Double) -> String {

@@ -195,6 +195,9 @@ struct TVPlayerController: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
         vc.player = player
+        // Vitesse : le contrôle de tvOS sur une VOD, aucun sur un direct (il
+        // n'y a rien à accélérer). L'écran est propre à un seul contenu.
+        vc.speeds = model.isLive ? [] : AVPlaybackSpeed.systemDefaultSpeeds
         vc.transportBarCustomMenuItems = menus()
         // Chat dans le calque du lecteur : sur l'image, sous les commandes,
         // sans jamais prendre le focus.

@@ -32,6 +32,12 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🎬 **Immersive player** — custom controls drawn over the picture, the way
   Twitch does it. Play/pause, scrubbing, quality, refresh, orientation. Apple's
   native player stays available as a fallback in Settings.
+* 🐢 **Playback speed** — 0.25× to 2× on VODs and clips, from the ⋯ menu (or
+  Apple's own speed menu in the native player and on Apple TV). The VOD speed
+  is remembered from one VOD to the next, shown next to the timer, and synced
+  with the website through the backup file; clips start at 1×, live streams
+  always play at normal speed. Catching up with a live recording drops back to
+  1× near its edge.
 * ⏩ **Double-tap to skip ±10 s** — consecutive taps add up, so three taps read
   "+30 s" instead of three separate "+10 s". On a live there's nothing to skip
   ahead to: in landscape, double-tap shows or hides the chat instead, and once

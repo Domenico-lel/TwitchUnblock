@@ -15,11 +15,13 @@ import ActivityKit
 // ═══════════════════════════════════════════════════════════════════════════
 enum PlayerActivity {
     /// Démarre l'activité, ou met à jour celle en cours.
+    /// `rate` : vitesse de lecture d'une VOD (la barre et le compteur avancent
+    /// seuls, à ce rythme).
     static func update(_ meta: NowPlayingMeta, isLive: Bool, isPlaying: Bool,
-                       position: Double = 0, duration: Double = 0) {
+                       position: Double = 0, duration: Double = 0, rate: Double = 1) {
         guard #available(iOS 16.2, *) else { return }
         PlayerActivityController.shared.update(meta, isLive: isLive, isPlaying: isPlaying,
-                                               position: position, duration: duration)
+                                               position: position, duration: duration, rate: rate)
     }
 
     /// Lecteur fermé : l'activité disparaît aussitôt.
@@ -56,20 +58,24 @@ private final class PlayerActivityController {
     var currentID: String? { activity?.id }
 
     func update(_ meta: NowPlayingMeta, isLive: Bool, isPlaying: Bool,
-                position: Double, duration: Double) {
+                position: Double, duration: Double, rate: Double) {
         let channel = meta.artist.isEmpty ? meta.title : meta.artist
         guard !channel.isEmpty else { return }
 
         let vodProgress = !isLive && duration > 0
+        // À 1,5×, la VOD finit 1,5 fois plus tôt : départ « virtuel » à
+        // maintenant − position / vitesse, et barre sur durée / vitesse.
+        let speed = vodProgress && rate.isFinite && rate > 0 ? rate : 1
         let newState = PlayerActivityAttributes.ContentState(
             title: meta.title == channel ? "" : meta.title,
             game: isLive ? meta.game : "",
             viewers: isLive && meta.viewers > 0 ? formatViewers(meta.viewers) : "",
             isPlaying: isPlaying,
             startedAt: isLive ? meta.startedAt
-                              : (vodProgress ? Date().addingTimeInterval(-position) : nil),
+                              : (vodProgress ? Date().addingTimeInterval(-position / speed) : nil),
             position: vodProgress ? position : 0,
-            duration: vodProgress ? duration : 0)
+            duration: vodProgress ? duration : 0,
+            rate: speed == 1 ? nil : speed)
 
         // Même chaîne, même nature (direct ou VOD) : simple mise à jour.
         if let activity, let attributes,
@@ -111,7 +117,8 @@ private final class PlayerActivityController {
                                 to new: PlayerActivityAttributes.ContentState) -> Bool {
         guard let old else { return true }
         if old.title != new.title || old.game != new.game || old.viewers != new.viewers
-            || old.isPlaying != new.isPlaying || old.duration != new.duration { return true }
+            || old.isPlaying != new.isPlaying || old.duration != new.duration
+            || old.rate != new.rate { return true }
         if !new.isPlaying, abs(old.position - new.position) > 1 { return true }
         switch (old.startedAt, new.startedAt) {
         case (nil, nil):            return false
