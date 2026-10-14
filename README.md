@@ -182,7 +182,12 @@ no key to paste. The backend is already hosted and shared by every install.
 ### Finding things
 
 * 🏠 **Home** — your followed channels that are live, top streams (France or
-  worldwide).
+  worldwide; without an account, **Load more** adds 30 at a time).
+* 📜 **Long lists without an account** — a channel's VODs and clips, the
+  categories and the live channels in a category keep loading past the first
+  100 without logging in (the next pages are asked the way Twitch's Android
+  app does). If Twitch ever refuses, your Twitch account takes over for
+  categories, lives and clips, or a short note says so.
 * 📍 **Pinned streamers** — long-press a followed channel (live or offline) →
   **Pin to the top of Following**: pinned ones come first, with a small pin.
 * 🎮 **Categories** — browse by game, then the live channels in it, filtered
@@ -325,6 +330,9 @@ Installing it needs a Mac with Xcode and the Apple TV paired with it
 ## 🌐 Web version
 
 **No install? Use it in your browser: https://twitchunblock.vercel.app**
+
+No sideloading? Use it in your browser, or add it to your Home Screen: it
+opens like an app and gets live notifications (iOS 16.4+).
 
 The website has its own repository, [TwitchUnblock-Web](https://github.com/MXFia19/TwitchUnblock-Web),
 and shares this app's backend (the Cloudflare Worker, which now lives there too).

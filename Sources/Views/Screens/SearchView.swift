@@ -40,6 +40,10 @@ struct SearchView: View {
     @State private var vodCursor: String? = nil
     @State private var hasMoreVods  = false
     @State private var isLoadingMore = false
+    /// Suite des VODs : Twitch la refuse (message), ou panne réseau (bouton
+    /// pour réessayer, le défilement infini ne relance pas seul).
+    @State private var vodsRefused   = false
+    @State private var vodsMoreFailed = false
 
     // Onglets de la chaîne : 0 VODs, 1 Highlights, 2 Playlists, 3 Clips, 4 À propos
     @State private var channelTab   = 0
@@ -62,10 +66,11 @@ struct SearchView: View {
     @State private var clipPeriod   = "LAST_WEEK"
     @State private var clipsFor     = ""
     @State private var loadingClips = false
-    /// Twitch en a d'autres que les 100 premiers ; la suite vient de Helix
-    /// (compte connecté), à partir de ce curseur.
-    @State private var clipsMore    = false
-    @State private var clipsCursor: String? = nil
+    /// Suite des clips : GQL sans compte (Client-ID d'Android), ou Helix avec
+    /// le compte si Twitch refuse GQL. nil : pas de suite.
+    @State private var clipsCursor: ListCursor? = nil
+    /// Twitch refuse la suite sans compte : un message remplace le bouton.
+    @State private var clipsLocked  = false
     @State private var loadingMoreClips = false
 
     // Onglet « À propos » (description, réseaux, panneaux)
@@ -125,7 +130,8 @@ struct SearchView: View {
         for v in vods {
             if let d = parseTwitchDate(v.publishedAt) { dated.append((vod: v, date: d)) }
         }
-        let oldest = hasMoreVods ? dated.map { $0.date }.min() : nil
+        // Liste incomplète : suite à charger, en panne, ou refusée par Twitch.
+        let oldest = vodCursor != nil || vodsRefused ? dated.map { $0.date }.min() : nil
         // Le direct en cours a sa propre page : pas une VOD perdue.
         let liveStart = liveData?.error == nil ? liveData?.startedAt : nil
         return recovery.streams.filter { s in
@@ -505,7 +511,16 @@ struct SearchView: View {
                         }
                         .padding(.horizontal, TSpace.lg)
 
-                        if isLoadingMore { TLoader() }
+                        if isLoadingMore {
+                            TLoader()
+                        } else if vodsMoreFailed {
+                            TLoadMoreButton(busy: false) {
+                                isLoadingMore = true
+                                Task { await loadMoreVods() }
+                            }
+                        } else if vodsRefused {
+                            TListEndNote(key: "more_unavailable")
+                        }
                     }
                 }
             } else if liveData != nil, errorMsg == nil {
@@ -637,16 +652,12 @@ struct SearchView: View {
                 }
                 .padding(.horizontal, TSpace.lg)
 
-                // Au-delà des 100 premiers : il faut le compte (Helix).
-                if clipsMore {
-                    if store.twitchToken != nil {
-                        TLoadMoreButton(busy: loadingMoreClips) { Task { await loadMoreClips() } }
-                    } else {
-                        Text(store.t("more_needs_login"))
-                            .font(.tMeta).foregroundColor(.tMuted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, TSpace.sm)
-                    }
+                // Au-delà des 100 premiers : GQL sans compte ; si Twitch le
+                // refuse, Helix avec le compte, sinon un message.
+                if clipsCursor != nil {
+                    TLoadMoreButton(busy: loadingMoreClips) { Task { await loadMoreClips() } }
+                } else if clipsLocked {
+                    TListEndNote(key: "more_needs_login")
                 }
             }
         }
@@ -658,44 +669,51 @@ struct SearchView: View {
         let key = "\(login)|\(clipPeriod)"
         if clipsFor == key, !clips.isEmpty { return }
         loadingClips = true
-        let result = await getClips(login: login, period: clipPeriod)
+        let result = await getClipsPage(login: login, period: clipPeriod, after: nil)
         guard key == "\(searchedName.lowercased())|\(clipPeriod)" else { return }
-        clips = result.clips
-        clipsMore = result.more
-        clipsCursor = nil
+        clips = result?.clips ?? []
+        if let next = result?.next {
+            clipsCursor = .gql(next)
+        } else if result?.more == true, store.twitchToken != nil {
+            // Suite annoncée sans curseur GQL : Helix la donne avec le compte.
+            clipsCursor = .helix(nil)
+        } else {
+            clipsCursor = nil
+        }
+        clipsLocked = false
         clipsFor = key
         loadingClips = false
     }
 
-    /// Clips au-delà des 100 premiers : Helix, avec le compte. Helix repart du
-    /// début (ses 100 premiers recouvrent ceux déjà là) : jusqu'à 3 pages pour
-    /// trouver du neuf.
+    /// Clips au-delà des 100 premiers : GQL sans compte (Client-ID
+    /// d'Android). Si Twitch le refuse, Helix avec le compte, qui repart du
+    /// début (ses 100 premiers recouvrent ceux déjà là) : loadMorePages
+    /// enchaîne jusqu'à 3 pages pour trouver du neuf.
     @MainActor private func loadMoreClips() async {
-        guard clipsMore, !loadingMoreClips, let token = store.twitchToken else { return }
+        guard let c = clipsCursor, !loadingMoreClips else { return }
         let key = clipsFor
         let login = searchedName.lowercased()
+        let period = clipPeriod
         loadingMoreClips = true
         defer { loadingMoreClips = false }
         var broadcaster = liveData?.userId ?? ""
-        if broadcaster.isEmpty { broadcaster = await getUserIdGQL(login: login) ?? "" }
-        guard !broadcaster.isEmpty else { clipsMore = false; return }
-        var known = Set(clips.map(\.id))
-        var cursor = clipsCursor
-        var fresh: [ClipData] = []
-        for _ in 0..<3 {
-            let page = await getClipsHelix(token: token, broadcasterId: broadcaster,
-                                           period: clipPeriod, cursor: cursor)
-            cursor = page.cursor
-            for c in page.clips where !known.contains(c.id) {
-                known.insert(c.id)
-                fresh.append(c)
-            }
-            if !fresh.isEmpty || cursor == nil { break }
-        }
+        let result = await loadMorePages(
+            after: c, current: clips, token: store.twitchToken,
+            gql: { after in
+                guard let p = await getClipsPage(login: login, period: period, after: after) else { return nil }
+                return (p.clips, p.next, p.refused)
+            },
+            helix: { token, after in
+                if broadcaster.isEmpty { broadcaster = await getUserIdGQL(login: login) ?? "" }
+                guard !broadcaster.isEmpty else { return nil }
+                let p = await getClipsHelix(token: token, broadcasterId: broadcaster,
+                                            period: period, cursor: after)
+                return (p.clips, p.cursor)
+            })
         guard key == clipsFor else { return }
-        clips += fresh
-        clipsCursor = cursor
-        clipsMore = cursor != nil
+        clips += result.fresh
+        clipsCursor = result.cursor
+        clipsLocked = result.locked
     }
 
     // MARK: – À propos
@@ -782,12 +800,13 @@ struct SearchView: View {
         loading = true; errorMsg = nil; liveData = nil; vods = []
         filterText = ""; searchedName = login; suggestions = []
         channelTab = 0; clips = []; clipsFor = ""
-        clipsMore = false; clipsCursor = nil; loadingMoreClips = false
+        clipsLocked = false; clipsCursor = nil; loadingMoreClips = false
         about = nil; aboutFor = ""; loadingAbout = false
         resolvingID = nil; goneIDs = []
         playlists = []; playlistsFor = ""; loadingPlaylists = false
         highlights = []; highlightsFor = ""; loadingHighlights = false
         vodCursor = nil; hasMoreVods = false; isLoadingMore = false
+        vodsRefused = false; vodsMoreFailed = false
 
         async let liveTask   = getLive(channelName: login)
         async let videosTask = getChannelVideos(channelName: login)
@@ -823,17 +842,33 @@ struct SearchView: View {
         await follow.load(login: login, channelId: cid, token: web)
     }
 
+    /// Suite des VODs (défilement infini) : au-delà des 100 premières, Twitch
+    /// ne la donne qu'au Client-ID d'Android (getChannelVideosPage).
     @MainActor private func loadMoreVods() async {
-        guard let cursor = vodCursor, !channelName.isEmpty else {
+        let login = searchedName.lowercased()
+        guard let cursor = vodCursor, !login.isEmpty else {
             isLoadingMore = false; return
         }
-        let ch = await getChannelVideos(channelName: channelName, cursor: cursor)
+        vodsMoreFailed = false
+        let ch = await getChannelVideosPage(channelName: login, cursor: cursor)
+        // Autre chaîne ouverte pendant l'attente : cette page n'est pas la sienne.
+        guard login == searchedName.lowercased() else { return }
+        isLoadingMore = false
+        if ch.refused {
+            // Se connecter n'y changerait rien : pas de secours Helix ici.
+            vodCursor = nil; hasMoreVods = false; vodsRefused = true
+            return
+        }
+        if ch.error != nil {
+            // Panne réseau : on garde le curseur, un bouton permet de réessayer.
+            hasMoreVods = false; vodsMoreFailed = true
+            return
+        }
         let known = Set(vods.map(\.id))
         let fresh = ch.videos.filter { !known.contains($0.id) }
         vods += fresh
         vodCursor   = ch.cursor
         hasMoreVods = ch.cursor != nil && !fresh.isEmpty
-        isLoadingMore = false
     }
 
     /// Suggestions de chaînes, différées de 300 ms pour ne pas appeler à chaque frappe.

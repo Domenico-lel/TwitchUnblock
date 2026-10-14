@@ -387,6 +387,22 @@ struct TLoadMoreButton: View {
     }
 }
 
+/// À la place de TLoadMoreButton quand Twitch refuse la suite d'une liste :
+/// une ligne discrète qui dit pourquoi (`key` : clé de traduction).
+struct TListEndNote: View {
+    let key: String
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        Text(store.t(key))
+            .font(.tMeta).foregroundColor(.tMuted)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, TSpace.lg)
+            .padding(.top, TSpace.sm)
+    }
+}
+
 // MARK: – Carte de dialogue (style de l'app)
 /// Remplace l'alerte système grise : carte sombre, icône dans un rond violet,
 /// bouton principal plein et bouton secondaire discret. Un appui en dehors

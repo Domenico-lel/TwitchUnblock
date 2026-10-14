@@ -36,6 +36,57 @@ enum StreamSort: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: – « Charger plus » sans compte
+/// Curseur de la suite d'une liste : GQL sans jeton (Client-ID d'Android,
+/// kGQLNextClientID) ou Helix avec le compte (`nil` : Helix depuis le début).
+/// Les deux ne se mélangent pas : un curseur GQL envoyé à Helix, ou
+/// l'inverse, serait refusé après une connexion en cours de route.
+enum ListCursor: Equatable {
+    case gql(String)
+    case helix(String?)
+}
+
+/// Charge la suite d'une liste à partir de `cursor`. Jusqu'à 3 pages pour
+/// trouver du neuf : les pages se recouvrent un peu d'un Client-ID à l'autre,
+/// les lives bougent, et Helix repart du début après un refus de GQL.
+/// - `gql` : une page après ce curseur ; nil = panne réseau.
+/// - `helix` : une page avec le jeton, après ce curseur (nil = début) ; nil = panne.
+/// Renvoie les éléments absents de `current`, le curseur suivant (le même
+/// après une panne : le bouton reste pour réessayer), et `locked` : Twitch
+/// refuse la suite et aucun compte ne peut prendre le relais.
+@MainActor func loadMorePages<T: Identifiable>(
+    after cursor: ListCursor, current: [T], token: String?,
+    gql: (String) async -> (items: [T], next: String?, refused: Bool)?,
+    helix: (String, String?) async -> (items: [T], next: String?)?
+) async -> (fresh: [T], cursor: ListCursor?, locked: Bool) {
+    var c: ListCursor? = cursor
+    var seen = Set(current.map(\.id))
+    var fresh: [T] = []
+    for _ in 0..<3 {
+        guard let step = c else { break }
+        switch step {
+        case .gql(let after):
+            guard let page = await gql(after) else { return (fresh, c, false) }
+            if page.refused {
+                // Twitch refuse aussi ce Client-ID : Helix avec le compte,
+                // depuis le début ; sans compte, la liste s'arrête là.
+                guard token != nil else { return (fresh, nil, true) }
+                c = .helix(nil)
+                continue
+            }
+            fresh += page.items.filter { seen.insert($0.id).inserted }
+            c = page.next.map { ListCursor.gql($0) }
+        case .helix(let after):
+            guard let token else { return (fresh, nil, false) }
+            guard let page = await helix(token, after) else { return (fresh, c, false) }
+            fresh += page.items.filter { seen.insert($0.id).inserted }
+            c = page.next.map { ListCursor.helix($0) }
+        }
+        if !fresh.isEmpty { break }
+    }
+    return (fresh, c, false)
+}
+
 // MARK: – Grille des catégories
 struct CategoriesView: View {
     let onPlayStream: (String) -> Void
@@ -43,7 +94,9 @@ struct CategoriesView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var categories: [TwitchCategory] = []
-    @State private var cursor: String? = nil
+    @State private var cursor: ListCursor? = nil
+    /// Twitch refuse la suite sans compte : un message remplace le bouton.
+    @State private var locked       = false
     @State private var loading      = false
     @State private var loadingMore  = false
     @State private var errorMsg: String? = nil
@@ -175,8 +228,12 @@ struct CategoriesView: View {
                     .padding(.top, TSpace.md)
 
                     // Pagination : uniquement sur le Top (la recherche n'en a pas).
-                    if cursor != nil && search.isEmpty {
-                        TLoadMoreButton(busy: loadingMore) { Task { await loadMore() } }
+                    if search.isEmpty {
+                        if cursor != nil {
+                            TLoadMoreButton(busy: loadingMore) { Task { await loadMore() } }
+                        } else if locked {
+                            TListEndNote(key: "more_needs_login")
+                        }
                     }
 
                     Spacer(minLength: 40)
@@ -193,11 +250,12 @@ struct CategoriesView: View {
         if categories.isEmpty { loading = true }
         errorMsg = nil
         guard let token = store.twitchToken else {
-            // Sans compte : GQL public, une seule page de 100 (Twitch en
-            // refuse la suite sans jeton d'intégrité), audience comprise.
-            if let list = await getTopCategoriesGQL() {
-                categories = list
-                cursor = nil
+            // Sans compte : GQL public, audience comprise, par pages de 100 ;
+            // la suite passe par le Client-ID d'Android (loadMore).
+            if let page = await getTopCategoriesPageGQL(after: nil) {
+                categories = page.categories
+                cursor = page.next.map { ListCursor.gql($0) }
+                locked = false
             } else if categories.isEmpty {
                 errorMsg = store.t("err_loading")
             }
@@ -207,7 +265,8 @@ struct CategoriesView: View {
         do {
             let page = try await getTopCategories(token: token)
             categories = page.categories
-            cursor     = page.cursor
+            cursor     = page.cursor.map { ListCursor.helix($0) }
+            locked     = false
         } catch is CancellationError {
             loading = false; return
         } catch {
@@ -230,15 +289,27 @@ struct CategoriesView: View {
         }
     }
 
+    /// Suite du Top : GQL sans compte, Helix avec ; doublons écartés (Twitch
+    /// en renvoie entre deux pages).
     @MainActor private func loadMore() async {
-        guard let token = store.twitchToken, let c = cursor, !loadingMore else { return }
+        guard let c = cursor, !loadingMore else { return }
         loadingMore = true
         defer { loadingMore = false }
-        guard let page = try? await getTopCategories(token: token, cursor: c) else { return }
-        // Twitch peut renvoyer des doublons entre deux pages : on dédoublonne.
-        let known = Set(categories.map(\.id))
-        categories += page.categories.filter { !known.contains($0.id) }
-        cursor = page.cursor
+        let result = await loadMorePages(
+            after: c, current: categories, token: store.twitchToken,
+            gql: { after in
+                guard let p = await getTopCategoriesPageGQL(after: after) else { return nil }
+                return (p.categories, p.next, p.refused)
+            },
+            helix: { token, after in
+                guard let p = try? await getTopCategories(token: token, cursor: after) else { return nil }
+                return (p.categories, p.cursor)
+            })
+        // Recherche lancée entre-temps : elle a remplacé la grille.
+        guard search.isEmpty else { return }
+        categories += result.fresh
+        cursor = result.cursor
+        locked = result.locked
         await loadViewers()
     }
 
@@ -284,7 +355,9 @@ struct CategoryStreamsView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var streams: [TwitchStream] = []
-    @State private var cursor: String? = nil
+    @State private var cursor: ListCursor? = nil
+    /// Twitch refuse la suite sans compte : un message remplace le bouton.
+    @State private var locked      = false
     @State private var loading     = false
     @State private var loadingMore = false
     @State private var errorMsg: String? = nil
@@ -370,6 +443,8 @@ struct CategoryStreamsView: View {
 
                     if cursor != nil {
                         TLoadMoreButton(busy: loadingMore) { Task { await loadMore() } }
+                    } else if locked {
+                        TListEndNote(key: "more_needs_login")
                     }
 
                     Spacer(minLength: 40)
@@ -383,6 +458,7 @@ struct CategoryStreamsView: View {
         .onChange(of: store.categoryLang) { _ in
             streams = []
             cursor = nil
+            locked = false
             Task { await load() }
         }
     }
@@ -430,11 +506,12 @@ struct CategoryStreamsView: View {
         if streams.isEmpty { loading = true }
         errorMsg = nil
         guard let token = store.twitchToken else {
-            // Sans compte : les 100 lives les plus regardés (GQL public, pas
-            // de page suivante sans jeton d'intégrité).
-            if let list = await getStreamsByCategoryGQL(gameId: category.id, lang: store.categoryLang) {
-                streams = list
-                cursor = nil
+            // Sans compte : les lives les plus regardés (GQL public) par pages
+            // de 100 ; la suite passe par le Client-ID d'Android (loadMore).
+            if let page = await getStreamsByCategoryPageGQL(gameId: category.id, lang: store.categoryLang, after: nil) {
+                streams = page.streams
+                cursor = page.next.map { ListCursor.gql($0) }
+                locked = false
             } else if streams.isEmpty {
                 errorMsg = store.t("err_loading")
             }
@@ -444,7 +521,8 @@ struct CategoryStreamsView: View {
         do {
             let page = try await getStreamsByCategory(token: token, gameId: category.id, lang: store.categoryLang)
             streams = page.streams
-            cursor  = page.cursor
+            cursor  = page.cursor.map { ListCursor.helix($0) }
+            locked  = false
         } catch is CancellationError {
             loading = false; return
         } catch {
@@ -453,15 +531,29 @@ struct CategoryStreamsView: View {
         loading = false
     }
 
+    /// Suite des lives : GQL sans compte, Helix avec ; doublons écartés (les
+    /// lives bougent d'une page à l'autre).
     @MainActor private func loadMore() async {
-        guard let token = store.twitchToken, let c = cursor, !loadingMore else { return }
+        guard let c = cursor, !loadingMore else { return }
+        let lang = store.categoryLang
+        let gameId = category.id
         loadingMore = true
         defer { loadingMore = false }
-        guard let page = try? await getStreamsByCategory(token: token, gameId: category.id, cursor: c,
-                                                         lang: store.categoryLang)
-        else { return }
-        let known = Set(streams.map(\.id))
-        streams += page.streams.filter { !known.contains($0.id) }
-        cursor = page.cursor
+        let result = await loadMorePages(
+            after: c, current: streams, token: store.twitchToken,
+            gql: { after in
+                guard let p = await getStreamsByCategoryPageGQL(gameId: gameId, lang: lang, after: after) else { return nil }
+                return (p.streams, p.next, p.refused)
+            },
+            helix: { token, after in
+                guard let p = try? await getStreamsByCategory(token: token, gameId: gameId, cursor: after, lang: lang)
+                else { return nil }
+                return (p.streams, p.cursor)
+            })
+        // Langue changée entre-temps : la liste a été rechargée.
+        guard lang == store.categoryLang else { return }
+        streams += result.fresh
+        cursor = result.cursor
+        locked = result.locked
     }
 }

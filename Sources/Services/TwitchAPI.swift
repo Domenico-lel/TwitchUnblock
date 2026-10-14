@@ -109,11 +109,12 @@ private func workerVariants(_ value: Any?) -> [String: VariantInfo] {
 }
 
 // MARK: – GQL
-private func twitchGQL(_ query: String) async throws -> Any {
+/// `clientID` : kGQLNextClientID seulement pour la page suivante d'une liste.
+private func twitchGQL(_ query: String, clientID: String = kGQLClientID) async throws -> Any {
     guard let url = URL(string: "https://gql.twitch.tv/gql") else { throw URLError(.badURL) }
     var req = URLRequest(url: url)
     req.httpMethod = "POST"
-    req.setValue(kGQLClientID, forHTTPHeaderField: "Client-ID")
+    req.setValue(clientID, forHTTPHeaderField: "Client-ID")
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.setValue(requestHeaders["User-Agent"], forHTTPHeaderField: "User-Agent")
     req.setValue("MkMq8a9\(Int.random(in: 100000...999999))", forHTTPHeaderField: "Device-ID")
@@ -567,6 +568,15 @@ func getStreamStats(channelName: String) async -> (viewerCount: Int, startedAt: 
 
 // MARK: – getChannelVideos
 func getChannelVideos(channelName: String, cursor: String? = nil) async -> (videos: [VodData], avatar: String?, error: String?, cursor: String?) {
+    let page = await getChannelVideosPage(channelName: channelName, cursor: cursor)
+    return (page.videos, page.avatar, page.error, page.cursor)
+}
+
+/// Comme getChannelVideos, plus `refused` : Twitch a refusé la page suivante
+/// (intégrité). La page 1 passe par le Client-ID web, la suite par celui
+/// d'Android : avec le web, Twitch refuse tout au-delà des 100 premières.
+func getChannelVideosPage(channelName: String, cursor: String? = nil) async
+    -> (videos: [VodData], avatar: String?, error: String?, cursor: String?, refused: Bool) {
     logger.info("VIDEOS", "Chargement VODs de \"\(channelName)\"\(cursor != nil ? " (Page suivante)" : "")")
 
     let afterCursor = cursor != nil ? ", after: \"\(gqlStr(cursor!))\"" : ""
@@ -582,11 +592,15 @@ func getChannelVideos(channelName: String, cursor: String? = nil) async -> (vide
     }
     """
 
-    guard let json = try? await twitchGQL(q) as? [String: Any],
-          let data = json["data"] as? [String: Any],
+    let json = try? await twitchGQL(q, clientID: cursor == nil ? kGQLClientID : kGQLNextClientID) as? [String: Any]
+    if cursor != nil, let json, gqlIntegrityRefused(json) {
+        logger.warn("VIDEOS", "Twitch refuse la suite des VODs de \"\(channelName)\" (intégrité)")
+        return (videos: [], avatar: nil, error: nil, cursor: nil, refused: true)
+    }
+    guard let data = json?["data"] as? [String: Any],
           let user = data["user"] as? [String: Any] else {
         logger.error("VIDEOS", "Streamer \"\(channelName)\" introuvable")
-        return (videos: [], avatar: nil, error: "Streamer introuvable", cursor: nil)
+        return (videos: [], avatar: nil, error: "Streamer introuvable", cursor: nil, refused: false)
     }
 
     let avatar     = user["profileImageURL"] as? String
@@ -610,7 +624,7 @@ func getChannelVideos(channelName: String, cursor: String? = nil) async -> (vide
     let nextCursor  = hasNextPage ? (edges.last?["cursor"] as? String) : nil
 
     logger.success("VIDEOS", "\(videos.count) VODs trouvées pour \"\(channelName)\"")
-    return (videos: videos, avatar: avatar, error: nil, cursor: nextCursor)
+    return (videos: videos, avatar: avatar, error: nil, cursor: nextCursor, refused: false)
 }
 
 // MARK: – Couleur du pseudo (Helix)
@@ -1196,6 +1210,69 @@ private func gqlRequest(_ query: String, _ variables: [String: Any]) async -> [S
     return json["data"] as? [String: Any]
 }
 
+// MARK: – Pages suivantes des listes (Client-ID Android)
+/// Twitch refuse la page faute de jeton d'intégrité : réponse HTTP 200, liste
+/// à null et `errors[].extensions.code` = IntegrityCheckFailed. Sans cette
+/// lecture, un refus ressemblerait à une fin de liste.
+private func gqlIntegrityRefused(_ json: [String: Any]) -> Bool {
+    guard let errors = json["errors"] as? [[String: Any]] else { return false }
+    return errors.contains { e in
+        (e["extensions"] as? [String: Any])?["code"] as? String == "IntegrityCheckFailed"
+            || ((e["message"] as? String)?.lowercased().contains("integrity check") ?? false)
+    }
+}
+
+/// Page suivante d'une liste, sans jeton, avec le Client-ID d'Android
+/// (kGQLNextClientID). nil : panne réseau ou réponse illisible (on pourra
+/// réessayer). `refused` : Twitch refuse ce Client-ID (intégrité, ou rejet
+/// d'office en 400/401/403) ; inutile de rejouer la même requête.
+private func gqlNextRequest(_ query: String, _ variables: [String: Any]) async -> (data: [String: Any]?, refused: Bool)? {
+    guard let url = URL(string: "https://gql.twitch.tv/gql"),
+          let body = try? JSONSerialization.data(withJSONObject: ["query": query, "variables": variables]) else { return nil }
+    var req = URLRequest(url: url)
+    req.httpMethod = "POST"
+    req.setValue(kGQLNextClientID, forHTTPHeaderField: "Client-ID")
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.httpBody = body
+    guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return nil }
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    if [400, 401, 403].contains(status) {
+        logger.warn("GQL", "Page suivante refusée (HTTP \(status))")
+        return (nil, true)
+    }
+    guard status == 200,
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+    if gqlIntegrityRefused(json) {
+        logger.warn("GQL", "Page suivante refusée (intégrité)")
+        return (nil, true)
+    }
+    return (json["data"] as? [String: Any], false)
+}
+
+/// Une page de liste : la 1ʳᵉ (`after` nil) par le Client-ID web, comme
+/// avant ; la suite par gqlNextRequest, `after` passé en variable `$after`.
+private func gqlListPage(_ query: String, _ variables: [String: Any],
+                         after: String?) async -> (data: [String: Any]?, refused: Bool)? {
+    guard let after else {
+        guard let d = await gqlRequest(query, variables) else { return nil }
+        return (d, false)
+    }
+    var vars = variables
+    vars["after"] = after
+    return await gqlNextRequest(query, vars)
+}
+
+/// Curseur de la page suivante d'une connexion GQL (`edges { cursor }` +
+/// `pageInfo { hasNextPage }`) : celui de la dernière arête, seulement si
+/// Twitch annonce une suite. Sans suite, les curseurs des clips sont nuls,
+/// et `after: null` redonnerait la page 1.
+private func gqlNextCursor(_ connection: [String: Any]?) -> String? {
+    guard (connection?["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool == true,
+          let c = (connection?["edges"] as? [[String: Any]])?.last?["cursor"] as? String,
+          !c.isEmpty else { return nil }
+    return c
+}
+
 // MARK: – Lives sans compte (GQL public)
 private func streamFromGQL(user u: [String: Any], stream s: [String: Any]) -> TwitchStream? {
     guard let login = u["login"] as? String else { return nil }
@@ -1329,10 +1406,12 @@ func getUserIdGQL(login: String) async -> String? {
 }
 
 // MARK: – Catégories sans compte (GQL public)
-// Helix demande un jeton ; ces requêtes-là non. Mais Twitch refuse leur
-// pagination (« failed integrity check » dès la 2ᵉ page, avec ou sans
-// requête persistée) : sans compte, une seule page de 100, la plus grande
-// qu'il accepte. Connecté, Helix pagine sans limite.
+// Helix demande un jeton ; ces requêtes-là non. Avec le Client-ID web, Twitch
+// refuse leur pagination (« failed integrity check » dès la 2ᵉ page) : la
+// page 1 reste sur le web, la suite passe par le Client-ID d'Android
+// (gqlListPage). Si Twitch le refuse aussi, `refused` le dit : Helix prend le
+// relais avec un compte, sinon un message. Les fonctions sans « Page »
+// (page 1 seule) gardent leur forme : l'Apple TV les appelle.
 private func categoryFromGQL(_ n: [String: Any]) -> TwitchCategory? {
     guard let id = n["id"] as? String else { return nil }
     return TwitchCategory(id: id, name: n["displayName"] as? String ?? "",
@@ -1340,12 +1419,39 @@ private func categoryFromGQL(_ n: [String: Any]) -> TwitchCategory? {
                           viewers: n["viewersCount"] as? Int)
 }
 
+/// Lives d'une connexion GQL `streams` (arêtes `node { … broadcaster }`).
+private func streamsFromGQL(_ edges: [[String: Any]]) -> [TwitchStream] {
+    edges.compactMap { e in
+        guard let n = e["node"] as? [String: Any], let b = n["broadcaster"] as? [String: Any] else { return nil }
+        return streamFromGQL(user: b, stream: n)
+    }
+}
+
+/// Langue au format Helix (« fr », « zh-hk ») → format GQL (« FR », « ZH_HK »).
+private func gqlLanguages(_ lang: String?) -> [String]? {
+    lang.map { [$0.uppercased().replacingOccurrences(of: "-", with: "_")] }
+}
+
 /// Catégories les plus regardées, avec leur audience. nil si Twitch n'a pas répondu.
 func getTopCategoriesGQL() async -> [TwitchCategory]? {
-    let q = "query { games(first: 100) { edges { node { id displayName boxArtURL(width: 570, height: 760) viewersCount } } } }"
-    guard let d = await gqlRequest(q, [:]),
-          let edges = (d["games"] as? [String: Any])?["edges"] as? [[String: Any]] else { return nil }
-    return edges.compactMap { ($0["node"] as? [String: Any]).flatMap(categoryFromGQL) }
+    await getTopCategoriesPageGQL(after: nil)?.categories
+}
+
+/// Une page de 100 catégories. `after` nil = la 1ʳᵉ ; `next` : curseur de la
+/// suivante. nil si Twitch n'a pas répondu (réseau).
+func getTopCategoriesPageGQL(after: String?) async -> (categories: [TwitchCategory], next: String?, refused: Bool)? {
+    let q = """
+    query($after: Cursor) { games(first: 100, after: $after) {
+      edges { cursor node { id displayName boxArtURL(width: 570, height: 760) viewersCount } }
+      pageInfo { hasNextPage }
+    } }
+    """
+    guard let page = await gqlListPage(q, [:], after: after) else { return nil }
+    if page.refused { return ([], nil, true) }
+    guard let games = page.data?["games"] as? [String: Any],
+          let edges = games["edges"] as? [[String: Any]] else { return nil }
+    return (edges.compactMap { ($0["node"] as? [String: Any]).flatMap(categoryFromGQL) },
+            gqlNextCursor(games), false)
 }
 
 /// Recherche de catégories par nom. nil si Twitch n'a pas répondu.
@@ -1359,54 +1465,76 @@ func searchCategoriesGQL(query: String) async -> [TwitchCategory]? {
 /// Les 100 lives les plus regardés d'une catégorie, d'une langue si `lang`
 /// (format Helix). nil si Twitch n'a pas répondu.
 func getStreamsByCategoryGQL(gameId: String, lang: String? = nil) async -> [TwitchStream]? {
+    await getStreamsByCategoryPageGQL(gameId: gameId, lang: lang, after: nil)?.streams
+}
+
+/// Une page de 100 lives d'une catégorie (même langue d'une page à l'autre).
+func getStreamsByCategoryPageGQL(gameId: String, lang: String?,
+                                 after: String?) async -> (streams: [TwitchStream], next: String?, refused: Bool)? {
     let q = """
-    query($id: ID!, $langs: [Language!]) { game(id: $id) { streams(first: 100, options: { broadcasterLanguages: $langs }) { edges { node {
-      title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
-      broadcaster { id login displayName } } } } } }
+    query($id: ID!, $langs: [Language!], $after: Cursor) { game(id: $id) {
+      streams(first: 100, after: $after, options: { broadcasterLanguages: $langs }) {
+        edges { cursor node {
+          title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
+          broadcaster { id login displayName } } }
+        pageInfo { hasNextPage }
+    } } }
     """
     var vars: [String: Any] = ["id": gameId]
-    if let lang { vars["langs"] = [lang.uppercased().replacingOccurrences(of: "-", with: "_")] }
-    guard let d = await gqlRequest(q, vars),
-          let edges = ((d["game"] as? [String: Any])?["streams"] as? [String: Any])?["edges"] as? [[String: Any]]
-    else { return nil }
-    return edges.compactMap { e in
-        guard let n = e["node"] as? [String: Any], let b = n["broadcaster"] as? [String: Any] else { return nil }
-        return streamFromGQL(user: b, stream: n)
-    }
+    if let langs = gqlLanguages(lang) { vars["langs"] = langs }
+    guard let page = await gqlListPage(q, vars, after: after) else { return nil }
+    if page.refused { return ([], nil, true) }
+    guard let streams = (page.data?["game"] as? [String: Any])?["streams"] as? [String: Any],
+          let edges = streams["edges"] as? [[String: Any]] else { return nil }
+    return (streamsFromGQL(edges), gqlNextCursor(streams), false)
 }
 
 /// Top des lives sans jeton (GQL public) ; `lang` au format Helix (« fr », « zh-hk »).
 func getTopStreamsGQL(lang: String?) async -> [TwitchStream] {
-    let q = """
-    query($n: Int!, $langs: [Language!]) { streams(first: $n, options: { broadcasterLanguages: $langs }) {
-      edges { node { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
-        broadcaster { id login displayName } } } } }
-    """
-    var vars: [String: Any] = ["n": 30]   // Twitch refuse au-delà de 30
-    if let lang { vars["langs"] = [lang.uppercased().replacingOccurrences(of: "-", with: "_")] }
-    guard let d = await gqlRequest(q, vars),
-          let edges = (d["streams"] as? [String: Any])?["edges"] as? [[String: Any]] else { return [] }
-    return edges.compactMap { e in
-        guard let n = e["node"] as? [String: Any], let b = n["broadcaster"] as? [String: Any] else { return nil }
-        return streamFromGQL(user: b, stream: n)
-    }
+    await getTopStreamsPageGQL(lang: lang, after: nil)?.streams ?? []
 }
 
-/// Clips les plus vus d'une chaîne sur la période (LAST_DAY, LAST_WEEK, LAST_MONTH, ALL_TIME).
-/// Les 100 premiers d'un coup : en GQL public, Twitch refuse la page suivante
-/// (« failed integrity check »). `more` : il y en a d'autres — Helix, avec le
-/// compte, prend la suite (getClipsHelix).
-func getClips(login: String, period: String) async -> (clips: [ClipData], more: Bool) {
+/// Une page du top des lives sans jeton : 30, le plafond de Twitch pour
+/// `streams` à la racine, quel que soit le Client-ID. Sert à l'accueil sans
+/// compte (« Charger plus ») et à compléter le top.
+func getTopStreamsPageGQL(lang: String?,
+                          after: String?) async -> (streams: [TwitchStream], next: String?, refused: Bool)? {
     let q = """
-    query($l: String!, $p: ClipsPeriod) { user(login: $l) { clips(first: 100, criteria: { period: $p, sort: VIEWS_DESC }) {
-      edges { node { slug title viewCount durationSeconds createdAt thumbnailURL(width: 480, height: 272) curator { displayName } } }
+    query($langs: [Language!], $after: Cursor) { streams(first: 30, after: $after, options: { broadcasterLanguages: $langs }) {
+      edges { cursor node { title viewersCount previewImageURL(width: 440, height: 248) game { displayName } freeformTags { name }
+        broadcaster { id login displayName } } }
       pageInfo { hasNextPage }
+    } }
+    """
+    var vars: [String: Any] = [:]
+    if let langs = gqlLanguages(lang) { vars["langs"] = langs }
+    guard let page = await gqlListPage(q, vars, after: after) else { return nil }
+    if page.refused { return ([], nil, true) }
+    guard let streams = page.data?["streams"] as? [String: Any],
+          let edges = streams["edges"] as? [[String: Any]] else { return nil }
+    return (streamsFromGQL(edges), gqlNextCursor(streams), false)
+}
+
+/// Clips les plus vus d'une chaîne sur la période (LAST_DAY, LAST_WEEK,
+/// LAST_MONTH, ALL_TIME), par pages de 100. `next` : curseur GQL de la suite ;
+/// `more` : Twitch en a d'autres (si la suite GQL est refusée, Helix la
+/// reprend avec le compte, getClipsHelix). nil si Twitch n'a pas répondu.
+func getClipsPage(login: String, period: String,
+                  after: String?) async -> (clips: [ClipData], next: String?, more: Bool, refused: Bool)? {
+    let q = """
+    query($l: String!, $p: ClipsPeriod, $after: Cursor) { user(login: $l) {
+      clips(first: 100, after: $after, criteria: { period: $p, sort: VIEWS_DESC }) {
+        edges { cursor node { slug title viewCount durationSeconds createdAt thumbnailURL(width: 480, height: 272) curator { displayName } } }
+        pageInfo { hasNextPage }
     } } }
     """
-    guard let d = await gqlRequest(q, ["l": login.lowercased(), "p": period]),
-          let user = d["user"] as? [String: Any],
+    guard let page = await gqlListPage(q, ["l": login.lowercased(), "p": period], after: after) else { return nil }
+    if page.refused { return ([], nil, true, true) }
+    guard let data = page.data else { return nil }
+    // Chaîne introuvable : liste vide, pas une panne.
+    guard let user = data["user"] as? [String: Any],
           let clips = user["clips"] as? [String: Any],
-          let edges = clips["edges"] as? [[String: Any]] else { return ([], false) }
+          let edges = clips["edges"] as? [[String: Any]] else { return ([], nil, false, false) }
     let list: [ClipData] = edges.compactMap { e in
         guard let n = e["node"] as? [String: Any], let slug = n["slug"] as? String else { return nil }
         return ClipData(id: slug,
@@ -1418,7 +1546,7 @@ func getClips(login: String, period: String) async -> (clips: [ClipData], more: 
                         curator: (n["curator"] as? [String: Any])?["displayName"] as? String)
     }
     let more = (clips["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? false
-    return (list, more)
+    return (list, gqlNextCursor(clips), more, false)
 }
 
 /// Suite des clips avec le compte (Helix) : même période, même ordre (vues
