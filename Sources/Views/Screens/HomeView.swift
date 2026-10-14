@@ -33,6 +33,9 @@ struct HomeView: View {
     /// Avec le compte : taille du dernier top Helix (50, ou 100 quand des
     /// chaînes ou des catégories sont masquées, pour qu'il reste plein).
     @State private var topFetchCount  = 50
+    /// Numéro du dernier chargement du top : une réponse plus ancienne
+    /// (top à 50 arrivé après celui à 100) n'écrase pas la plus récente.
+    @State private var topGen = 0
     /// Feuille des chaînes et catégories masquées (ligne « N masqués · Gérer »).
     @State private var showHidden     = false
     @State private var topLang: TopLang = .local
@@ -525,6 +528,8 @@ struct HomeView: View {
 
     @MainActor private func loadTopStreams(_ l: TopLang, isRefresh: Bool = false) async {
         let lang = l == .local ? TopLanguage.resolved(store.topLang) : nil
+        topGen += 1
+        let gen = topGen
         if topStreams.isEmpty && !isRefresh { loadingTop = true }
         // Plus de « Charger plus » pendant le rechargement : l'ancienne suite
         // n'est peut-être plus la bonne (autre langue), et la garde
@@ -537,6 +542,8 @@ struct HomeView: View {
             // Chaque rechargement repart de la 1ʳᵉ page ; en cas d'échec, la
             // liste est gardée, sans suite.
             let page = await getTopStreamsPageGQL(lang: lang, after: nil)
+            // Un chargement plus récent est parti : c'est lui qui conclut.
+            guard gen == topGen else { return }
             if let page, !page.streams.isEmpty {
                 topStreams = page.streams
                 topNext = page.next
@@ -548,20 +555,27 @@ struct HomeView: View {
         // Avec le compte : Helix, 50 lives d'un coup (100 s'il y a des
         // masqués, filtrés à l'affichage), sans suite.
         let count = store.hidden.isEmpty ? 50 : 100
+        var applied = false
         do {
             let fetched = try await getTopStreams(token: token, lang: lang, count: count)
+            guard gen == topGen else { return }
             // Réseau capricieux : on ne vide jamais une liste déjà affichée.
             if !fetched.isEmpty {
                 topStreams = fetched
                 topFetchCount = count
+                applied = true
             }
         } catch is CancellationError {
-            loadingTop = false
+            if gen == topGen { loadingTop = false }
             return
         } catch {
+            guard gen == topGen else { return }
             logger.warn("HELIX", "Top streams indisponible", error.localizedDescription)
         }
         loadingTop = false
+        // Masquage fait pendant un tirage à 50 : on complète tout de suite
+        // (une fois : le suivant est à 100 ; rien après un échec).
+        if applied && count < 100 { await refillTopIfNeeded() }
     }
 
     /// Page suivante du top sans compte (30 lives), sans doublon : les lives
@@ -604,6 +618,18 @@ struct HomeView: View {
     private func loadAll(isRefresh: Bool = false) async {
         await loadFollowedStreams()
         await loadLocalFollows()
+        await loadAccountFollowedCategories()
         await loadTopStreams(topLang, isRefresh: isRefresh)
+    }
+
+    /// Catégories suivies sur Twitch (session web), lues dès l'accueil : le
+    /// top ne les masque pas et son menu ne propose pas de les masquer, même
+    /// avant un passage par l'onglet Catégories. En cas d'échec, la liste
+    /// déjà connue est gardée.
+    @MainActor private func loadAccountFollowedCategories() async {
+        guard let web = store.twitchWebToken,
+              let list = await getFollowedCategoriesGQL(webToken: web),
+              store.twitchWebToken == web else { return }
+        store.accountFollowedCategoryIds = Set(list.map(\.id))
     }
 }

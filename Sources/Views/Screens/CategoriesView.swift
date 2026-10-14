@@ -149,8 +149,9 @@ struct CategoriesView: View {
             if twitchFollowed.isEmpty { loadingFollowed = true }
             if let list = await getFollowedCategoriesGQL(webToken: web) {
                 twitchFollowed = list
-                // Suivies sur Twitch : jamais masquées (règle d'AppStore).
-                store.accountFollowedCategoryIds = Set(list.map(\.id))
+                // Suivies sur Twitch : jamais masquées (règle d'AppStore),
+                // tant que la session web qui les a lues est toujours là.
+                if store.twitchWebToken == web { store.accountFollowedCategoryIds = Set(list.map(\.id)) }
             }
             loadingFollowed = false
         }
@@ -436,6 +437,8 @@ struct CategoryStreamsView: View {
             .padding(.top, TSpace.md)
             .padding(.bottom, TSpace.sm)
 
+            hiddenStrip
+
             // ── Langue et tri ───────────────────────────────────────
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: TSpace.sm) {
@@ -514,34 +517,51 @@ struct CategoryStreamsView: View {
         }
     }
 
-    /// Masquer la catégorie (œil barré), ou la réafficher si elle l'est ;
-    /// rien si elle est suivie : une catégorie suivie n'est jamais masquée.
+    /// Catégorie masquée et pas suivie (une catégorie suivie n'est jamais
+    /// masquée).
+    private var isHiddenHere: Bool {
+        !store.followsCategory(category.id) && store.hidden.hides(category: category.id)
+    }
+
+    /// Masquer la catégorie (œil barré) ; rien si elle est suivie, ni si elle
+    /// est déjà masquée (la pastille « Masquée · Réafficher » est en dessous).
     @ViewBuilder private var hideButton: some View {
-        if !store.followsCategory(category.id) {
-            if store.hidden.hides(category: category.id) {
+        if !store.followsCategory(category.id) && !store.hidden.hides(category: category.id) {
+            TIconButton(icon: "eye.slash", size: 30) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    store.hideCategory(id: category.id, name: category.name, box: category.boxArtURL)
+                }
+            }
+            .accessibilityLabel(store.t("hide_this_category"))
+        }
+    }
+
+    /// Catégorie masquée : « Masquée · Réafficher », sur sa propre ligne sous
+    /// l'en-tête (dans l'en-tête, avec le nom et Suivre, elle serait coupée).
+    @ViewBuilder private var hiddenStrip: some View {
+        if isHiddenHere {
+            HStack {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { store.unhideCategory(category.id) }
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 6) {
                         Image(systemName: "eye")
                         Text("\(store.t("hidden_badge")) · \(store.t("unhide"))")
-                            .font(.system(size: 13, weight: .bold)).lineLimit(1)
+                            .font(.system(size: 13, weight: .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     .foregroundColor(.tMuted)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
                     .background(Color.tSurface)
                     .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
-            } else {
-                TIconButton(icon: "eye.slash", size: 30) {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        store.hideCategory(id: category.id, name: category.name, box: category.boxArtURL)
-                    }
-                }
-                .accessibilityLabel(store.t("hide_this_category"))
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, TSpace.lg)
+            .padding(.bottom, TSpace.sm)
         }
     }
 

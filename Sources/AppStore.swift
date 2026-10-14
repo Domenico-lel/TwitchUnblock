@@ -36,6 +36,9 @@ final class AppStore: ObservableObject {
     @Published var twitchWebToken: String? {
         didSet {
             Keychain.storeToken(twitchWebToken, for: "twitch_web_token")
+            // Session partie (déconnexion, refus, expiration) : ses catégories
+            // suivies ne protègent plus rien du masquage.
+            if twitchWebToken == nil { accountFollowedCategoryIds = [] }
         }
     }
 
@@ -366,7 +369,8 @@ final class AppStore: ObservableObject {
     /// (non enregistrées) : l'export les ajoute aux suivis de l'appareil.
     var accountFollowLogins: [String] = []
     /// Catégories suivies sur Twitch (session web), telles que lues par
-    /// l'onglet Catégories (non enregistrées) : jamais masquées.
+    /// l'accueil et l'onglet Catégories (non enregistrées) : jamais masquées.
+    /// Vidées quand la session web disparaît.
     var accountFollowedCategoryIds: Set<String> = []
 
     /// Chaînes suivies sans compte Twitch (sur cet appareil), en minuscules.
