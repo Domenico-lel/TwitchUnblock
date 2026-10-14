@@ -178,6 +178,43 @@ enum ChatNoticeKind: Hashable {
     }
 }
 
+/// Icônes des bandeaux, avec le compte à rebours d'un sondage ou d'une
+/// prédiction encore ouverts : ligne repliée (paysage) et pastille des
+/// bandeaux fermés.
+struct NoticeIconsRow: View {
+    let kinds: [ChatNoticeKind]
+    var pollEnds: Date? = nil
+    var predictionEnds: Date? = nil
+    var spacing: CGFloat = 10
+
+    var body: some View {
+        HStack(spacing: spacing) {
+            ForEach(kinds, id: \.self) { kind in
+                HStack(spacing: 3) {
+                    Image(systemName: kind.icon).font(.system(size: 11, weight: .semibold))
+                    // Une seule lecture de l'heure : entre deux, la fin
+                    // pourrait passer et l'intervalle s'inverser.
+                    let now = Date()
+                    if let end = ends(kind), end > now {
+                        Text(timerInterval: now...end, countsDown: true)
+                            .font(.system(size: 10, weight: .bold).monospacedDigit())
+                    }
+                }
+                .foregroundColor(kind.tint)
+                .fixedSize()
+            }
+        }
+    }
+
+    private func ends(_ kind: ChatNoticeKind) -> Date? {
+        switch kind {
+        case .poll:       return pollEnds
+        case .prediction: return predictionEnds
+        default:          return nil
+        }
+    }
+}
+
 /// Bandeaux repliés : une ligne d'icônes, avec le compte à rebours d'un
 /// sondage ou d'une prédiction encore ouverts. La toucher les déplie.
 struct CollapsedNoticesBar: View {
@@ -190,20 +227,7 @@ struct CollapsedNoticesBar: View {
     var body: some View {
         Button(action: onExpand) {
             HStack(spacing: 10) {
-                ForEach(kinds, id: \.self) { kind in
-                    HStack(spacing: 3) {
-                        Image(systemName: kind.icon).font(.system(size: 11, weight: .semibold))
-                        // Une seule lecture de l'heure : entre deux, la fin
-                        // pourrait passer et l'intervalle s'inverser.
-                        let now = Date()
-                        if let end = ends(kind), end > now {
-                            Text(timerInterval: now...end, countsDown: true)
-                                .font(.system(size: 10, weight: .bold).monospacedDigit())
-                        }
-                    }
-                    .foregroundColor(kind.tint)
-                    .fixedSize()
-                }
+                NoticeIconsRow(kinds: kinds, pollEnds: pollEnds, predictionEnds: predictionEnds)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
@@ -217,22 +241,41 @@ struct CollapsedNoticesBar: View {
         .overlay(Divider().background(Color.tBorder), alignment: .bottom)
         .accessibilityLabel(store.t("notices_show"))
     }
+}
 
-    private func ends(_ kind: ChatNoticeKind) -> Date? {
-        switch kind {
-        case .poll:       return pollEnds
-        case .prediction: return predictionEnds
-        default:          return nil
+/// Sondage, prédiction ou hype train fermés (×) : une seule pastille, quel
+/// que soit leur nombre (la barre de statut est étroite), qui les rouvre.
+struct ClosedNoticesChip: View {
+    let kinds: [ChatNoticeKind]
+    var pollEnds: Date? = nil
+    var predictionEnds: Date? = nil
+    let onReopen: () -> Void
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        Button(action: onReopen) {
+            NoticeIconsRow(kinds: kinds, pollEnds: pollEnds, predictionEnds: predictionEnds, spacing: 6)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.tSurface).clipShape(Capsule())
+                .contentShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel(store.t("notices_show"))
     }
 }
 
 /// Sous les bandeaux dépliés, en paysage : « Masquer » les replie en une
-/// ligne. Une épingle réduite se rouvre ici, la barre de statut qui porte
-/// sa pastille n'étant pas affichée.
+/// ligne. Une épingle réduite et les bandeaux fermés (×) se rouvrent ici, la
+/// barre de statut qui porte leurs pastilles n'étant pas affichée.
 struct NoticesHideStrip: View {
     var showPinChip = false
     let onReopenPin: () -> Void
+    /// Bandeaux fermés : leur pastille groupée (vide = pas de pastille).
+    var closedKinds: [ChatNoticeKind] = []
+    var pollEnds: Date? = nil
+    var predictionEnds: Date? = nil
+    var onReopenClosed: () -> Void = {}
     let onHide: () -> Void
     @EnvironmentObject private var store: AppStore
 
@@ -250,6 +293,10 @@ struct NoticesHideStrip: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
+            }
+            if !closedKinds.isEmpty {
+                ClosedNoticesChip(kinds: closedKinds, pollEnds: pollEnds,
+                                  predictionEnds: predictionEnds, onReopen: onReopenClosed)
             }
             Spacer(minLength: 4)
             Button(action: onHide) {

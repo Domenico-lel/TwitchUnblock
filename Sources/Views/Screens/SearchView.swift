@@ -26,6 +26,8 @@ struct SearchView: View {
     @EnvironmentObject private var store: AppStore
     /// Suivre pour de vrai (session web) depuis la page de la chaîne.
     @StateObject private var follow = FollowService()
+    /// « Ne plus suivre » touché : on demande d'abord confirmation.
+    @State private var confirmUnfollow = false
 
     @State private var query        = ""
     @State private var filterText   = ""
@@ -424,6 +426,11 @@ struct SearchView: View {
                 let local = store.twitchWebToken == nil
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    // Ne plus suivre se confirme (sur Twitch avec la session web).
+                    if follow.isFollowing == true {
+                        confirmUnfollow = true
+                        return
+                    }
                     let login = channelName
                     Task { @MainActor in
                         await follow.toggle(token: store.twitchWebToken)
@@ -448,6 +455,15 @@ struct SearchView: View {
                 .buttonStyle(.plain)
                 .disabled(follow.busy)
                 .opacity(follow.busy ? 0.5 : 1)
+                .confirmationDialog(
+                    store.t("unfollow_confirm").replacingOccurrences(of: "{c}", with: channelName),
+                    isPresented: $confirmUnfollow, titleVisibility: .visible
+                ) {
+                    Button(store.t("unfollow"), role: .destructive) {
+                        Task { @MainActor in await follow.unfollow(token: store.twitchWebToken) }
+                    }
+                    Button(store.t("cancel"), role: .cancel) {}
+                }
                 .padding(.horizontal, TSpace.lg)
             }
 
@@ -840,6 +856,8 @@ struct SearchView: View {
         guard !login.isEmpty else { return }
 
         loading = true; errorMsg = nil; liveData = nil; vods = []
+        // Le suivi de la chaîne précédente ne doit ni s'afficher ni se modifier ici.
+        follow.reset(); confirmUnfollow = false
         filterText = ""; searchedName = login; suggestions = []
         channelTab = 0; clips = []; clipsFor = ""
         clipsLocked = false; clipsCursor = nil; loadingMoreClips = false

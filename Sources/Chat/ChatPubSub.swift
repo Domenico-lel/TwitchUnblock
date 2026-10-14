@@ -231,6 +231,7 @@ struct PinnedBanner: View {
                         .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
                         .frame(width: 24, height: 22)
                 }
+                .accessibilityLabel(store.t("close"))
             }
             TimelineView(.periodic(from: .now, by: 30)) { ctx in
                 Text(meta(now: ctx.date))

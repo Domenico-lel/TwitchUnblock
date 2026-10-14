@@ -108,19 +108,57 @@ final class FollowService: ObservableObject {
     private static let hashFollow   = "800e7346bdf7e5278a3c1d3f21b2b56e2639928f86815677a7126b093b2fdd08"
     private static let hashUnfollow = "f7dae976ebf41c755ae2d758546bfd176b4eeb856656098bb40e0a672ca0d880"
 
+    /// Autre chaîne (page de chaîne) : plus rien d'affiché ni de modifiable
+    /// tant que son statut n'est pas lu.
+    func reset() {
+        isFollowing = nil
+        login = ""; channelId = ""
+        localStore = nil
+    }
+
     func load(login: String, channelId: String, token: String?) async {
-        self.login = login.lowercased(); self.channelId = channelId
+        let wanted = login.lowercased()
+        self.login = wanted; self.channelId = channelId
         localStore = nil
         isFollowing = nil
         guard let token = token, !login.isEmpty else { return }
         guard let res  = await TwitchGQL.shared.query("FollowButton_User",
-                            variables: ["login": self.login], sha256: Self.hashStatus, token: token),
+                            variables: ["login": wanted], sha256: Self.hashStatus, token: token),
+              // Réponse d'une chaîne quittée entre-temps : ignorée.
+              self.login == wanted, localStore == nil,
               let data = res["data"] as? [String: Any],
               let user = data["user"] as? [String: Any] else { return }
         // user.self.follower est non-null si on suit la chaîne.
         let follower = (user["self"] as? [String: Any])?["follower"]
         isFollowing = follower != nil && !(follower is NSNull)
         logger.debug("FOLLOW", "Statut @\(self.login)", isFollowing == true ? "suivi" : "non suivi")
+    }
+
+    /// Ne plus suivre, après confirmation : jamais un abonnement, même si le
+    /// statut a été relu entre le toucher et la confirmation. Selon le mode
+    /// chargé : suivi de l'appareil, ou compte Twitch (session web).
+    func unfollow(token: String?) async {
+        if let localStore {
+            guard localStore.isLocallyFollowed(login) else { isFollowing = false; return }
+            localStore.toggleLocalFollow(login)
+            isFollowing = localStore.isLocallyFollowed(login)
+            logger.info("FOLLOW", "Suivi local retiré @\(login)", nil)
+            return
+        }
+        guard let token, !token.isEmpty, !channelId.isEmpty, isFollowing == true, !busy else { return }
+        busy = true; defer { busy = false }
+        await sendUnfollow(token: token)
+    }
+
+    private func sendUnfollow(token: String) async {
+        let res = await TwitchGQL.shared.mutation("FollowButton_UnfollowUser",
+                    variables: ["input": ["targetID": channelId]],
+                    sha256: Self.hashUnfollow, token: token)
+        if let d = res?["data"] as? [String: Any], let u = d["unfollowUser"], !(u is NSNull),
+           res?["errors"] == nil {
+            isFollowing = false
+            logger.success("FOLLOW", "Ne suit plus @\(login)", nil)
+        } else { logger.warn("FOLLOW", "Unfollow échoué @\(login)", nil) }
     }
 
     func toggle(token: String?) async {
@@ -133,13 +171,7 @@ final class FollowService: ObservableObject {
         guard let token = token, let current = isFollowing, !busy, !channelId.isEmpty else { return }
         busy = true; defer { busy = false }
         if current {
-            let res = await TwitchGQL.shared.mutation("FollowButton_UnfollowUser",
-                        variables: ["input": ["targetID": channelId]],
-                        sha256: Self.hashUnfollow, token: token)
-            if let d = res?["data"] as? [String: Any], d["unfollowUser"] != nil, res?["errors"] == nil {
-                isFollowing = false
-                logger.success("FOLLOW", "Ne suit plus @\(login)", nil)
-            } else { logger.warn("FOLLOW", "Unfollow échoué @\(login)", nil) }
+            await sendUnfollow(token: token)
         } else {
             let res = await TwitchGQL.shared.mutation("FollowButton_FollowUser",
                         variables: ["input": ["disableNotifications": false, "targetID": channelId]],

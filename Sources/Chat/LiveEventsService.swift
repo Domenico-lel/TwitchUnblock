@@ -23,6 +23,8 @@ final class LiveEventsService: ObservableObject {
             guard !isActive, let best = choices.max(by: { $0.votes < $1.votes }), best.votes > 0 else { return nil }
             return best.id
         }
+        /// Clé de fermeture (×) : un nouveau sondage a un autre id et réapparaît.
+        var noticeKey: String { "poll:" + (id.isEmpty ? title : id) }
         struct Choice: Identifiable { let id: String; let title: String; let votes: Int }
     }
     struct LivePrediction {
@@ -38,8 +40,18 @@ final class LiveEventsService: ObservableObject {
         var myOutcomeId: String? = nil
         var myPoints: Int = 0
         var total: Int { max(1, outcomes.reduce(0) { $0 + $1.points }) }
+        /// Clé de fermeture (×) : la même jusqu'au résultat, une autre pour la suivante.
+        var noticeKey: String { "pred:" + (id.isEmpty ? title : id) }
     }
-    struct LiveHype { let level: Int; let percent: Double }
+    struct LiveHype {
+        /// Id du train : il ne change pas d'un niveau à l'autre.
+        var id: String = ""
+        let level: Int
+        /// Avancée du niveau en cours (0…1).
+        let percent: Double
+        /// Clé de fermeture (×) : un train fermé le reste jusqu'à sa fin.
+        var noticeKey: String { id.isEmpty ? "hype" : "hype:" + id }
+    }
 
     /// Choix pour lesquels on a voté (vide = pas encore voté sur ce sondage).
     @Published var votedChoiceIds: Set<String> = []
@@ -383,13 +395,17 @@ final class LiveEventsService: ObservableObject {
         let progress = exec["progress"] as? [String: Any]
         let level = (progress?["level"] as? [String: Any])?["value"] as? Int
                  ?? (exec["level"] as? [String: Any])?["value"] as? Int ?? 1
-        let total = progress?["total"] as? Int ?? 0
+        // `total` est cumulé sur tous les niveaux, `goal` ne vaut que pour le
+        // niveau en cours : total/goal affichait 100 % dès le niveau 2.
+        // `progression` est l'avancée dans le niveau ; total en repli s'il manque.
+        let done  = (progress?["progression"] as? Int) ?? (progress?["total"] as? Int) ?? 0
         let goal  = (progress?["goal"] as? Int)
                  ?? ((progress?["level"] as? [String: Any])?["goal"] as? Int) ?? 0
         if hype?.level != level {
             logger.success("EVENTS", "🚄 Hype train actif", "niveau \(level)")
         }
-        hype = LiveHype(level: level, percent: goal > 0 ? min(1, Double(total) / Double(goal)) : 0)
+        hype = LiveHype(id: exec["id"] as? String ?? "", level: level,
+                        percent: goal > 0 ? min(1, max(0, Double(done) / Double(goal))) : 0)
     }
 }
 
@@ -398,60 +414,26 @@ struct LiveEventsBanner: View {
     @ObservedObject var events: LiveEventsService
     /// Solde et session web : pour parier sur les prédictions.
     @ObservedObject var points: ChannelPointsService
+    /// Bandeaux fermés (×), par clé d'événement (`noticeKey`) : un nouveau
+    /// sondage ou une nouvelle prédiction a une autre clé et réapparaît.
+    var closed: Set<String> = []
+    var onClose: (String) -> Void = { _ in }
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
         VStack(spacing: 0) {
-            if let poll = events.poll {
-                banner(icon: "chart.bar.fill", tint: .tPrimary) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text("📊 \(poll.title)")
-                                .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
-                            Spacer(minLength: 4)
-                            if !poll.isActive {
-                                Text(store.t("poll_results"))
-                                    .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
-                                    .background(Color.tSurface).cornerRadius(5)
-                            } else if let endsAt = poll.endsAt, endsAt > Date() {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "clock.fill").font(.system(size: 9))
-                                    Text(timerInterval: Date()...endsAt, countsDown: true)
-                                        .font(.system(size: 11, weight: .bold).monospacedDigit())
-                                }
-                                .foregroundColor(.tPrimary)
-                            }
-                        }
-                        if poll.multichoice && poll.isActive {
-                            Text(store.t("poll_multi"))
-                                .font(.system(size: 10)).foregroundColor(.tMuted)
-                        }
-                        ForEach(poll.choices) { c in
-                            let voted = events.votedChoiceIds.contains(c.id)
-                            Button {
-                                Task { await events.vote(choiceId: c.id) }
-                            } label: {
-                                EventBar(label: c.title, value: c.votes, total: poll.total,
-                                         color: poll.winnerId == c.id ? .tSuccess : .tPrimary,
-                                         voted: voted, winner: poll.winnerId == c.id)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(events.voting || !poll.isActive || voted || c.id.isEmpty
-                                      || (!poll.multichoice && !events.votedChoiceIds.isEmpty))
-                        }
-                        Text("\(poll.choices.reduce(0) { $0 + $1.votes }) \(store.t("poll_votes"))")
-                            .font(.system(size: 10)).foregroundColor(.tMuted)
-                    }
+            if let poll = events.poll, !closed.contains(poll.noticeKey) {
+                banner(icon: "chart.bar.fill", tint: .tPrimary, onClose: { onClose(poll.noticeKey) }) {
+                    PollCard(poll: poll, events: events)
                 }
             }
-            if let pred = events.prediction {
-                banner(icon: "sparkles", tint: .tPurple) {
+            if let pred = events.prediction, !closed.contains(pred.noticeKey) {
+                banner(icon: "sparkles", tint: .tPurple, onClose: { onClose(pred.noticeKey) }) {
                     PredictionCard(pred: pred, events: events, points: points)
                 }
             }
-            if let hype = events.hype {
-                banner(icon: "flame.fill", tint: .tLive) {
+            if let hype = events.hype, !closed.contains(hype.noticeKey) {
+                banner(icon: "flame.fill", tint: .tLive, onClose: { onClose(hype.noticeKey) }) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("🚄 Hype Train — \(store.t("hype_level")) \(hype.level)")
                             .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
@@ -463,15 +445,115 @@ struct LiveEventsBanner: View {
     }
 
     @ViewBuilder
-    private func banner<Content: View>(icon: String, tint: Color, @ViewBuilder content: () -> Content) -> some View {
+    private func banner<Content: View>(icon: String, tint: Color, onClose: @escaping () -> Void,
+                                       @ViewBuilder content: () -> Content) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon).font(.system(size: 12)).foregroundColor(tint).padding(.top, 2)
             content()
             Spacer(minLength: 0)
+            // × comme celui des drops : le bandeau se range dans la pastille
+            // groupée de la barre de statut (ou du repli en paysage).
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold)).foregroundColor(.tMuted)
+                    .frame(width: 26, height: 26).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(store.t("close"))
+            // Zone de toucher pleine, sans grandir un bandeau d'une ligne.
+            .padding(.vertical, -5)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(tint.opacity(0.10))
         .overlay(Divider().background(Color.tBorder), alignment: .bottom)
+    }
+}
+
+// MARK: – Sondage : barres et vote
+/// Les choix se touchent pour voter. Terminé (Twitch le renvoie encore 1 à
+/// 3 min), il se replie sur son titre et le choix gagnant ; un toucher
+/// montre toutes les barres.
+private struct PollCard: View {
+    let poll: LiveEventsService.LivePoll
+    @ObservedObject var events: LiveEventsService
+    @EnvironmentObject private var store: AppStore
+    @State private var showResults = false
+
+    private var folded: Bool { !poll.isActive && !showResults }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if poll.isActive {
+                header
+            } else {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { showResults.toggle() }
+                } label: {
+                    header.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            if folded {
+                if let w = poll.choices.first(where: { $0.id == poll.winnerId }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 10)).foregroundColor(.tWarning)
+                        Text("\(w.title) · \(Int(Double(w.votes) / Double(poll.total) * 100))%")
+                            .font(.system(size: 11, weight: .semibold)).foregroundColor(.tText)
+                            .lineLimit(1)
+                    }
+                }
+            } else {
+                if poll.multichoice && poll.isActive {
+                    Text(store.t("poll_multi"))
+                        .font(.system(size: 10)).foregroundColor(.tMuted)
+                }
+                ForEach(poll.choices) { c in
+                    let voted = events.votedChoiceIds.contains(c.id)
+                    Button {
+                        Task { await events.vote(choiceId: c.id) }
+                    } label: {
+                        EventBar(label: c.title, value: c.votes, total: poll.total,
+                                 color: poll.winnerId == c.id ? .tSuccess : .tPrimary,
+                                 voted: voted, winner: poll.winnerId == c.id)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(events.voting || !poll.isActive || voted || c.id.isEmpty
+                              || (!poll.multichoice && !events.votedChoiceIds.isEmpty))
+                }
+                Text("\(poll.choices.reduce(0) { $0 + $1.votes }) \(store.t("poll_votes"))")
+                    .font(.system(size: 10)).foregroundColor(.tMuted)
+            }
+        }
+        // Sondage suivant : replié d'office à son tour quand il se termine.
+        .onChange(of: poll.id) { _ in showResults = false }
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text("📊 \(poll.title)")
+                .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
+            Spacer(minLength: 4)
+            // Une seule lecture de l'heure : entre deux, la fin pourrait
+            // passer et l'intervalle s'inverser.
+            let now = Date()
+            if !poll.isActive {
+                Text(store.t("poll_results"))
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Color.tSurface).cornerRadius(5)
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(showResults ? 180 : 0))
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
+            } else if let endsAt = poll.endsAt, endsAt > now {
+                HStack(spacing: 3) {
+                    Image(systemName: "clock.fill").font(.system(size: 9))
+                    Text(timerInterval: now...endsAt, countsDown: true)
+                        .font(.system(size: 11, weight: .bold).monospacedDigit())
+                }
+                .foregroundColor(.tPrimary)
+            }
+        }
     }
 }
 
@@ -488,6 +570,8 @@ private struct PredictionCard: View {
     @State private var selected: String? = nil
     @State private var amount = ""
     @FocusState private var amountFocused: Bool
+    /// Barres d'une prédiction verrouillée, dépliées d'un toucher.
+    @State private var showBars = false
 
     /// Règles de Twitch : 10 points au moins, 250 000 au plus par prédiction.
     private static let minBet = 10
@@ -499,12 +583,28 @@ private struct PredictionCard: View {
     private var needsSession: Bool { store.twitchWebToken == nil || points.needsWebLogin }
     /// Mise possible : le solde, sans dépasser le plafond (paris déjà faits compris).
     private var maxBet: Int { max(0, min(points.balance, Self.maxTotal - pred.myPoints)) }
+    /// Verrouillée, en attente du résultat (souvent 10 à 60 min) : plus de
+    /// pari, les montants ne bougent plus. C'est l'état le plus courant.
+    private var awaitingResult: Bool { pred.locked && pred.winnerId == nil }
+    /// Repliée d'office sur son titre, « Paris fermés » et ton pari.
+    private var folded: Bool { awaitingResult && !showBars }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            header
-            ForEach(Array(pred.outcomes.enumerated()), id: \.offset) { _, o in
-                outcomeRow(o)
+            if awaitingResult {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { showBars.toggle() }
+                } label: {
+                    header.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            } else {
+                header
+            }
+            if !folded {
+                ForEach(Array(pred.outcomes.enumerated()), id: \.offset) { _, o in
+                    outcomeRow(o)
+                }
             }
             if let mine = myOutcome {
                 Text(store.t("pred_my_bet")
@@ -528,6 +628,7 @@ private struct PredictionCard: View {
         .onChange(of: pred.id) { _ in
             selected = nil
             amount = ""
+            showBars = false
             events.betError = nil
         }
     }
@@ -542,16 +643,26 @@ private struct PredictionCard: View {
             Text("🔮 \(pred.title)\(pred.locked && pred.winnerId == nil ? " 🔒" : "")")
                 .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
             Spacer(minLength: 4)
-            if let closes = pred.closesAt, closes > Date() {
+            // Une seule lecture de l'heure : entre deux, la fin pourrait
+            // passer et l'intervalle s'inverser.
+            let now = Date()
+            if let closes = pred.closesAt, closes > now {
                 HStack(spacing: 3) {
                     Image(systemName: "clock.fill").font(.system(size: 9))
-                    Text(timerInterval: Date()...closes, countsDown: true)
+                    Text(timerInterval: now...closes, countsDown: true)
                         .font(.system(size: 11, weight: .bold).monospacedDigit())
                 }
                 .foregroundColor(.tPurple)
             } else if pred.winnerId != nil {
                 Text(store.t("pred_result"))
                     .font(.system(size: 10, weight: .bold)).foregroundColor(.tSuccess)
+            } else if awaitingResult {
+                Text(store.t("pred_closed"))
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
+                    .lineLimit(1).fixedSize()
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(showBars ? 180 : 0))
+                    .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
             }
         }
     }

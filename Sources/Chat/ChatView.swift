@@ -36,6 +36,11 @@ struct ChatView: View {
     @State private var threadRoot: ChatMessage? = nil   // fil de discussion ouvert
     @State private var pinnedExpanded   = false   // bandeau épinglé déplié
     @State private var dismissedPinId: String? = nil   // épingle réduite en pastille
+    /// Sondages, prédictions et hype trains fermés (×), par `noticeKey` :
+    /// gardés tant que ce chat vit (mini-lecteur, rotation compris).
+    @State private var closedNotices: Set<String> = []
+    /// « Ne plus suivre » touché : on demande d'abord confirmation.
+    @State private var confirmUnfollow = false
     /// Emote ou badge touché : sa fiche (nom exact, source, copier).
     @State private var infoItem: ChatInfoItem? = nil
     @State private var chromeWidth: CGFloat = 320
@@ -117,9 +122,15 @@ struct ChatView: View {
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(Color.tWarning.opacity(0.15)).cornerRadius(6)
                 }
-                // Bouton Suivre / Ne plus suivre
+                // Bouton Suivre / Ne plus suivre. Juste sous la vidéo en
+                // portrait, à portée de pouce : ne plus suivre se confirme
+                // (sur Twitch avec la session web, et les notifications avec).
                 if store.showFollowButton, let following = follow.isFollowing {
                     Button {
+                        if follow.isFollowing == true {
+                            confirmUnfollow = true
+                            return
+                        }
                         Task { @MainActor in
                             await follow.toggle(token: store.twitchWebToken)
                             // Suivie (aussi sur Twitch) : plus masquée des listes.
@@ -142,6 +153,23 @@ struct ChatView: View {
                     }
                     .disabled(follow.busy)
                     .opacity(follow.busy ? 0.5 : 1)
+                    .confirmationDialog(
+                        store.t("unfollow_confirm").replacingOccurrences(of: "{c}", with: channelName),
+                        isPresented: $confirmUnfollow, titleVisibility: .visible
+                    ) {
+                        // Action explicite, jamais une bascule : un statut relu
+                        // entre-temps ne peut pas la changer en abonnement.
+                        Button(store.t("unfollow"), role: .destructive) {
+                            Task { @MainActor in await follow.unfollow(token: store.twitchWebToken) }
+                        }
+                        Button(store.t("follow_hide_button")) {
+                            store.showFollowButton = false
+                            logger.settingChanged("Bouton suivre", value: "désactivé")
+                        }
+                        Button(store.t("cancel"), role: .cancel) {}
+                    } message: {
+                        Text(store.t("follow_hide_hint"))
+                    }
                 }
                 // Épingle réduite : une pastille la rouvre.
                 if store.showPinnedMessages, let pin = pubsub.pinned, pin.id == dismissedPinId {
@@ -157,6 +185,11 @@ struct ChatView: View {
                         .background(Color.tPurple.opacity(0.15)).cornerRadius(6)
                     }
                     .fixedSize()
+                }
+                // Bandeaux fermés (×) : une seule pastille les rouvre tous.
+                if !closedKinds.isEmpty {
+                    ClosedNoticesChip(kinds: closedKinds, pollEnds: pollEnds,
+                                      predictionEnds: predictionEnds) { reopenClosedNotices() }
                 }
             }
             // Hauteur stable même quand seul le point est affiché.
@@ -202,7 +235,9 @@ struct ChatView: View {
 
             // ── Événements live (sondage / prédiction / hype train) ─
             if store.showLiveEvents {
-                LiveEventsBanner(events: events, points: pointsService)
+                LiveEventsBanner(events: events, points: pointsService, closed: closedNotices) { key in
+                    withAnimation(.easeInOut(duration: 0.18)) { _ = closedNotices.insert(key) }
+                }
             }
 
             // ── Raid sortant ────────────────────────────────────────
@@ -250,6 +285,27 @@ struct ChatView: View {
         return kinds
     }
 
+    /// Événements présents dont le bandeau a été fermé (×) : leur pastille.
+    private var closedKinds: [ChatNoticeKind] {
+        guard store.showLiveEvents, !closedNotices.isEmpty else { return [] }
+        var kinds: [ChatNoticeKind] = []
+        if let p = events.poll, closedNotices.contains(p.noticeKey) { kinds.append(.poll) }
+        if let p = events.prediction, closedNotices.contains(p.noticeKey) { kinds.append(.prediction) }
+        if let h = events.hype, closedNotices.contains(h.noticeKey) { kinds.append(.hype) }
+        return kinds
+    }
+
+    /// Fin d'un sondage ou d'une prédiction encore ouverts (comptes à rebours
+    /// des icônes).
+    private var pollEnds: Date? { events.poll.flatMap { $0.isActive ? $0.endsAt : nil } }
+    private var predictionEnds: Date? {
+        events.prediction.flatMap { $0.locked || $0.winnerId != nil ? nil : $0.closesAt }
+    }
+
+    private func reopenClosedNotices() {
+        withAnimation(.easeInOut(duration: 0.18)) { closedNotices = [] }
+    }
+
     /// Les bandeaux, et en paysage (sans barre de statut) de quoi les replier :
     /// la colonne est étroite, un sondage et une prédiction la remplissaient.
     /// Repliés, ils tiennent sur une ligne d'icônes qui les rouvre ; le choix
@@ -261,11 +317,12 @@ struct ChatView: View {
             if store.landscapeNoticesHidden {
                 CollapsedNoticesBar(
                     kinds: activeNotices,
-                    pollEnds: events.poll.flatMap { $0.isActive ? $0.endsAt : nil },
-                    predictionEnds: events.prediction.flatMap { $0.locked || $0.winnerId != nil ? nil : $0.closesAt }
+                    pollEnds: pollEnds,
+                    predictionEnds: predictionEnds
                 ) {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         dismissedPinId = nil
+                        closedNotices = []
                         store.landscapeNoticesHidden = false
                     }
                 }
@@ -276,6 +333,10 @@ struct ChatView: View {
                     // Sa pastille vit dans la barre de statut, absente ici.
                     showPinChip: pubsub.pinned.map { $0.id == dismissedPinId } ?? false,
                     onReopenPin: { withAnimation(.easeInOut(duration: 0.18)) { dismissedPinId = nil } },
+                    closedKinds: closedKinds,
+                    pollEnds: pollEnds,
+                    predictionEnds: predictionEnds,
+                    onReopenClosed: { reopenClosedNotices() },
                     onHide: {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             pinnedExpanded = false
@@ -504,7 +565,7 @@ struct ChatView: View {
                 onCancel: { showWebLogin = false }
             )
         }
-        // ── Token web mis à jour → recharge les points ───────────────
+        // ── Token web mis à jour → recharge les points et le suivi ───
         .onChange(of: store.twitchWebToken) { newWebToken in
             guard let cid = channelId else { return }
             logger.info("POINTS", "Token web mis à jour → rechargement points",
@@ -518,6 +579,14 @@ struct ChatView: View {
                     viewerId:    store.twitchUserId
                 )
             }
+            // Sans ça, le bouton gardait le mode d'avant (appareil ou compte)
+            // et ne faisait plus rien, en silence.
+            if store.showFollowButton { Task { await loadFollow() } }
+        }
+        // Bouton Suivre réactivé pendant le live : il revient tout de suite.
+        .onChange(of: store.showFollowButton) { show in
+            guard show, follow.isFollowing == nil else { return }
+            Task { await loadFollow() }
         }
         // ── Token OAuth mis à jour → reconnecte uniquement l'IRC ──────
         .onChange(of: store.twitchToken) { newToken in
@@ -609,14 +678,7 @@ struct ChatView: View {
         }
         if let cid = channelId {
             // Statut de suivi (nécessite le token web pour le champ self.follower)
-            if store.showFollowButton {
-                if store.twitchWebToken == nil {
-                    // Sans session web, le suivi reste sur cet appareil.
-                    follow.loadLocal(login: channelName, store: store)
-                } else {
-                    await follow.load(login: channelName, channelId: cid, token: store.twitchWebToken)
-                }
-            }
+            if store.showFollowButton { await loadFollow() }
             // Événements live (série de visionnage, sondage, prédiction, hype train)
             if store.showWatchStreak || store.showLiveEvents {
                 events.start(login: channelName, channelId: cid,
@@ -627,6 +689,17 @@ struct ChatView: View {
             if store.enableRaids {
                 raidService.connect(channelId: cid, token: store.twitchWebToken ?? "")
             }
+        }
+    }
+
+    /// Statut de suivi : celui du compte avec la session web (champ
+    /// self.follower), sinon le suivi gardé sur cet appareil.
+    private func loadFollow() async {
+        guard let cid = channelId else { return }
+        if store.twitchWebToken == nil {
+            follow.loadLocal(login: channelName, store: store)
+        } else {
+            await follow.load(login: channelName, channelId: cid, token: store.twitchWebToken)
         }
     }
 

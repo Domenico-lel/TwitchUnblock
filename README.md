@@ -135,18 +135,26 @@ no key to paste. The backend is already hosted and shared by every install.
   a countdown; collapse it to a chip. Shown in landscape too, along with polls,
   predictions and raids; there, **Hide** under them folds them all into one
   line of icons (with the poll or prediction countdown) — tap it to bring them
-  back. The choice is remembered (Settings → Customize).
+  back. The choice is remembered (Settings → Chat → Customization).
 * 🎁 **Drops card** — when the channel runs a drops campaign, a card at the top
   of the chat shows the reward, the watch time it takes, the end date and a
   link to the details, like in the Twitch app; dismissed, it stays away for
-  that campaign (Settings → Customize → Channel drops).
+  that campaign (Settings → Chat → Customization → Channel drops).
 * 📊 **Polls, predictions, hype train** — vote, bet channel points on a
-  prediction, see the countdown, the results and the winning outcome.
+  prediction, see the countdown, the results and the winning outcome. Once
+  betting is closed, a prediction folds down to its title and your bet, and a
+  finished poll to its winning choice; tap to see the bars. The hype train bar
+  shows the progress of the current level. Each banner has a × that tucks it
+  into a single chip above the chat (in portrait, landscape and multi-live) —
+  tap the chip to bring them back; a new poll or prediction still shows up.
 * 🚀 **Raids** — follow the streamer to the raided channel automatically;
   incoming raids shown with a link to the raider. Each of these can be switched off.
 * 🔦 **Highlights & filters** — messages mentioning you or containing your words
   stand out; hide bots, `!commands`, muted words or someone in particular.
-* 🔥 **Watch streak** and a **follow / unfollow** button.
+* 🔥 **Watch streak** and a **follow / unfollow** button. Unfollowing, from the
+  player or a channel page, asks for confirmation first; from the player, the
+  same dialog can hide the button (Settings → Chat → Customization → Follow
+  button above the chat).
 * 🎁 **Channel points** — balance, rewards, and automatic bonus chest claiming.
 * ⏱ **Auto-sync chat delay** — delays the chat by how far behind live you are,
   measured from the stream's timestamps so it doesn't drift each time the
