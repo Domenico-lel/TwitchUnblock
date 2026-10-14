@@ -1050,6 +1050,8 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 liveSourceRow
                 Divider().background(Color.tBorder)
+                preferredQualityRow
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("fill_screen"), store.t("fill_screen_sub"),
                           $store.fillScreen, log: "Remplir l'écran")
                 Divider().background(Color.tBorder)
@@ -1063,6 +1065,35 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
                           $store.showLatency, log: "Afficher la latence")
+            }
+        }
+    }
+
+    /// Qualité préférée : celle qui démarre (ou la plus proche en dessous).
+    @ViewBuilder private var preferredQualityRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("pref_quality"))
+                    .font(.tCardTitle)
+                    .foregroundColor(.tText)
+                Text(store.t("pref_quality_sub"))
+                    .font(.tMeta)
+                    .foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Picker("", selection: $store.preferredQuality) {
+                ForEach(kQualityPrefs, id: \.self) { pref in
+                    Text(pref == "source" ? store.t("q_source")
+                         : pref == "audio" ? store.t("q_audio") : "\(pref)p")
+                        .tag(pref)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .tint(.tPrimary)
+            .onChange(of: store.preferredQuality) { value in
+                logger.settingChanged("Qualité préférée", value: value)
             }
         }
     }

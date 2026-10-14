@@ -356,6 +356,12 @@ struct TVAccountTab: View {
                     TVChoiceRow(title: session.t("live_source"),
                                 options: kLiveSourceChoices.map { ($0, session.t("src_\($0)")) },
                                 selection: $session.liveSource)
+                    TVChoiceRow(title: session.t("pref_quality"),
+                                options: kQualityPrefs.map { pref -> (String, String) in
+                                    (pref, pref == "source" ? session.t("q_source")
+                                         : pref == "audio" ? session.t("tv_audio") : "\(pref)p")
+                                },
+                                selection: $session.qualityPref)
                 }
             }
             .padding(64)

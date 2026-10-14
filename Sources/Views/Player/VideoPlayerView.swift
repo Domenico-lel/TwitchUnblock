@@ -360,6 +360,9 @@ struct VideoPlayerView: View {
     /// d'identifiant de VOD mais ne sont pas des directs. Décide de la tenue
     /// du direct, de la latence et de la synchro du chat.
     let isLive: Bool
+    /// Hauteur et cadence de chaque qualité (qualité préférée) ; vide quand
+    /// la source ne les donne pas.
+    var variants: [String: VariantInfo] = [:]
     /// Mode compact (chat ouvert) : masque la barre Source / le lien pour laisser
     /// un maximum de place au chat. Seul le lecteur reste visible.
     var compact: Bool = false
@@ -387,7 +390,7 @@ struct VideoPlayerView: View {
     @State private var lastPersisted: Double = -99
     @State private var latency: Double? = nil
 
-    private var qualities: [String] { sortQualities(Array(qualityLinks.keys)) }
+    private var qualities: [String] { sortQualities(Array(qualityLinks.keys), variants: variants) }
     private var currentURL: URL? { qualityLinks[selectedQuality].flatMap(URL.init) }
 
     var body: some View {
@@ -446,7 +449,7 @@ struct VideoPlayerView: View {
                         Button {
                             currentTime = 0
                             selectedQuality = q
-                            store.rememberQualityChoice(q)
+                            store.rememberQualityChoice(q, among: qualities, variants: variants)
                             showQualityPicker = false
                         } label: {
                             HStack {
@@ -474,11 +477,19 @@ struct VideoPlayerView: View {
         .background(Color.tCard)
         .cornerRadius(16)
         .onAppear {
-            if selectedQuality.isEmpty {
-                selectedQuality = store.preferAudioOnly && qualities.contains("audio_only")
-                    ? "audio_only" : (qualities.first ?? "")
-            }
+            if selectedQuality.isEmpty { selectedQuality = preferredSelection(qualityLinks) }
         }
+        // Autres liens (bascule direct ↔ rembobinage, autre source) : la
+        // qualité en cours peut ne plus y être ; on repart de la préférence
+        // au lieu de rester sans image.
+        .onChange(of: qualityLinks) { links in
+            if links[selectedQuality] == nil { selectedQuality = preferredSelection(links) }
+        }
+    }
+
+    /// Qualité préférée, ou la plus proche en dessous (même règle que le lecteur immersif).
+    private func preferredSelection(_ links: QualityLinks) -> String {
+        preferredQualityKey(Array(links.keys), pref: store.preferredQuality, variants: variants)
     }
 
     // Lecteur natif (AVPlayerViewController) avec PiP + reprise de position.
@@ -568,8 +579,5 @@ struct VideoPlayerView: View {
         )
     }
 
-    private func qualityLabel(_ q: String) -> String {
-        q.replacingOccurrences(of: "chunked", with: "Source")
-         .replacingOccurrences(of: "source",  with: "Source")
-    }
+    private func qualityLabel(_ q: String) -> String { qualityText(q, store.lang) }
 }

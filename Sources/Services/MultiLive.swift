@@ -67,16 +67,17 @@ final class MultiLive: ObservableObject {
         if let data = try? JSONEncoder().encode(entries) { UserDefaults.standard.set(data, forKey: key) }
     }
 
-    /// Une qualité qui tient à plusieurs : 1080p seul, 720p à deux, 480p au-delà.
-    nonisolated static func pick(_ links: QualityLinks, count: Int) -> URL? {
-        let want = count <= 1 ? 1080 : count == 2 ? 720 : 480
-        let video = sortQualities(Array(links.keys)).filter { !$0.lowercased().contains("audio") }
-        func height(_ k: String) -> Int {
-            if let r = k.range(of: #"\d+(?=p)"#, options: .regularExpression) { return Int(k[r]) ?? 0 }
-            let l = k.lowercased()
-            return l.contains("source") || l.contains("chunked") ? 1080 : 0
-        }
-        let key = video.first { (1 ... want).contains(height($0)) } ?? video.last ?? links.keys.first
+    /// Une qualité qui tient à plusieurs : 1080p seul, 720p à deux, 480p
+    /// au-delà — ou la qualité préférée si elle est plus basse (plafond).
+    /// La plus haute à cette hauteur ou en dessous, sinon la plus basse.
+    nonisolated static func pick(_ links: QualityLinks, count: Int,
+                                 variants: [String: VariantInfo] = [:]) -> URL? {
+        let rule = count <= 1 ? 1080 : count == 2 ? 720 : 480
+        let pref = UserDefaults.standard.string(forKey: "cfg_quality_pref") ?? "source"
+        let want = Int(pref).map { min($0, rule) } ?? rule
+        let video = links.keys.filter { !isAudioQuality($0) }
+        let key: String? = video.isEmpty ? links.keys.first
+            : preferredQualityKey(video, pref: String(want), variants: variants)
         return key.flatMap { links[$0] }.flatMap { URL(string: $0) }
     }
 }
@@ -114,7 +115,7 @@ final class MultiTileModel: ObservableObject {
             guard let self, !Task.isCancelled else { return }
             if let id = data.userId { self.channelId = id }
             guard let links = data.links, !links.isEmpty,
-                  let url = MultiLive.pick(links, count: count) else {
+                  let url = MultiLive.pick(links, count: count, variants: data.variants) else {
                 let gone = data.error == "offline" || data.error == "Streamer introuvable"
                 self.phase = gone ? .offline : .failed
                 return

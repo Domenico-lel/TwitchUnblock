@@ -34,14 +34,11 @@ struct VodDownloadSheet: View {
     @State private var restore = true
     @State private var withChat = true
 
-    private var qualities: [String] { sortQualities(Array(context.links.keys)) }
+    private var qualities: [String] { sortQualities(Array(context.links.keys), variants: context.variants) }
 
-    /// 720p d'abord : un bon compromis entre la taille et l'image.
+    /// La qualité préférée (ou la plus proche en dessous), comme à la lecture.
     private var defaultQuality: String {
-        qualities.first { $0.lowercased().hasPrefix("720p60") }
-            ?? qualities.first { $0.lowercased().contains("720") }
-            ?? qualities.first { !$0.lowercased().contains("audio") }
-            ?? qualities.first ?? ""
+        preferredQualityKey(qualities, pref: store.preferredQuality, variants: context.variants)
     }
 
     var body: some View {
@@ -175,10 +172,7 @@ struct VodDownloadSheet: View {
             .font(.tCardTitle).foregroundColor(.tText)
     }
 
-    private func label(_ q: String) -> String {
-        q.replacingOccurrences(of: "chunked", with: "Source")
-         .replacingOccurrences(of: "audio_only", with: "Audio")
-    }
+    private func label(_ q: String) -> String { qualityText(q, store.lang) }
 
     /// Durée de la VOD (playlist de la qualité choisie) et débit estimé d'après
     /// la taille du premier segment.

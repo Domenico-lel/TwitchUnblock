@@ -45,8 +45,14 @@ no key to paste. The backend is already hosted and shared by every install.
   you fall behind (pause, network drop) a red **Live** button with the delay
   brings you back to the edge.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps.
-* ⚙️ **Quality selector** — every resolution the channel broadcasts, Source
-  included.
+* ⚙️ **Quality selector and preferred quality** — every resolution the channel
+  broadcasts, Source included, sorted by height then frame rate. Pick a
+  preferred quality once (Settings → Player: Source, 1080p, 720p, 480p, 360p,
+  160p or audio only): lives, VODs and clips start in it, or in the closest
+  one below when the channel doesn't have it. The real height of each quality
+  is read from the playlist, so “720p” also finds a channel whose Source is
+  720p60. Picking a quality in the player replaces the preference (as on the
+  website); backups carry it under the website's name (`qualityPref`).
 * 🛡 **Ad-free lives, in the source order you pick** — lives come from ad-free
   sources (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous Europe)
   or official Twitch (with ads), tried one after the other until one answers.
@@ -86,7 +92,7 @@ no key to paste. The backend is already hosted and shared by every install.
   played with the original chat replayed.
 * 📥 **Offline downloads** — download a whole VOD or just a part of it (from one
   time to another, from where you are, the next 10 minutes) in the quality you
-  pick, then watch it without a connection from the My VODs tab. With the app
+  pick (your preferred quality is suggested first), then watch it without a connection from the My VODs tab. With the app
   open, the app downloads the segments itself (four at a time, any error shown
   under the download); when you leave it, what's left goes to iOS's background
   downloads, in batches, and keeps going even with the app closed (resumed if
@@ -100,7 +106,9 @@ no key to paste. The backend is already hosted and shared by every install.
   stream to hear it, open any of them with its chat, add a channel by name.
   Side by side in landscape, stacked in portrait. On iPad (or a large iPhone
   in landscape), the chat of the stream you hear shows on the right — a
-  button in the mosaic and Settings → Player turn it on or off.
+  button in the mosaic and Settings → Player turn it on or off. Each tile
+  plays 1080p alone, 720p with two, 480p beyond — or your preferred quality
+  when it is lower.
 
 ### Chat
 
@@ -302,6 +310,9 @@ unsigned `tv-test-N` pre-release:
   bar: the chat (read-only, no account needed) sits on the right of the
   picture — live, or a VOD's chat replayed in sync — with Twitch, BTTV, FFZ
   and 7TV emotes.
+* A preferred quality (Account → Settings), same rule as the iPhone: the
+  closest one below when the channel doesn't have it; picking a quality in the
+  player's bar replaces it.
 * Cards that grow when focused stay above their neighbours; the app has its
   own layered icon and Top Shelf banners (`TV/make_tv_icons.py`, drawn from
   the iPhone app's logo).

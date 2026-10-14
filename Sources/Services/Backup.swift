@@ -51,6 +51,7 @@ enum Backup {
             "highlightWords": store.chatHighlightWords,
             "shareUsage": store.shareUsage,
             "vodSpeed": store.vodSpeed,
+            "qualityPref": store.preferredQuality,
             // Propres à l'app
             "ios_autoClaimChest": store.autoClaimChest,
             "ios_showPinned": store.showPinnedMessages,
@@ -71,6 +72,7 @@ enum Backup {
             "ios_chatEmoteScale": store.chatEmoteScale,
             "ios_chatWidthRatio": store.chatWidthRatio,
             "ios_chatAutocomplete": store.chatAutocomplete,
+            // Pour les versions d'avant « qualityPref » (audio seul retenu).
             "ios_preferAudioOnly": store.preferAudioOnly,
         ]
         let root: [String: Any] = [
@@ -155,7 +157,16 @@ enum Backup {
         num("ios_chatEmoteScale", 0.3...3) { store.chatEmoteScale = $0 }
         num("ios_chatWidthRatio", 0.1...0.9) { store.chatWidthRatio = $0 }
         bool("ios_chatAutocomplete") { store.chatAutocomplete = $0 }
-        bool("ios_preferAudioOnly") { store.preferAudioOnly = $0 }
+        // Qualité préférée (nom du site). « auto » du site devient « source »
+        // tant que l'app n'a pas d'Auto ; sans elle (sauvegarde d'une version
+        // d'avant), seul l'audio seul était retenu.
+        if let q = s["qualityPref"] as? String {
+            if kQualityPrefs.contains(q) { store.preferredQuality = q }
+            else if q == "auto" { store.preferredQuality = "source" }
+        } else if let audio = s["ios_preferAudioOnly"] as? Bool {
+            if audio { store.preferredQuality = "audio" }
+            else if store.preferAudioOnly { store.preferredQuality = "source" }
+        }
         return added
     }
 }

@@ -28,6 +28,12 @@ final class TVSession: ObservableObject {
     @Published var tvChat: Bool {
         didSet { UserDefaults.standard.set(tvChat, forKey: "tv_chat") }
     }
+    /// Qualité préférée (`kQualityPrefs`), même règle que l'iPhone : si elle
+    /// manque, la plus proche en dessous. Choisir une qualité dans le lecteur
+    /// la remplace.
+    @Published var qualityPref: String {
+        didSet { UserDefaults.standard.set(qualityPref, forKey: "tv_quality_pref") }
+    }
 
     private static let scopes = "user:read:follows"
     private static let tokenKey = "tv_token"
@@ -44,6 +50,15 @@ final class TVSession: ObservableObject {
         let source = ud.string(forKey: "liveSource") ?? "auto"
         liveSource = kLiveSourceChoices.contains(source) ? source : "auto"
         tvChat = ud.object(forKey: "tv_chat") as? Bool ?? true
+        // Avant : le nom exact de la dernière qualité choisie (« 720p60 »),
+        // qui ne servait que s'il existait sur la chaîne suivante.
+        if let pref = ud.string(forKey: "tv_quality_pref"), kQualityPrefs.contains(pref) {
+            qualityPref = pref
+        } else if let old = ud.string(forKey: "tv_quality"), !old.isEmpty {
+            qualityPref = qualityPreference(for: old, among: []) ?? "source"
+        } else {
+            qualityPref = "source"
+        }
         token = Keychain.loadToken(Self.tokenKey)
     }
 

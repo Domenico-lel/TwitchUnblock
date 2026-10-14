@@ -174,6 +174,26 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(vodSpeed, forKey: "cfg_vod_speed") }
     }
 
+    /// Qualité préférée au lancement d'un direct, d'une VOD ou d'un clip
+    /// (`kQualityPrefs` : « source », une hauteur, « audio ») ; si elle
+    /// manque, la plus proche en dessous (preferredQualityKey). Une qualité
+    /// choisie dans le lecteur la remplace, comme sur le site. Même nom que
+    /// le site dans la sauvegarde (« qualityPref »).
+    @Published var preferredQuality: String = "source" {
+        didSet { UserDefaults.standard.set(preferredQuality, forKey: "cfg_quality_pref") }
+    }
+    /// Audio seul préféré : ce que retenaient les versions d'avant (gardé
+    /// dans la sauvegarde pour elles).
+    var preferAudioOnly: Bool { preferredQuality == "audio" }
+    /// Qualité choisie à la main dans le lecteur : elle devient la préférence
+    /// (« Auto » ne change rien, l'app ne le propose pas en réglage).
+    func rememberQualityChoice(_ q: String, among keys: [String], variants: [String: VariantInfo] = [:]) {
+        guard let pref = qualityPreference(for: q, among: keys, variants: variants),
+              pref != preferredQuality else { return }
+        preferredQuality = pref
+        logger.settingChanged("Qualité préférée", value: pref)
+    }
+
     /// Multi-live : le chat du direct qui a le son, à droite de la mosaïque
     /// (écran assez large : iPad, grand iPhone en paysage).
     @Published var multiLiveChat: Bool = true {
@@ -376,14 +396,6 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(showRecentChannels, forKey: "cfg_recent") }
     }
 
-    /// « Audio seul » choisi dans le lecteur : retenu pour les lectures
-    /// suivantes, jusqu'à ce qu'on choisisse une autre qualité (comme l'app Twitch).
-    @Published var preferAudioOnly: Bool = false {
-        didSet { UserDefaults.standard.set(preferAudioOnly, forKey: "cfg_audio_only") }
-    }
-    /// Retient ou oublie l'audio seul selon la qualité choisie à la main.
-    func rememberQualityChoice(_ q: String) { preferAudioOnly = (q == "audio_only") }
-
     /// Langue du top des lives ; nil = celle de l'appareil.
     @Published var topLang: String? = nil {
         didSet { UserDefaults.standard.set(topLang, forKey: "cfg_top_lang") }
@@ -565,7 +577,13 @@ final class AppStore: ObservableObject {
         }
         homeListLayout     = ud.bool(forKey: "cfg_home_list")
         showRecentChannels = ud.object(forKey: "cfg_recent") as? Bool ?? true
-        preferAudioOnly    = ud.bool(forKey: "cfg_audio_only")
+        // Qualité préférée ; avant elle, seul l'audio seul était retenu.
+        if let pref = ud.string(forKey: "cfg_quality_pref"), kQualityPrefs.contains(pref) {
+            preferredQuality = pref
+        } else {
+            preferredQuality = ud.bool(forKey: "cfg_audio_only") ? "audio" : "source"
+            ud.set(preferredQuality, forKey: "cfg_quality_pref")
+        }
         showLatency        = ud.object(forKey: "dbg_latency")    as? Bool ?? false
         autoChatDelay      = ud.object(forKey: "dbg_chat_delay") as? Bool ?? false
         chatSyncNudge      = ud.double(forKey: "chat_sync_nudge")

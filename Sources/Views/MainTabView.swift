@@ -11,6 +11,9 @@ struct MainTabView: View {
     @State private var vodQueue: [VodData] = []
     @State private var vodQueueStreamer: String? = nil
     @State private var qualityLinks: QualityLinks? = nil
+    /// Hauteur et cadence de chaque qualité (mêmes clés que `qualityLinks`),
+    /// pour la qualité préférée ; vide quand la source ne les donne pas.
+    @State private var qualityVariants: [String: VariantInfo] = [:]
     @State private var playerVisible = false
     @State private var loading = false
     @State private var errorMsg: String? = nil
@@ -314,11 +317,15 @@ struct MainTabView: View {
         // Menu « ⋯ » du lecteur immersif.
         .sheet(isPresented: $showPlayerMenu) {
             PlayerMenuSheet(
-                qualities: sortQualities(Array((qualityLinks ?? [:]).keys)),
+                qualities: sortQualities(Array((qualityLinks ?? [:]).keys), variants: qualityVariants),
                 selected: currentQuality(qualityLinks ?? [:]),
                 canRewind: liveDvrVideoId != nil,
                 isDvr: dvrSourceChannel != nil,
-                onSelectQuality: { q in immersiveQuality = q; store.rememberQualityChoice(q); showPlayerMenu = false },
+                onSelectQuality: { q in
+                    immersiveQuality = q
+                    store.rememberQualityChoice(q, among: Array((qualityLinks ?? [:]).keys), variants: qualityVariants)
+                    showPlayerMenu = false
+                },
                 // Pas sur le direct lui-même ; son rembobinage (enregistrement)
                 // l'a, de quoi rattraper le bord.
                 speed: isLivePlaying ? nil : playbackSpeed,
@@ -811,6 +818,7 @@ struct MainTabView: View {
                 qualityLinks: links,
                 vodId: currentVodId,
                 isLive: isLivePlaying,
+                variants: qualityVariants,
                 compact: false,  // garde qualité / rembobiner ; le bouton Chat, lui,
                                  // n'a plus lieu d'être (le chat est toujours affiché)
                 nowPlaying: nowPlayingMeta,
@@ -907,11 +915,11 @@ struct MainTabView: View {
         }
     }
 
-    /// Qualité en cours pour le lecteur immersif : celle choisie, sinon la meilleure.
+    /// Qualité en cours pour le lecteur immersif : celle choisie, sinon la
+    /// qualité préférée (ou la plus proche en dessous).
     private func currentQuality(_ links: QualityLinks) -> String {
         if !immersiveQuality.isEmpty, links[immersiveQuality] != nil { return immersiveQuality }
-        if store.preferAudioOnly, links["audio_only"] != nil { return "audio_only" }
-        return sortQualities(Array(links.keys)).first ?? ""
+        return preferredQualityKey(Array(links.keys), pref: store.preferredQuality, variants: qualityVariants)
     }
 
     /// Arrondi à la seconde : sinon la vue se recalculerait à chaque tick.
@@ -985,7 +993,8 @@ struct MainTabView: View {
         switch playerMode {
         case .vod(let id, let title, let thumb, let streamer)?:
             return VodDownloadContext(vodId: id, title: title ?? statusTitle, streamer: streamer ?? "",
-                                      thumbnail: thumb ?? "", links: links, position: vodPlaybackTime)
+                                      thumbnail: thumb ?? "", links: links, position: vodPlaybackTime,
+                                      variants: qualityVariants)
         case .recovered(let rec)? where !rec.streamID.hasPrefix("offline-"):
             // VOD supprimée retrouvée : la garder avant qu'elle ne quitte le CDN.
             return VodDownloadContext(vodId: "r\(rec.streamID)", title: rec.title.isEmpty ? statusTitle : rec.title,
@@ -1239,6 +1248,7 @@ struct MainTabView: View {
         } else {
             loading          = true
             qualityLinks     = nil
+            qualityVariants  = [:]
             // Avatar, jeu et qualité retenue ne sont vidés qu'à l'ouverture
             // d'une autre chaîne : en bascule, ils sont toujours les bons, et
             // les effacer ne ferait que les faire clignoter.
@@ -1277,6 +1287,7 @@ struct MainTabView: View {
                         return
                     }
                     qualityLinks    = clip.links
+                    qualityVariants = [:]   // noms avec la hauteur (« 720p60 »)
                     statusTitle     = clip.title.isEmpty ? (title ?? "Clip") : clip.title
                     clipVodId       = clip.vodId
                     clipOffset      = clip.vodOffset ?? 0
@@ -1322,6 +1333,7 @@ struct MainTabView: View {
                         vodChapters     = markers.chapters
                         vodMuted        = markers.muted
                         qualityLinks    = links
+                        qualityVariants = data.variants
                         statusTitle     = title ?? "VOD \(id)"
                         loading         = false
                         switchingSource = false
@@ -1340,6 +1352,7 @@ struct MainTabView: View {
                 await MainActor.run {
                     guard gen == loadGeneration else { return }
                     qualityLinks    = rec.links
+                    qualityVariants = [:]
                     statusTitle     = rec.title.isEmpty ? store.t("recover_title") : rec.title
                     loading         = false
                     switchingSource = false
@@ -1367,6 +1380,7 @@ struct MainTabView: View {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }
                         qualityLinks      = playable
+                        qualityVariants   = data.variants
                         statusTitle       = data.title.isEmpty ? channel : data.title
                         liveViewerCount   = data.viewerCount
                         liveStartedAt     = data.startedAt
@@ -1431,6 +1445,7 @@ struct MainTabView: View {
             liveGame           = ""
             playerMode         = nil
             qualityLinks       = nil
+            qualityVariants    = [:]
             statusTitle        = ""
             closingPlayer      = false
         }

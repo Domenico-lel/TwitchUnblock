@@ -60,6 +60,8 @@ final class TVPlayerModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var links: QualityLinks = [:]
     @Published private(set) var quality = ""
+    /// Hauteur et cadence de chaque qualité (qualité préférée, ordre du menu).
+    private(set) var variants: [String: VariantInfo] = [:]
     private(set) var isLive = false
 
     private var current: TVPlayback?
@@ -86,6 +88,7 @@ final class TVPlayerModel: ObservableObject {
             // Playlists réécrites avec la vraie durée des segments (2 s) : le
             // lecteur tient le bord du direct au lieu de rester ~20 s derrière.
             links = LivePlaylistLoader.wrap(raw)
+            variants = data.variants
         case .vod(let id, let videoTitle):
             isLive = false
             title = videoTitle
@@ -101,11 +104,10 @@ final class TVPlayerModel: ObservableObject {
             // VOD récente avec des passages coupés : le son d'origine est
             // peut-être encore sur le CDN (VodUnmuteLoader).
             links = VodUnmuteLoader.worthTrying(markers) ? VodUnmuteLoader.wrap(data.links) : data.links
+            variants = data.variants
         }
-        let keys = sortQualities(Array(links.keys))
-        let saved = UserDefaults.standard.string(forKey: "tv_quality") ?? ""
-        quality = keys.contains(saved) ? saved
-            : (keys.first { $0.lowercased() != "audio_only" } ?? keys.first ?? "")
+        // Qualité préférée, sinon la plus proche en dessous (même règle que l'iPhone).
+        quality = preferredQualityKey(Array(links.keys), pref: session.qualityPref, variants: variants)
         start(at: isLive ? 0 : TVProgress.position(vodId))
     }
 
@@ -139,10 +141,13 @@ final class TVPlayerModel: ObservableObject {
         }
     }
 
-    func setQuality(_ key: String) {
+    /// Qualité choisie dans la barre : elle devient la qualité préférée.
+    func setQuality(_ key: String, session: TVSession) {
         guard key != quality, links[key] != nil else { return }
         quality = key
-        UserDefaults.standard.set(key, forKey: "tv_quality")
+        if let pref = qualityPreference(for: key, among: Array(links.keys), variants: variants) {
+            session.qualityPref = pref
+        }
         start(at: isLive ? 0 : (player?.currentTime().seconds ?? 0))
     }
 
@@ -231,9 +236,9 @@ struct TVPlayerController: UIViewControllerRepresentable {
     private func menus() -> [UIMenuElement] {
         let model = self.model
         let session = self.session
-        let qualities: [UIMenuElement] = sortQualities(Array(model.links.keys)).map { key in
+        let qualities: [UIMenuElement] = sortQualities(Array(model.links.keys), variants: model.variants).map { key in
             UIAction(title: label(key), state: key == model.quality ? .on : .off) { _ in
-                Task { @MainActor in model.setQuality(key) }
+                Task { @MainActor in model.setQuality(key, session: session) }
             }
         }
         var items: [UIMenuElement] = [
@@ -263,11 +268,8 @@ struct TVPlayerController: UIViewControllerRepresentable {
         return items
     }
 
+    /// Libellé commun avec l'iPhone ; l'audio seul garde le texte de la TV.
     private func label(_ key: String) -> String {
-        switch key.lowercased() {
-        case "chunked", "source": return "Source"
-        case "audio_only":        return session.t("tv_audio")
-        default:                  return key
-        }
+        isAudioQuality(key) ? session.t("tv_audio") : qualityText(key, session.lang)
     }
 }

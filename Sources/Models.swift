@@ -18,6 +18,20 @@ struct LiveData {
     var error: String?
     /// Source qui a servi le direct (« as », « al », « eu », « twitch », « worker »).
     var source: String? = nil
+    /// Hauteur, cadence et débit de chaque qualité (mêmes clés que `links`) ;
+    /// vide quand la source ne les donne pas.
+    var variants: [String: VariantInfo] = [:]
+}
+
+/// Ce que la liste maîtresse dit d'une variante (RESOLUTION, FRAME-RATE,
+/// BANDWIDTH), ou ce qu'en renvoie le Worker (`variants` : h, fps, bw).
+/// « Source » ne dit pas sa hauteur dans son nom (1080p60, 720p60, 936p…) :
+/// sans elle, une qualité préférée en 720p se tromperait de variante.
+struct VariantInfo: Equatable {
+    /// 0 pour l'audio seul.
+    let height: Int
+    let fps: Double
+    let bandwidth: Int
 }
 
 struct VodData: Identifiable {
@@ -114,6 +128,7 @@ struct ChannelVideosData {
 struct M3U8Data {
     let links: QualityLinks
     let error: String?
+    var variants: [String: VariantInfo] = [:]
 }
 
 struct TwitchStream: Identifiable {

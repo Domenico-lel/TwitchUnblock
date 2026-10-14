@@ -183,10 +183,7 @@ struct PlayerMenuSheet: View {
         .background(Color.tDark)
     }
 
-    private func label(_ q: String) -> String {
-        q.replacingOccurrences(of: "chunked", with: "Source")
-         .replacingOccurrences(of: "source",  with: "Source")
-    }
+    private func label(_ q: String) -> String { qualityText(q, store.lang) }
 
     private var divider: some View {
         Divider().background(Color.tBorder).padding(.leading, 56)

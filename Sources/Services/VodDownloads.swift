@@ -73,6 +73,8 @@ struct VodDownloadContext {
     let links: QualityLinks
     /// Position de lecture actuelle, en secondes.
     let position: Double
+    /// Hauteur et cadence de chaque qualité (qualité proposée d'abord).
+    var variants: [String: VariantInfo] = [:]
 }
 
 // MARK: – Plan : les segments d'un passage

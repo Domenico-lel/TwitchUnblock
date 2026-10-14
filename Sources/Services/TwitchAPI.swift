@@ -21,8 +21,31 @@ private func m3u8Attr(_ line: String, _ name: String) -> String? {
     return nil
 }
 
+/// Valeur sans guillemets d'un attribut (`,RESOLUTION=1920x1080`,
+/// `,FRAME-RATE=60.000`). `\s` écarte un `\r` de fin de ligne.
+private func m3u8Plain(_ line: String, _ name: String) -> String? {
+    guard let r = line.range(of: #"[:,]\#(name)=[^,"\s]+"#, options: .regularExpression) else { return nil }
+    return String(line[r].drop(while: { $0 != "=" }).dropFirst())
+}
+
 func parseM3U8(_ content: String, baseURL: URL? = nil) -> QualityLinks {
+    parseMaster(content, baseURL: baseURL).links
+}
+
+/// Hauteur, cadence et débit de chaque qualité d'une liste maîtresse, sous le
+/// même nom que `parseM3U8` lui donne.
+func parseVariants(_ content: String) -> [String: VariantInfo] {
+    parseMaster(content).variants
+}
+
+/// Liens par qualité, et ce que la liste maîtresse dit de chacune.
+typealias MasterPlaylist = (links: QualityLinks, variants: [String: VariantInfo])
+
+/// Lecture d'une liste maîtresse : un seul calcul du nom des qualités pour
+/// les liens et pour les variantes, qui gardent ainsi les mêmes clés.
+func parseMaster(_ content: String, baseURL: URL? = nil) -> MasterPlaylist {
     var links: QualityLinks = [:]
+    var variants: [String: VariantInfo] = [:]
     let lines = content.components(separatedBy: "\n")
     // Groupes vidéo nommés « … (source) » (EXT-X-MEDIA) : certains proxys
     // appellent la version d'origine « 1080p60 » plutôt que « chunked ».
@@ -61,9 +84,28 @@ func parseM3U8(_ content: String, baseURL: URL? = nil) -> QualityLinks {
             } else {
                 links[quality] = nextLine
             }
+            // « 1920x1080 » → 1080 ; pas de RESOLUTION (audio seul) → 0.
+            let height = m3u8Plain(line, "RESOLUTION")
+                .flatMap { $0.split(separator: "x").last }.flatMap { Int($0) } ?? 0
+            variants[quality] = VariantInfo(height: height,
+                                            fps: m3u8Plain(line, "FRAME-RATE").flatMap { Double($0) } ?? 0,
+                                            bandwidth: m3u8Plain(line, "BANDWIDTH").flatMap { Int($0) } ?? 0)
         }
     }
-    return links
+    return (links, variants)
+}
+
+/// `variants` d'une réponse du Worker ({ "720p60": { h, fps, bw } }) ; vide
+/// pour un Worker d'avant (personnel ou Docker pas à jour).
+private func workerVariants(_ value: Any?) -> [String: VariantInfo] {
+    guard let dict = value as? [String: [String: Any]] else { return [:] }
+    var out: [String: VariantInfo] = [:]
+    for (key, v) in dict {
+        guard let h = (v["h"] as? NSNumber)?.intValue else { continue }
+        out[key] = VariantInfo(height: h, fps: (v["fps"] as? NSNumber)?.doubleValue ?? 0,
+                               bandwidth: (v["bw"] as? NSNumber)?.intValue ?? 0)
+    }
+    return out
 }
 
 // MARK: – GQL
@@ -276,10 +318,10 @@ func getM3U8(vodId: String) async -> M3U8Data {
            let (data, resp) = try? await URLSession.shared.data(for: req),
            (resp as? HTTPURLResponse)?.statusCode == 200,
            let body = String(data: data, encoding: .utf8) {
-            let links = parseM3U8(body, baseURL: url)
-            if !links.isEmpty {
-                logger.success("M3U8", "[1/3] ✅ \(links.count) qualités", links.keys.joined(separator: ", "))
-                return M3U8Data(links: links, error: nil)
+            let master = parseMaster(body, baseURL: url)
+            if !master.links.isEmpty {
+                logger.success("M3U8", "[1/3] ✅ \(master.links.count) qualités", master.links.keys.joined(separator: ", "))
+                return M3U8Data(links: master.links, error: nil, variants: master.variants)
             }
         }
         }
@@ -296,7 +338,7 @@ func getM3U8(vodId: String) async -> M3U8Data {
     if let json = await workerJSON("/api/get-m3u8?id=\(vodId)&proxy=false"),
        let links = json["links"] as? QualityLinks, !links.isEmpty {
         logger.success("M3U8", "[3/3] ✅ Worker \(links.count) qualités")
-        return M3U8Data(links: links, error: nil)
+        return M3U8Data(links: links, error: nil, variants: workerVariants(json["variants"]))
     }
 
     logger.error("M3U8", "❌ Toutes les tentatives ont échoué pour VOD \(vodId)")
@@ -358,22 +400,22 @@ func getLive(channelName: String) async -> LiveData {
         startedAt = df.date(from: createdAtStr) ?? ISO8601DateFormatter().date(from: createdAtStr)
     }
 
-    var links: QualityLinks = [:]
+    var found: MasterPlaylist = ([:], [:])
 
     // Ordre des sources (Réglages → Lecteur, ou menu du lecteur) : essayées
     // l'une après l'autre, pour que le direct se lance quand même.
     let steps = liveSourceSteps()
     logger.info("LIVE", "Ordre des sources : \(steps.joined(separator: " → ").uppercased())")
     var usedSource: String? = nil
-    for src in steps where links.isEmpty {
+    for src in steps where found.links.isEmpty {
         switch src {
-        case "as":     links = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login)
-        case "al":     links = await ttvlolLiveLinks(login: login)
-        case "eu":     links = await luminousLiveLinks(hosts: kLuminousHosts.filter { $0 != "as.luminous.dev" }, login: login)
-        case "twitch": if let token { links = await usherLiveLinks(login: login, token: token) }
-        default:       links = await workerLiveLinks(login: login)
+        case "as":     found = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login)
+        case "al":     found = await ttvlolLiveLinks(login: login)
+        case "eu":     found = await luminousLiveLinks(hosts: kLuminousHosts.filter { $0 != "as.luminous.dev" }, login: login)
+        case "twitch": if let token { found = await usherLiveLinks(login: login, token: token) }
+        default:       found = await workerLiveLinks(login: login)
         }
-        if !links.isEmpty { usedSource = src }
+        if !found.links.isEmpty { usedSource = src }
     }
 
     if let uid = userId {
@@ -381,8 +423,9 @@ func getLive(channelName: String) async -> LiveData {
     }
 
     return LiveData(title: title, game: game, thumbnail: thumbnail, avatar: avatar,
-                    userId: userId, links: links, viewerCount: viewerCount,
-                    startedAt: startedAt, dvrVideoId: dvrVideoId, source: usedSource)
+                    userId: userId, links: found.links, viewerCount: viewerCount,
+                    startedAt: startedAt, dvrVideoId: dvrVideoId, source: usedSource,
+                    variants: found.variants)
 }
 
 // MARK: – Sources du direct
@@ -400,7 +443,7 @@ func liveSourceSteps() -> [String] {
 }
 
 /// Miroirs Luminous (sans pub), essayés dans l'ordre ; vide si aucun ne répond.
-private func luminousLiveLinks(hosts: [String], login: String) async -> QualityLinks {
+private func luminousLiveLinks(hosts: [String], login: String) async -> MasterPlaylist {
     for host in hosts {
         logger.info("LIVE", "Tentative Luminous (Sans Pub)…", host)
         guard var comps = URLComponents(string: "https://\(host)/live/\(login)") else { continue }
@@ -417,10 +460,10 @@ private func luminousLiveLinks(hosts: [String], login: String) async -> QualityL
             let (data, resp) = try await URLSession.shared.data(for: req)
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if code == 200, let body = String(data: data, encoding: .utf8) {
-                let links = parseM3U8(body, baseURL: url)
-                if !links.isEmpty {
-                    logger.success("LIVE", "✅ Luminous OK (\(host))", "\(links.count) qualités")
-                    return links
+                let master = parseMaster(body, baseURL: url)
+                if !master.links.isEmpty {
+                    logger.success("LIVE", "✅ Luminous OK (\(host))", "\(master.links.count) qualités")
+                    return master
                 }
                 logger.warn("LIVE", "⚠️ Luminous \(host) : playlist vide", "miroir suivant…")
             } else {
@@ -430,12 +473,12 @@ private func luminousLiveLinks(hosts: [String], login: String) async -> QualityL
             logger.error("LIVE", "❌ Erreur Luminous \(host)", error.localizedDescription)
         }
     }
-    return [:]
+    return ([:], [:])
 }
 
 /// Proxy albanais (format TTV.LOL : la requête usher encodée après
 /// /playlist/<chaîne>.m3u8), sans pub lui aussi.
-private func ttvlolLiveLinks(login: String) async -> QualityLinks {
+private func ttvlolLiveLinks(login: String) async -> MasterPlaylist {
     var allowed = CharacterSet.alphanumerics
     allowed.insert(charactersIn: "-._~")
     let query = "allow_source=true&allow_audio_only=true&fast_bread=true"
@@ -452,20 +495,20 @@ private func ttvlolLiveLinks(login: String) async -> QualityLinks {
         }
         let body = String(decoding: data, as: UTF8.self)
         guard body.contains("#EXT-X-STREAM-INF") else { continue }
-        let links = parseM3U8(body, baseURL: url)
-        if !links.isEmpty {
-            logger.success("LIVE", "✅ Proxy TTV.LOL OK (\(host))", "\(links.count) qualités")
-            return links
+        let master = parseMaster(body, baseURL: url)
+        if !master.links.isEmpty {
+            logger.success("LIVE", "✅ Proxy TTV.LOL OK (\(host))", "\(master.links.count) qualités")
+            return master
         }
     }
-    return [:]
+    return ([:], [:])
 }
 
 /// Flux officiel de Twitch (usher), avec ses pubs.
-private func usherLiveLinks(login: String, token: (value: String, signature: String)) async -> QualityLinks {
+private func usherLiveLinks(login: String, token: (value: String, signature: String)) async -> MasterPlaylist {
     guard login.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }), !login.isEmpty,
           var comps = URLComponents(string: "https://usher.ttvnw.net/api/channel/hls/\(login).m3u8")
-    else { return [:] }
+    else { return ([:], [:]) }
     logger.info("LIVE", "Tentative Twitch officiel...")
     // Mode faible latence : Twitch sert alors la variante « low latency »
     // (segments plus courts, playlist rafraîchie plus souvent).
@@ -487,19 +530,19 @@ private func usherLiveLinks(login: String, token: (value: String, signature: Str
     guard let url = comps.url,
           let (data, resp) = try? await URLSession.shared.data(from: url),
           (resp as? HTTPURLResponse)?.statusCode == 200,
-          let body = String(data: data, encoding: .utf8) else { return [:] }
-    let links = parseM3U8(body, baseURL: url)
-    logger.success("LIVE", "✅ Twitch officiel : \(links.count) qualités")
-    return links
+          let body = String(data: data, encoding: .utf8) else { return ([:], [:]) }
+    let master = parseMaster(body, baseURL: url)
+    logger.success("LIVE", "✅ Twitch officiel : \(master.links.count) qualités")
+    return master
 }
 
 /// Worker Cloudflare : sa propre chaîne de sources, en dernier recours.
-private func workerLiveLinks(login: String) async -> QualityLinks {
+private func workerLiveLinks(login: String) async -> MasterPlaylist {
     logger.info("LIVE", "Tentative Cloudflare Worker...")
     guard let json = await workerJSON("/api/get-live?name=\(login)&proxy=false"),
-          let links = json["links"] as? QualityLinks else { return [:] }
+          let links = json["links"] as? QualityLinks else { return ([:], [:]) }
     logger.success("LIVE", "✅ Cloudflare Worker : \(links.count) qualités")
-    return links
+    return (links, workerVariants(json["variants"]))
 }
 
 // MARK: – getStreamStats (rafraîchissement LÉGER viewers/uptime, sans re-fetch des liens)
@@ -950,14 +993,115 @@ func offlineLabel(since end: Date, store: AppStore) -> String {
 }
 #endif
 
-func sortQualities(_ keys: [String]) -> [String] {
-    let order = ["Source","chunked","source","1080p60","1080p30","1080p","720p60","720p30","720p",
-                 "480p60","480p30","480p","360p30","360p","160p30","160p","audio_only"]
-    return keys.sorted { a, b in
-        let ai = order.firstIndex { a.lowercased().contains($0.lowercased()) || $0.lowercased().contains(a.lowercased()) } ?? 999
-        let bi = order.firstIndex { b.lowercased().contains($0.lowercased()) || $0.lowercased().contains(b.lowercased()) } ?? 999
-        return ai < bi
+// MARK: – Qualités : ordre, hauteur, préférence, libellé
+/// Qualités préférées possibles (réglage, sauvegarde) : celles du site, sans
+/// son « auto » (l'app et l'Apple TV n'ont pas d'Auto pour l'instant).
+let kQualityPrefs = ["source", "1080", "720", "480", "360", "160", "audio"]
+
+func isSourceQuality(_ key: String) -> Bool { ["source", "chunked"].contains(key.lowercased()) }
+func isAudioQuality(_ key: String) -> Bool { key.lowercased().contains("audio") }
+/// « Auto » : la liste maîtresse, que seuls les liens du Worker proposent.
+private func isAutoQuality(_ key: String) -> Bool { key.lowercased() == "auto" }
+
+/// Hauteur écrite dans le nom : « 720p60 » → 720, « 1920x1080 » → 1080.
+private func nameHeight(_ key: String) -> Int? {
+    if let r = key.range(of: #"\d+x\d+"#, options: .regularExpression) {
+        return key[r].split(separator: "x").last.flatMap { Int($0) }
     }
+    if let r = key.range(of: #"\d+(?=p)"#, options: .regularExpression) { return Int(key[r]) }
+    return nil
+}
+
+/// Hauteur d'une qualité : celle de la liste maîtresse (ou du Worker) quand
+/// on l'a, sinon celle de son nom. « Source » sans information : le palier
+/// standard au-dessus de la meilleure qualité transcodée (1080 s'il y a une
+/// 720p, 720 si la meilleure est une 480p) — une chaîne en 720p60 sans
+/// transcodage 720 garde ainsi sa Source pour une préférence 720p.
+/// Audio seul : 0.
+func qualityHeight(_ key: String, among keys: [String], variants: [String: VariantInfo] = [:]) -> Int {
+    if isAudioQuality(key) { return 0 }
+    if let h = variants[key]?.height, h > 0 { return h }
+    if let h = nameHeight(key) { return h }
+    guard isSourceQuality(key) else { return 0 }
+    let best = keys.filter { !isSourceQuality($0) }.compactMap { nameHeight($0) }.max() ?? 0
+    guard best > 0 else { return 1080 }
+    return [360, 480, 720, 1080, 1440, 2160].first { $0 > best } ?? best
+}
+
+/// Cadence : celle de la liste maîtresse, sinon celle du nom (« 720p60 »).
+private func qualityFPS(_ key: String, variants: [String: VariantInfo]) -> Double {
+    if let f = variants[key]?.fps, f > 0 { return f }
+    if let r = key.range(of: #"(?<=p)\d+"#, options: .regularExpression) { return Double(String(key[r])) ?? 0 }
+    return 0
+}
+
+/// Ordre des menus : Source en tête, puis « Auto » (liens du Worker), puis de
+/// la plus haute à la plus basse (à hauteur égale, la plus fluide), l'audio
+/// seul en dernier. `.first` reste Source.
+func sortQualities(_ keys: [String], variants: [String: VariantInfo] = [:]) -> [String] {
+    func group(_ k: String) -> Int {
+        isSourceQuality(k) ? 0 : isAutoQuality(k) ? 1 : isAudioQuality(k) ? 3 : 2
+    }
+    return keys.sorted { a, b in
+        if group(a) != group(b) { return group(a) < group(b) }
+        let ha = qualityHeight(a, among: keys, variants: variants)
+        let hb = qualityHeight(b, among: keys, variants: variants)
+        if ha != hb { return ha > hb }
+        let fa = qualityFPS(a, variants: variants), fb = qualityFPS(b, variants: variants)
+        if fa != fb { return fa > fb }
+        return a < b
+    }
+}
+
+/// Qualité à lancer d'après la préférence (`kQualityPrefs`), même règle que
+/// le site : une hauteur prend la même hauteur à la cadence la plus haute,
+/// sinon la plus haute en dessous, sinon la plus basse au-dessus ; « source »
+/// prend Source, sinon la vidéo la plus haute ; « audio » l'audio seul, sinon
+/// la vidéo la plus basse. Une valeur inconnue (« auto » venu du site) compte
+/// comme « source ». « Auto » n'est choisi que s'il n'y a rien d'autre.
+func preferredQualityKey(_ keys: [String], pref: String, variants: [String: VariantInfo] = [:]) -> String {
+    let h = { (k: String) in qualityHeight(k, among: keys, variants: variants) }
+    let f = { (k: String) in qualityFPS(k, variants: variants) }
+    // Vidéos de la plus haute à la plus basse (« Auto » n'en est pas une).
+    let video = keys.filter { !isAudioQuality($0) && !isAutoQuality($0) }
+        .sorted { (h($0), f($0), $1) > (h($1), f($1), $0) }
+    let audio = keys.first(where: isAudioQuality)
+    let fallback = video.first ?? audio ?? keys.first ?? ""
+    if pref == "audio" { return audio ?? video.last ?? fallback }
+    if let want = Int(pref) {
+        return video.first { h($0) == want } ?? video.first { h($0) < want } ?? video.last ?? fallback
+    }
+    return video.first(where: isSourceQuality) ?? fallback
+}
+
+/// Préférence déduite d'une qualité choisie dans le lecteur : « audio »,
+/// « source » (Source, ou la vidéo la plus haute quand il n'y a pas de
+/// Source), sinon le palier standard le plus proche (une 936p devient
+/// « 1080 », qui la reprendra faute de 1080p). nil pour « Auto », que l'app
+/// ne retient pas, et pour une qualité dont on ne sait rien.
+func qualityPreference(for key: String, among keys: [String], variants: [String: VariantInfo] = [:]) -> String? {
+    if isAudioQuality(key) { return "audio" }
+    if isAutoQuality(key) { return nil }
+    if isSourceQuality(key)
+        || (!keys.contains(where: isSourceQuality) && preferredQualityKey(keys, pref: "source", variants: variants) == key) {
+        return "source"
+    }
+    let height = qualityHeight(key, among: keys, variants: variants)
+    guard height > 0 else { return nil }
+    let tier = [1080, 720, 480, 360, 160].min { abs($0 - height) < abs($1 - height) } ?? 1080
+    return String(tier)
+}
+
+/// Nom d'une qualité dans les menus (iPhone et Apple TV) : « Source »
+/// (chunked compris), « Audio seul » traduit, « 720p » pour « 720p30 » (la
+/// cadence ordinaire), « 1080p » pour « 1920x1080 ». Les noms de fichiers
+/// des téléchargements gardent la clé brute.
+func qualityText(_ key: String, _ lang: Lang) -> String {
+    if isSourceQuality(key) { return "Source" }
+    if isAudioQuality(key) { return translate("q_audio", lang) }
+    if key.hasSuffix("p30") { return String(key.dropLast(2)) }
+    if key.range(of: #"^\d+x\d+$"#, options: .regularExpression) != nil, let h = nameHeight(key) { return "\(h)p" }
+    return key
 }
 
 // MARK: – Validité de la session web
