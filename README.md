@@ -54,7 +54,9 @@ no key to paste. The backend is already hosted and shared by every install.
 * ⚡ **Low latency mode** — stays as close to the live edge as the connection
   allows, but never under 4 seconds behind (closer, playback stalls): the
   target follows how long Twitch takes to publish each segment, and skipping
-  ahead or **Live** stop there too.
+  ahead or **Live** stop there too. It never changes the playback speed
+  (speeding up could pull the sound out of sync): the player only makes a
+  small jump when it really falls behind, and never undoes a rewind.
 * 🖥 **Fill the screen** — crops the video to remove the black bars in
   landscape. Cuts off the top and bottom: 16:9 in a phone screen can't do both.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown

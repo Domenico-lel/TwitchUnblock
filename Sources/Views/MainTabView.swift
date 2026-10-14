@@ -177,12 +177,24 @@ struct MainTabView: View {
         return nil
     }
 
-    /// Ce qui se lit, joint à un signalement fait depuis le lecteur.
+    /// Ce qui se lit, joint à un signalement fait depuis le lecteur, avec ce
+    /// qui suffit à classer un retour de lecture : qualité, source du direct,
+    /// mode faible latence, lecteur immersif ou natif.
+    /// Exemple : « live caedrel · chunked · as · ll=1 · imm=1 ».
     private var playerFeedbackContext: String? {
         guard playerMode != nil else { return nil }
         let parts: [String?] = [isLivePlaying ? "live" : "vod", playerChannelLogin,
                                 isLivePlaying ? nil : currentVodId]
-        return parts.compactMap { $0 }.joined(separator: " ")
+        var details: [String] = []
+        // Le lecteur natif choisit sa qualité lui-même : on ne la connaît pas ici.
+        if store.immersivePlayer, let links = qualityLinks {
+            let q = currentQuality(links)
+            if !q.isEmpty { details.append(q) }
+        }
+        if let source = menuLiveSource { details.append(source) }
+        if isLivePlaying { details.append("ll=\(store.lowLatency ? 1 : 0)") }
+        details.append("imm=\(store.immersivePlayer ? 1 : 0)")
+        return ([parts.compactMap { $0 }.joined(separator: " ")] + details).joined(separator: " · ")
     }
 
     /// Y a-t-il un chat à afficher sous le lecteur ?
@@ -788,6 +800,7 @@ struct MainTabView: View {
             VideoPlayerView(
                 qualityLinks: links,
                 vodId: currentVodId,
+                isLive: isLivePlaying,
                 compact: false,  // garde qualité / rembobiner ; le bouton Chat, lui,
                                  // n'a plus lieu d'être (le chat est toujours affiché)
                 nowPlaying: nowPlayingMeta,

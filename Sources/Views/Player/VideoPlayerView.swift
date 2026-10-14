@@ -34,6 +34,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         vc.showsPlaybackControls = true
         vc.delegate = context.coordinator
         context.coordinator.playerVC = vc
+        context.coordinator.isLive = isLive
         context.coordinator.lowLatency = lowLatency && isLive
         context.coordinator.configureLatency(player)
         context.coordinator.setupObserver(player: player, onProgress: onProgress,
@@ -57,6 +58,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             let player = AVPlayer(playerItem: VodUnmuteLoader.playerItem(url: url))
             player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
             vc.player = player
+            context.coordinator.isLive = isLive
             context.coordinator.lowLatency = lowLatency && isLive
             context.coordinator.configureLatency(player)
             context.coordinator.setupObserver(player: player, onProgress: onProgress,
@@ -84,11 +86,15 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         private var playerRef: AVPlayer?
         private var externalObs: NSKeyValueObservation?
 
+        /// Lecture d'un direct (journaux LIVE).
+        var isLive = false
         /// Mode faible latence actif (direct uniquement).
         var lowLatency = false
         private var lastCatchUp = Date.distantPast
         private var latency = LiveLatencyController()
         private var sync = LiveSyncEstimator()
+        private var diagnostics: LiveDiagnostics?
+        private var jumpObserver: NSObjectProtocol?
 
 
         /// Prépare le direct : le mode faible latence tient ensuite le bord du
@@ -98,22 +104,42 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         /// `configuredTimeOffsetFromLive` inférieur à `recommendedTimeOffsetFromLive` :
         /// le lecteur démarre alors sans tampon et passe son temps à se recharger.
         func configureLatency(_ player: AVPlayer) {
+            // Le Coordinator survit au changement de qualité (nouvel AVPlayer) :
+            // la tenue du direct repart de zéro, recalage du démarrage compris.
+            latency.reset()
             guard lowLatency else { return }
             lastCatchUp = Date()   // laisse le flux démarrer avant tout rattrapage
-            logger.info("LIVE", "Mode faible latence actif", "tenue du bord du direct (vitesse ×1,1, saut si dérive)")
+            logger.info("LIVE", "Mode faible latence actif", "tenue du bord du direct (sauts seulement, vitesse ×1)")
         }
 
-        /// Tient le bord du direct (vitesse ×1,1, saut si grosse dérive) : voir
+        /// Tient le bord du direct par des sauts seulement : voir
         /// LiveLatencyController. En pause, on ne touche à rien.
         private func catchUpIfNeeded() {
             guard lowLatency, let player = playerRef, let item = player.currentItem,
                   let liveEdge = item.seekableTimeRanges.last?.timeRangeValue.end,
-                  liveEdge.isValid, liveEdge.isNumeric,
-                  Date().timeIntervalSince(lastCatchUp) > 4 else { return }
+                  liveEdge.isValid, liveEdge.isNumeric else { return }
             let behind = (liveEdge - item.currentTime()).seconds
+            // Le recalage du démarrage part dès que la lecture a commencé ; le
+            // reste laisse d'abord le flux démarrer (quelques secondes).
             latency.adjust(player: player, item: item, behind: behind,
                            total: item.currentDate().map { Date().timeIntervalSince($0) },
-                           enabled: player.rate > 0)
+                           enabled: player.rate > 0 && behind > 0,
+                           settled: Date().timeIntervalSince(lastCatchUp) > 4)
+        }
+
+        /// Les commandes d'AVPlayerViewController (−15 s, barre) ne passent pas
+        /// par notre code : un saut loin du bord est un recul voulu, que la
+        /// tenue du direct ne doit pas défaire. Les sauts du contrôleur, eux,
+        /// sont écartés par leur horodatage (marge pour une recherche lente),
+        /// comme ceux du démarrage (position initiale, recalage).
+        private func timeJumped(_ item: AVPlayerItem) {
+            guard lowLatency, item === playerRef?.currentItem, latency.aligned,
+                  Date().timeIntervalSince(lastCatchUp) > 4,
+                  Date().timeIntervalSince(latency.lastJumpAt) > 5,
+                  let edge = item.seekableTimeRanges.last?.timeRangeValue.end, edge.isNumeric else { return }
+            let behind = (edge - item.currentTime()).seconds
+            guard behind.isFinite else { return }
+            latency.hold(behind > latency.minBehind(for: item) + 3)
         }
 
         // MARK: Plein écran — maintient PlayerFullscreen.isActive à jour
@@ -165,6 +191,10 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                         obs?.invalidate(); obs = nil
                     }
                 }
+            } else {
+                // Nouvel élément du direct : la tenue repart de zéro.
+                latency.reset()
+                lastCatchUp = Date()
             }
             player.replaceCurrentItem(with: item)
             if playing { player.play() }
@@ -177,6 +207,17 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             if let existing = timeObserver { playerRef?.removeTimeObserver(existing) }
             playerRef = player
             sync.reset()
+            // Journaux LIVE et sauts du lecteur : réabonnés à chaque nouvel
+            // AVPlayer (changement de qualité).
+            diagnostics = LiveDiagnostics(player: player) { [weak self] in self?.isLive ?? false }
+            if isLive { LiveDiagnostics.logAudioRoute("début du direct") }
+            if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
+            jumpObserver = NotificationCenter.default.addObserver(
+                forName: AVPlayerItem.timeJumpedNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let item = note.object as? AVPlayerItem else { return }
+                self?.timeJumped(item)
+            }
             // AirPlay ne lit pas les playlists réécrites : retour à celle du CDN.
             externalObs = player.observe(\.isExternalPlaybackActive, options: [.new]) { p, _ in
                 DispatchQueue.main.async { VodUnmuteLoader.fallBackForAirPlay(p) }
@@ -198,6 +239,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                                               behind: (edge - item.currentTime()).seconds))
                 } else {
                     onBehind(nil)
+                }
+                if let self, self.isLive, let item = player?.currentItem {
+                    self.diagnostics?.tick(item: item)
                 }
                 self?.catchUpIfNeeded()
             }
@@ -257,6 +301,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         deinit {
             if let obs = timeObserver { playerRef?.removeTimeObserver(obs) }
             if let stopObserver { NotificationCenter.default.removeObserver(stopObserver) }
+            if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
             artworkTask?.cancel()
         }
     }
@@ -265,7 +310,13 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
 // MARK: – Full Video Player View
 struct VideoPlayerView: View {
     let qualityLinks: QualityLinks
+    /// VOD à reprendre et dont on garde la progression (nil sinon).
     let vodId: String?
+    /// Direct en cours, donné par l'appelant : faux pendant son rembobinage,
+    /// et pour un clip ou une VOD retrouvée ou téléchargée, qui n'ont pas
+    /// d'identifiant de VOD mais ne sont pas des directs. Décide de la tenue
+    /// du direct, de la latence et de la synchro du chat.
+    let isLive: Bool
     /// Mode compact (chat ouvert) : masque la barre Source / le lien pour laisser
     /// un maximum de place au chat. Seul le lecteur reste visible.
     var compact: Bool = false
@@ -288,9 +339,6 @@ struct VideoPlayerView: View {
     @State private var currentTime: Double = 0
     @State private var lastPersisted: Double = -99
     @State private var latency: Double? = nil
-
-    /// Un direct n'a pas d'identifiant de VOD : c'est ce qui distingue les deux modes.
-    private var isLive: Bool { vodId == nil }
 
     private var qualities: [String] { sortQualities(Array(qualityLinks.keys)) }
     private var currentURL: URL? { qualityLinks[selectedQuality].flatMap(URL.init) }

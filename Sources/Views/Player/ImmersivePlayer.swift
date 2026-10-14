@@ -112,6 +112,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     private var lastCatchUp = Date.distantPast
     private var latency = LiveLatencyController()
     private var sync = LiveSyncEstimator()
+    private var diagnostics: LiveDiagnostics?
 
     // Écran verrouillé / centre de contrôle
     private var nowPlaying = NowPlayingMeta()
@@ -142,6 +143,9 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // iOS mettait la vidéo en pause au verrouillage, et les commandes de
         // l'écran verrouillé ne pouvaient rien relancer.
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+        // Journaux LIVE (vitesse et raison, calages, sortie audio) : de quoi
+        // vérifier sur appareil qu'un direct ne change plus de vitesse.
+        diagnostics = LiveDiagnostics(player: player) { [weak self] in self?.isLive ?? false }
         load(url: url, seek: savedTime)
         timeObs = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
@@ -183,6 +187,10 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // précédente affichait une barre fantaisiste le temps du chargement.
         startTime = 0; endTime = 0; currentDate = nil
         sync.reset()
+        // Même modèle pour un changement de qualité ou une bascule direct ↔
+        // enregistrement : la tenue du direct repart de zéro (recalage compris).
+        latency.reset()
+        if self.isLive { LiveDiagnostics.logAudioRoute("début du direct") }
 
         // Adresse `tuunmute://` : passages coupés rétablis (VodUnmuteLoader).
         let item = VodUnmuteLoader.playerItem(url: url)
@@ -249,18 +257,20 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // lui qui sépare le chat de l'image (voir LiveSyncEstimator).
         onBehind(isLive && endTime > position
                  ? sync.offset(latency: total, behind: endTime - position) : nil)
+        if isLive { diagnostics?.tick(item: item) }
 
         catchUpIfNeeded(item)
     }
 
-    /// Recolle au direct après une vraie dérive (pause longue, coupure réseau).
+    /// Tient le bord du direct par des sauts seulement (LiveLatencyController).
     /// Seuils volontairement larges : viser le bord en permanence fait caler.
     private func catchUpIfNeeded(_ item: AVPlayerItem) {
-        // Laisse le flux démarrer (quelques secondes) avant d'ajuster.
-        guard Date().timeIntervalSince(lastCatchUp) > 4 else { return }
+        // Le recalage du démarrage part dès que la lecture a commencé ; le
+        // reste laisse d'abord le flux démarrer (quelques secondes).
         latency.adjust(player: player, item: item, behind: endTime - position,
                        total: currentDate.map { Date().timeIntervalSince($0) },
-                       enabled: lowLatency && isLive && isPlaying && endTime > 0)
+                       enabled: lowLatency && isLive && isPlaying && endTime > position,
+                       settled: Date().timeIntervalSince(lastCatchUp) > 4)
     }
 
     var atLiveEdge: Bool { isLive && (endTime - position) < 12 }
@@ -280,10 +290,15 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // affichées, voir LiveLatencyController).
         let ceiling = isLive ? endTime - (player.currentItem.map { latency.minBehind(for: $0) } ?? 6) : endTime
         let clamped = max(startTime, min(max(startTime, ceiling), s))
+        // Approché : on peut atterrir avant la position visée (début du
+        // segment), jamais après — donc jamais plus près du bord que le plancher.
         player.seek(to: CMTime(seconds: clamped, preferredTimescale: 600),
                     toleranceBefore: exact ? .zero : .positiveInfinity,
-                    toleranceAfter:  exact ? .zero : .positiveInfinity)
+                    toleranceAfter:  .zero)
         position = clamped
+        // Recul voulu (barre, −10 s) : la tenue du direct ne doit pas le
+        // défaire. Près du bord, elle reprend la main.
+        if isLive { latency.hold(ceiling - clamped > 3) }
         refreshNowPlaying(force: true)
         updateActivity()
     }
@@ -295,6 +310,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // relue toutes les 2 s (mode faible latence), jamais sous le plancher.
         let back = player.currentItem.map { latency.minBehind(for: $0) } ?? 6
         seek(to: endTime - back, exact: false)
+        latency.hold(false)
         if !isPlaying { togglePlay() }
     }
 
