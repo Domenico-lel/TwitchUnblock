@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Multi-live : la mosaïque (plein écran), et ce qui sert à la composer —
@@ -60,6 +61,17 @@ struct MultiLiveView: View {
             if list.isEmpty { dismiss() } else { session.sync(list) }
         }
         .onChange(of: scenePhase) { session.sceneChanged($0) }
+        // Minuteur de veille écoulé : la mosaïque s'arrête et se ferme, comme
+        // le lecteur — sans réveiller la musique d'une autre app. Seul l'écran
+        // du lecteur l'écoutait, et il est fermé pendant le multi-live : les
+        // directs tournaient toute la nuit. Le compteur seul (pas tout le
+        // service, dont le compte à rebours change chaque seconde).
+        .onReceive(SleepTimerService.shared.$fireCount.dropFirst()) { _ in
+            logger.info("SLEEP", "Arrêt du multi-live par le minuteur de veille", nil)
+            session.stopAll()
+            PlaybackAudio.shared.release("multi", notifyOthers: false)
+            dismiss()
+        }
         .onDisappear {
             session.stopAll()
             PlaybackAudio.shared.release("multi")

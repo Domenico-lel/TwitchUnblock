@@ -348,11 +348,14 @@ struct MainTabView: View {
                 liveSource: menuLiveSource,
                 onSelectSource: { id in
                     showPlayerMenu = false
-                    // Lecture par le compte : un choix de source est respecté,
-                    // même celle déjà en tête — le compte est mis de côté pour
-                    // cette chaîne jusqu'au prochain lancement.
+                    // La source qui sert déjà le direct : rien à relancer. Une
+                    // autre le relance par elle, même celle en tête de l'ordre
+                    // quand c'est une suivante qui a répondu (la réessayer ne
+                    // faisait rien). Lecture par le compte : un choix de source
+                    // est respecté — le compte est mis de côté pour cette
+                    // chaîne jusqu'au prochain lancement.
                     let fromAccount = liveSourceUsed == "account"
-                    guard fromAccount || id != store.liveSourceOrder.first else { return }
+                    guard id != liveSourceUsed else { return }
                     if fromAccount, case .live(let ch)? = playerMode {
                         store.accountPlaybackSkipped.insert(ch.lowercased())
                         logger.info("LECTEUR", "Compte mis de côté pour \(ch)", "source choisie : \(id)")
@@ -867,6 +870,7 @@ struct MainTabView: View {
                 qualityLinks: links,
                 vodId: currentVodId,
                 isLive: isLivePlaying,
+                contentID: playerContentID,
                 variants: qualityVariants,
                 compact: false,  // garde qualité / rembobiner ; le bouton Chat, lui,
                                  // n'a plus lieu d'être (le chat est toujours affiché)

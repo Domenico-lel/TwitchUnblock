@@ -1,5 +1,6 @@
 import Foundation
 import ActivityKit
+import UIKit
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Live Activity du lecteur (écran verrouillé, Dynamic Island) : la chaîne,
@@ -66,7 +67,7 @@ private final class PlayerActivityController {
         // À 1,5×, la VOD finit 1,5 fois plus tôt : départ « virtuel » à
         // maintenant − position / vitesse, et barre sur durée / vitesse.
         let speed = vodProgress && rate.isFinite && rate > 0 ? rate : 1
-        let newState = PlayerActivityAttributes.ContentState(
+        var newState = PlayerActivityAttributes.ContentState(
             title: meta.title == channel ? "" : meta.title,
             game: isLive ? meta.game : "",
             viewers: isLive && meta.viewers > 0 ? formatViewers(meta.viewers) : "",
@@ -77,13 +78,27 @@ private final class PlayerActivityController {
             duration: vodProgress ? duration : 0,
             rate: speed == 1 ? nil : speed)
 
-        // Même chaîne, même nature (direct ou VOD) : simple mise à jour.
-        if let activity, let attributes,
-           attributes.channel == channel, attributes.isLive == isLive {
-            guard Self.changed(from: state, to: newState) else { return }
-            state = newState
-            Task { await activity.update(ActivityContent(state: newState, staleDate: nil)) }
-            return
+        if let activity, let attributes {
+            let shown = state.map { attributes.channel(in: $0) } ?? attributes.channel
+            let shownLive = state.map { attributes.isLive(in: $0) } ?? attributes.isLive
+            let same = shown == channel && shownLive == isLive
+            // Même chaîne, même nature (direct ou VOD) : simple mise à jour.
+            // Autre chaîne, app en arrière-plan (raid suivi écran verrouillé) :
+            // iOS refuse d'en démarrer une autre — l'activité disparaissait
+            // jusqu'au retour dans l'app. Celle-ci est reprise, et affiche la
+            // nouvelle chaîne.
+            if same || UIApplication.shared.applicationState != .active {
+                if attributes.channel != channel || attributes.isLive != isLive {
+                    newState.shownChannel = channel
+                    newState.shownIsLive = isLive
+                    newState.shownLiveLabel = meta.liveLabel
+                }
+                guard Self.changed(from: state, to: newState) else { return }
+                if !same { logger.info("ACTIVITY", "Live Activity reprise pour une autre chaîne (arrière-plan)", channel) }
+                state = newState
+                Task { await activity.update(ActivityContent(state: newState, staleDate: nil)) }
+                return
+            }
         }
 
         // Sinon, nouvelle activité : l'ancienne (autre chaîne) disparaît.
@@ -118,7 +133,8 @@ private final class PlayerActivityController {
         guard let old else { return true }
         if old.title != new.title || old.game != new.game || old.viewers != new.viewers
             || old.isPlaying != new.isPlaying || old.duration != new.duration
-            || old.rate != new.rate { return true }
+            || old.rate != new.rate || old.shownChannel != new.shownChannel
+            || old.shownIsLive != new.shownIsLive || old.shownLiveLabel != new.shownLiveLabel { return true }
         if !new.isPlaying, abs(old.position - new.position) > 1 { return true }
         switch (old.startedAt, new.startedAt) {
         case (nil, nil):            return false

@@ -32,11 +32,13 @@ struct PlayerLiveActivity: Widget {
         } dynamicIsland: { context in
             let a = context.attributes
             let s = context.state
+            // Activité reprise pour une autre chaîne : ce que dit l'état.
+            let live = a.isLive(in: s)
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
                     HStack(spacing: 6) {
-                        Badge(attributes: a)
-                        Text(a.channel).font(.headline).lineLimit(1)
+                        Badge(attributes: a, state: s)
+                        Text(a.channel(in: s)).font(.headline).lineLimit(1)
                     }
                     .padding(.leading, 4)
                 }
@@ -54,23 +56,28 @@ struct PlayerLiveActivity: Widget {
                     .padding(.horizontal, 4)
                 }
             } compactLeading: {
-                if a.isLive {
+                if live {
                     Circle().fill(liveRed).frame(width: 8, height: 8)
                 } else {
                     Image(systemName: s.isPlaying ? "play.fill" : "pause.fill")
                         .foregroundColor(purple)
                 }
             } compactTrailing: {
-                if a.isLive {
-                    Text(s.viewers.isEmpty ? "LIVE" : s.viewers)
+                if live {
+                    // Sans spectateurs connus : le libellé du direct dans la
+                    // langue de l'app (« LIVE » restait en anglais).
+                    Text(s.viewers.isEmpty ? a.liveLabel(in: s).uppercased() : s.viewers)
                         .font(.caption2.weight(.semibold).monospacedDigit())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .frame(maxWidth: 56)
                 } else {
                     ElapsedText(state: s)
                         .font(.caption2.weight(.semibold).monospacedDigit())
                         .frame(maxWidth: 56)
                 }
             } minimal: {
-                if a.isLive {
+                if live {
                     Circle().fill(liveRed).frame(width: 8, height: 8)
                 } else {
                     Image(systemName: "play.tv.fill").foregroundColor(purple)
@@ -96,8 +103,8 @@ private struct LockScreenView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    Badge(attributes: attributes)
-                    Text(attributes.channel).font(.headline).lineLimit(1)
+                    Badge(attributes: attributes, state: state)
+                    Text(attributes.channel(in: state)).font(.headline).lineLimit(1)
                     Spacer(minLength: 4)
                     TrailingInfo(attributes: attributes, state: state)
                 }
@@ -116,15 +123,17 @@ private struct LockScreenView: View {
 /// « EN DIRECT » en rouge, ou « VOD » en violet.
 private struct Badge: View {
     let attributes: PlayerActivityAttributes
+    let state: PlayerActivityAttributes.ContentState
 
     var body: some View {
-        Text(attributes.isLive ? attributes.liveLabel.uppercased() : "VOD")
+        let live = attributes.isLive(in: state)
+        Text(live ? attributes.liveLabel(in: state).uppercased() : "VOD")
             .font(.system(size: 10, weight: .heavy))
             .foregroundColor(.white)
             .lineLimit(1)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
-            .background(attributes.isLive ? liveRed : purple)
+            .background(live ? liveRed : purple)
             .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
@@ -135,7 +144,7 @@ private struct TrailingInfo: View {
     let state: PlayerActivityAttributes.ContentState
 
     var body: some View {
-        if attributes.isLive, !state.viewers.isEmpty {
+        if attributes.isLive(in: state), !state.viewers.isEmpty {
             Label(state.viewers, systemImage: "eye.fill")
                 .font(.caption.monospacedDigit())
                 .foregroundColor(.white.opacity(0.85))
@@ -155,7 +164,7 @@ private struct Footer: View {
     let state: PlayerActivityAttributes.ContentState
 
     var body: some View {
-        if attributes.isLive {
+        if attributes.isLive(in: state) {
             HStack(spacing: 5) {
                 if !state.game.isEmpty {
                     Image(systemName: "gamecontroller.fill").font(.caption2)

@@ -12,6 +12,10 @@ enum PlayerFullscreen {
 struct NativeVideoPlayer: UIViewControllerRepresentable {
     let url: URL
     let savedTime: Double
+    /// Ce qui se lit, quelle que soit la qualité (« vod:<id> », « clip:<slug> »…) :
+    /// une adresse qui change sans lui est un changement de qualité, et la
+    /// lecture reste où elle en est (voir updateUIViewController).
+    var contentID: String = ""
     let onProgress: (Double) -> Void
     /// Latence mesurée du direct (nil si la playlist ne porte pas d'horodatage).
     var onLatency: (Double?) -> Void = { _ in }
@@ -31,32 +35,47 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
     var adBreaks: AdBreakWatcher? = nil
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let player = AVPlayer(playerItem: VodUnmuteLoader.playerItem(url: url))
-        // Le son continue écran verrouillé, comme dans le lecteur immersif.
-        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-        context.coordinator.adBreaks = adBreaks
-        adBreaks?.attach(player)
         let vc = AVPlayerViewController()
-        vc.player = player
         vc.allowsPictureInPicturePlayback = true
         vc.canStartPictureInPictureAutomaticallyFromInline = true
         vc.showsPlaybackControls = true
         vc.delegate = context.coordinator
         context.coordinator.playerVC = vc
-        context.coordinator.isLive = isLive
-        context.coordinator.lowLatency = lowLatency && isLive
+        context.coordinator.adBreaks = adBreaks
         context.coordinator.onSpeedChange = onSpeedChange
-        context.coordinator.configureLatency(player)
-        context.coordinator.setupObserver(player: player, onProgress: onProgress,
-                                          onLatency: onLatency, onBehind: onBehind)
-        context.coordinator.applyMetadata(nowPlaying, isLive: isLive, to: player)
-        // Restore position
-        if savedTime > 5 {
-            player.seek(to: CMTime(seconds: savedTime, preferredTimescale: 600))
-        }
+        // Reprise : la progression enregistrée (une VOD vue jusqu'au bout
+        // repart du début).
+        startPlayer(in: vc, context: context, from: .init(seconds: savedTime, resume: true))
+        return vc
+    }
+
+    /// Nouvel AVPlayer pour `url` (ouverture, autre qualité, bascule direct ↔
+    /// enregistrement) : réglages, observateurs, départ, vitesse, lecture.
+    private func startPlayer(in vc: AVPlayerViewController, context: Context,
+                             from start: Coordinator.Start) {
+        let coordinator = context.coordinator
+        let item = VodUnmuteLoader.playerItem(url: url)
+        let player = AVPlayer(playerItem: item)
+        // Le son continue écran verrouillé, comme dans le lecteur immersif.
+        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
+        vc.player = player
+        // Un ancien lecteur retrouve son son avant d'être lâché.
+        adBreaks?.attach(player)
+        // Adresse demandée, gardée telle quelle : après un repli AirPlay,
+        // l'élément lit la playlist du CDN (https) et ne lui ressemble plus.
+        coordinator.requestedURL = url
+        coordinator.contentID = contentID
+        coordinator.isLive = isLive
+        coordinator.lowLatency = lowLatency && isLive
+        coordinator.configureLatency(player)
+        coordinator.setupObserver(player: player, onProgress: onProgress,
+                                  onLatency: onLatency, onBehind: onBehind)
+        coordinator.arm(item, start)
+        // Nouvel AVPlayer : sa vitesse par défaut repartirait à 1×.
         applySpeed(vc, player: player, context: context)
         player.play()
-        return vc
+        // Après play() : la Live Activity part en lecture, pas en pause.
+        coordinator.applyMetadata(nowPlaying, to: player)
     }
 
     /// Menu de vitesse d'Apple hors direct seulement : en direct, il se
@@ -73,38 +92,33 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
-        let currentURL = (vc.player?.currentItem?.asset as? AVURLAsset)?.url
-        if currentURL != url {
-            // ✨ LA CORRECTION EST ICI : On force l'ancien lecteur à se mettre en pause 
-            // avant de le remplacer par la nouvelle qualité !
+        let coordinator = context.coordinator
+        coordinator.onSpeedChange = onSpeedChange
+        // Comparée à l'adresse demandée, pas à celle de l'élément : après un
+        // repli AirPlay (playlist du CDN), elles différaient toujours, et le
+        // lecteur se recréait à chaque mise à jour — en boucle, jamais lisible.
+        if coordinator.requestedURL != url {
+            // Même contenu, autre qualité : la lecture reste où elle en est
+            // (VOD, clip, VOD retrouvée ou téléchargée), un direct reculé exprès
+            // garde son retard. Autre contenu (direct ↔ enregistrement) : la
+            // progression enregistrée, comme à l'ouverture.
+            let sameContent = !contentID.isEmpty && contentID == coordinator.contentID
+                && isLive == coordinator.isLive
+            let start: Coordinator.Start = sameContent ? coordinator.carryOver()
+                                                       : .init(seconds: savedTime, resume: true)
+            // L'ancien lecteur se tait avant d'être remplacé.
             vc.player?.pause()
-            
-            let player = AVPlayer(playerItem: VodUnmuteLoader.playerItem(url: url))
-            player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-            vc.player = player
-            // L'ancien lecteur retrouve son son avant d'être lâché.
-            adBreaks?.attach(player)
-            context.coordinator.isLive = isLive
-            context.coordinator.lowLatency = lowLatency && isLive
-            context.coordinator.configureLatency(player)
-            context.coordinator.setupObserver(player: player, onProgress: onProgress,
-                                              onLatency: onLatency, onBehind: onBehind)
-            if savedTime > 5 {
-                player.seek(to: CMTime(seconds: savedTime, preferredTimescale: 600))
-            }
-            // Nouvel AVPlayer (qualité, bascule direct ↔ enregistrement) : sa
-            // vitesse par défaut repartirait à 1×.
-            applySpeed(vc, player: player, context: context)
-            player.play()
+            startPlayer(in: vc, context: context, from: start)
+        } else if let player = vc.player {
+            coordinator.applyMetadata(nowPlaying, to: player)
         }
-        context.coordinator.onSpeedChange = onSpeedChange
-        if let player = vc.player { context.coordinator.applyMetadata(nowPlaying, isLive: isLive, to: player) }
     }
 
     // Force l'arrêt de la vidéo quand la vue est détruite
     static func dismantleUIViewController(_ vc: AVPlayerViewController, coordinator: Coordinator) {
-        // Lecteur fermé : une fin d'interruption ne doit plus le relancer.
-        coordinator.interruptions = nil
+        // Lecteur fermé : plus rien ne le relance (fin d'interruption), ni ne
+        // relance sa Live Activity (observateur tardif).
+        coordinator.teardown()
         vc.player?.pause()
         coordinator.adBreaks?.detach()
         vc.player = nil
@@ -118,7 +132,13 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         private var timeObserver: Any?
         private var playerRef: AVPlayer?
         private var externalObs: NSKeyValueObservation?
+        /// Lecture ou pause, d'après AVPlayer : la Live Activity la suit.
+        private var timeControlObs: NSKeyValueObservation?
 
+        /// Adresse demandée pour le lecteur en cours (voir updateUIViewController).
+        var requestedURL: URL?
+        /// Contenu du lecteur en cours (voir NativeVideoPlayer.contentID).
+        var contentID = ""
         /// Lecture d'un direct (journaux LIVE).
         var isLive = false
         /// Pause pub du direct : détachée quand le lecteur disparaît.
@@ -137,7 +157,115 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         /// Appel, Siri, autre app qui prend le son : la lecture repart à la
         /// fin (PlaybackInterruptions). nil une fois le lecteur fermé.
         var interruptions: PlaybackInterruptions?
+        /// Démonté (vue fermée) : plus rien ne relance ce lecteur ni ne publie
+        /// pour lui (Live Activity).
+        private var tornDown = false
+        /// Durée de VOD déjà envoyée à la Live Activity.
+        private var activityDuration: Double = 0
 
+        // MARK: Départ
+        /// Où démarre un nouvel élément.
+        struct Start {
+            /// Position à retrouver (au-delà de 5 s), une fois l'élément prêt.
+            var seconds: Double = 0
+            /// `seconds` vient de la progression enregistrée : une VOD vue
+            /// jusqu'au bout repart alors du début.
+            var resume = false
+            /// Direct reculé exprès : retard sur le bord à retrouver.
+            var behind: Double? = nil
+        }
+
+        /// Départ en attente. Chercher juste après la création de l'élément ne
+        /// tient pas en HLS (playlist pas encore chargée) : la lecture partait de
+        /// 0:00, et ce 0:00, envoyé comme progression, écrasait la reprise.
+        private var pendingSeek: Double?
+        private var pendingIsResume = false
+        private var pendingBehind: Double?
+        /// Élément auquel s'applique le départ en attente.
+        private weak var pendingItem: AVPlayerItem?
+        private var statusObs: NSKeyValueObservation?
+
+        /// Départ de `item`, appliqué une fois l'élément prêt.
+        func arm(_ item: AVPlayerItem, _ start: Start) {
+            clearPending()
+            pendingSeek = !isLive && start.seconds > 5 ? start.seconds : nil
+            pendingIsResume = start.resume
+            pendingBehind = isLive ? start.behind : nil
+            guard pendingSeek != nil || pendingBehind != nil else { return }
+            pendingItem = item
+            statusObs = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+                guard item.status != .unknown else { return }
+                DispatchQueue.main.async { self?.applyPendingSeek(on: item) }
+            }
+        }
+
+        private func clearPending() {
+            statusObs = nil
+            pendingItem = nil
+            pendingSeek = nil
+            pendingBehind = nil
+        }
+
+        /// Élément prêt : le départ s'applique.
+        private func applyPendingSeek(on item: AVPlayerItem) {
+            guard item === pendingItem else { return }
+            // En échec : le départ reste en attente (une autre qualité le
+            // reprendra), et rien ne part comme progression — le 0:00 de
+            // l'élément écraserait la reprise.
+            guard item.status == .readyToPlay else { statusObs = nil; return }
+            let target = pendingSeek, behind = pendingBehind, resume = pendingIsResume
+            clearPending()
+            guard !tornDown, let player = playerRef, player.currentItem === item else { return }
+            if let behind {
+                // Direct reculé exprès, passé à une autre qualité : même retard
+                // sur le bord, et tenu (sinon la tenue du direct le défaisait).
+                // Jamais plus près du bord que visé.
+                guard let range = item.seekableTimeRanges.last?.timeRangeValue,
+                      range.duration.seconds > 0 else { return }
+                let t = max(range.start.seconds, (range.start + range.duration).seconds - behind)
+                player.seek(to: CMTime(seconds: t, preferredTimescale: 600),
+                            toleranceBefore: .positiveInfinity, toleranceAfter: .zero)
+                latency.hold(true)
+                return
+            }
+            guard let target else { return }
+            // Reprise d'une VOD regardée jusqu'au bout (à moins de 30 s de la
+            // fin, même règle que le lecteur immersif et le site) : le début.
+            // Elle se rouvrait sur sa dernière seconde, et « Tout lire » passait
+            // aussitôt à la suivante. Un enregistrement en cours n'a pas de fin.
+            let length = item.duration.seconds
+            if resume, length.isFinite, length > 0, target > length - 30 {
+                logger.info("LECTEUR", "VOD déjà vue jusqu'au bout", "reprise au début")
+                return
+            }
+            var t = target
+            if let range = item.seekableTimeRanges.last?.timeRangeValue,
+               range.duration.seconds > 0 {
+                t = max(range.start.seconds, min((range.start + range.duration).seconds, t))
+            }
+            player.seek(to: CMTime(seconds: t, preferredTimescale: 600),
+                        toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+
+        /// Ce que le lecteur en cours doit retrouver dans un autre élément du
+        /// même contenu (autre qualité) : sa position (VOD, clip, VOD retrouvée
+        /// ou téléchargée), ou son retard voulu sur le bord (direct reculé en
+        /// mode faible latence, seul cas où ce recul est connu). Avant, tout
+        /// repartait de la progression enregistrée, qui vaut 0 hors VOD de
+        /// Twitch. Un départ encore en attente passe tel quel.
+        func carryOver() -> Start {
+            if let pendingSeek { return Start(seconds: pendingSeek, resume: pendingIsResume) }
+            if let pendingBehind { return Start(behind: pendingBehind) }
+            guard let player = playerRef, let item = player.currentItem else { return Start() }
+            guard isLive else {
+                let t = player.currentTime().seconds
+                return Start(seconds: t.isFinite ? max(0, t) : 0)
+            }
+            guard lowLatency, latency.holdingBehind,
+                  let edge = item.seekableTimeRanges.last?.timeRangeValue.end, edge.isNumeric else { return Start() }
+            let behind = (edge - item.currentTime()).seconds
+            return behind.isFinite && behind > 0 ? Start(behind: behind) : Start()
+        }
 
         /// Prépare le direct : le mode faible latence tient ensuite le bord du
         /// direct en continu (catchUpIfNeeded).
@@ -184,16 +312,37 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             latency.hold(behind > latency.minBehind(for: item) + 3)
         }
 
-        // MARK: Plein écran — maintient PlayerFullscreen.isActive à jour
+        // MARK: Plein écran et PiP — maintiennent PlayerFullscreen.isActive à jour
+        /// Ce lecteur a mis le drapeau à vrai (plein écran, PiP) : il le rend
+        /// au démontage, même si AVKit n'a pas prévenu de la fin.
+        private var fullscreenShown = false
+        private var pipShown = false
+
         func playerViewController(_ playerViewController: AVPlayerViewController,
                                   willBeginFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator) {
+            fullscreenShown = true
             PlayerFullscreen.isActive = true
         }
         func playerViewController(_ playerViewController: AVPlayerViewController,
                                   willEndFullScreenPresentationWithAnimationCoordinator coordinator: UIViewControllerTransitionCoordinator) {
-            coordinator.animate(alongsideTransition: nil) { _ in
-                PlayerFullscreen.isActive = false
+            coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+                guard let self, !self.tornDown else { return }
+                self.fullscreenShown = false
+                // Un PiP parti du plein écran garde le chat actif.
+                if !self.pipShown { PlayerFullscreen.isActive = false }
             }
+        }
+        /// PiP : comme dans le lecteur immersif, le chat garde son IRC et ses
+        /// points tant qu'il dure.
+        func playerViewControllerDidStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            guard !tornDown else { return }
+            pipShown = true
+            PlayerFullscreen.isActive = true
+        }
+        func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+            guard !tornDown else { return }
+            pipShown = false
+            if !fullscreenShown { PlayerFullscreen.isActive = false }
         }
 
         /// Jeton de l'observateur à bloc : `removeObserver(self)` ne le retire
@@ -214,6 +363,39 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             interruptions = PlaybackInterruptions(name: "lecteur natif") { [weak self] since in
                 self?.resumeAfterInterruption(since: since)
             }
+        }
+
+        /// Lecteur démonté (vue fermée) : observateurs retirés, et drapeau du
+        /// plein écran et du PiP rendu — sinon le chat de la chaîne quittée,
+        /// et tous ceux ouverts ensuite, ne coupaient plus leur IRC.
+        func teardown() {
+            guard !tornDown else { return }
+            tornDown = true
+            interruptions = nil
+            clearPending()
+            timeControlObs = nil
+            externalObs = nil
+            diagnostics = nil
+            if let o = timeObserver { playerRef?.removeTimeObserver(o); timeObserver = nil }
+            removeObservers()
+            artworkTask?.cancel()
+            if fullscreenShown || pipShown {
+                fullscreenShown = false
+                pipShown = false
+                PlayerFullscreen.isActive = false
+            }
+        }
+
+        /// Observateurs à bloc (audio spatial compris : il n'était jamais
+        /// retiré, un par lecteur ouvert restait appelé à chaque changement).
+        private func removeObservers() {
+            for token in [stopObserver, spatialObserver, jumpObserver, rateObserver] {
+                if let token { NotificationCenter.default.removeObserver(token) }
+            }
+            stopObserver = nil
+            spatialObserver = nil
+            jumpObserver = nil
+            rateObserver = nil
         }
 
         /// Fin d'une interruption du son : la lecture repart. VOD, clip, VOD
@@ -247,8 +429,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 // sans nous. Nouvel élément, pris au bord.
                 latency.reset()
                 lastCatchUp = Date()
+                clearPending()
                 player.replaceCurrentItem(with: VodUnmuteLoader.playerItem(url: asset.url))
-                if let meta = metadataShown { applyMetadata(meta, isLive: true, to: player) }
+                if let meta = metadataShown { applyMetadata(meta, to: player) }
                 player.play()
                 return "direct relu au bord" + lost
             }
@@ -265,31 +448,29 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
 
         /// Réglage « Audio spatial » changé : l'élément est recréé au même
         /// endroit (rien ne garantit qu'iOS relise ce choix en cours de lecture).
+        /// Un direct repart au bord ; une VOD, même en cours d'enregistrement
+        /// (sans durée finie, elle était prise pour un direct), à l'endroit.
         private func reloadForSpatialAudio() {
-            guard let player = playerRef,
+            guard !tornDown, let player = playerRef,
                   let current = player.currentItem,
                   let asset = current.asset as? AVURLAsset else { return }
-            let live = current.duration.isIndefinite
             let t = player.currentTime()
-            let playing = player.rate > 0
+            let playing = player.rate != 0
             let item = VodUnmuteLoader.playerItem(url: asset.url)
-            if !live {
-                // Chercher avant que la playlist soit chargée ne tient pas.
-                var obs: NSKeyValueObservation?
-                obs = item.observe(\.status, options: [.new]) { item, _ in
-                    guard item.status == .readyToPlay else { return }
-                    DispatchQueue.main.async {
-                        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-                        obs?.invalidate(); obs = nil
-                    }
-                }
-            } else {
+            if isLive {
                 // Nouvel élément du direct : la tenue repart de zéro.
                 latency.reset()
                 lastCatchUp = Date()
+                clearPending()
+            } else if let pendingSeek {
+                // Départ pas encore appliqué : il suit le nouvel élément.
+                arm(item, Start(seconds: pendingSeek, resume: pendingIsResume))
+            } else {
+                VodUnmuteLoader.seek(player, to: t, whenReady: item)
             }
             player.replaceCurrentItem(with: item)
             if playing { player.play() }
+            if let meta = metadataShown { applyMetadata(meta, to: player) }
         }
 
         func setupObserver(player: AVPlayer,
@@ -303,6 +484,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             interruptions?.watch(player)
             interruptions?.settle()
             sync.reset()
+            activityDuration = 0
             // Journaux LIVE et sauts du lecteur : réabonnés à chaque nouvel
             // AVPlayer (changement de qualité).
             diagnostics = LiveDiagnostics(player: player) { [weak self] in self?.isLive ?? false }
@@ -311,12 +493,30 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             jumpObserver = NotificationCenter.default.addObserver(
                 forName: AVPlayerItem.timeJumpedNotification, object: nil, queue: .main
             ) { [weak self] note in
-                guard let item = note.object as? AVPlayerItem else { return }
-                self?.timeJumped(item)
+                guard let self, let item = note.object as? AVPlayerItem,
+                      item === self.playerRef?.currentItem else { return }
+                self.timeJumped(item)
+                // Saut (barre, ±15 s, reprise) : la Live Activity repart d'ici.
+                self.updateActivity()
             }
             // AirPlay ne lit pas les playlists réécrites : retour à celle du CDN.
-            externalObs = player.observe(\.isExternalPlaybackActive, options: [.new]) { p, _ in
-                DispatchQueue.main.async { VodUnmuteLoader.fallBackForAirPlay(p) }
+            externalObs = player.observe(\.isExternalPlaybackActive, options: [.new]) { [weak self] p, _ in
+                DispatchQueue.main.async {
+                    guard let self, !self.tornDown, p === self.playerRef else { return }
+                    // Départ encore en attente (reprise d'une VOD) : il suit le
+                    // nouvel élément, au lieu de repartir de 0:00.
+                    let waiting = self.pendingSeek != nil
+                    let start = Start(seconds: self.pendingSeek ?? 0, resume: self.pendingIsResume)
+                    guard let item = VodUnmuteLoader.fallBackForAirPlay(p, keepPosition: !waiting) else { return }
+                    if waiting { self.arm(item, start) }
+                    // Titre et image de l'écran verrouillé : propres à chaque élément.
+                    if let meta = self.metadataShown { self.applyMetadata(meta, to: p) }
+                }
+            }
+            // Lecture ou pause (commandes d'Apple, écran verrouillé, appel,
+            // fin) : la Live Activity la suit.
+            timeControlObs = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.updateActivity() }
             }
             // Vitesse choisie dans le menu d'Apple, ou imposée (AirPlay) : elle
             // devient la vitesse par défaut (play() la rend après une pause) et
@@ -331,11 +531,20 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 self.speed = v
                 player.defaultRate = Float(v)
                 self.onSpeedChange(v)
+                self.updateActivity()
             }
             // 1 s : assez fin pour synchroniser le chat des VODs.
             let interval = CMTime(seconds: 1, preferredTimescale: 600)
             timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self, weak player] time in
-                onProgress(time.seconds)
+                guard let self, !self.tornDown else { return }
+                // Élément remplacé sans nous : son départ ne s'appliquera plus.
+                if self.pendingSeek != nil || self.pendingBehind != nil,
+                   player?.currentItem !== self.pendingItem {
+                    self.clearPending()
+                }
+                // Départ en attente (ouverture, autre qualité) : l'élément lit
+                // encore 0:00. L'envoyer écrasait la progression enregistrée.
+                if self.pendingSeek == nil { onProgress(time.seconds) }
                 // Latence = écart entre l'heure réelle et l'horodatage du segment lu
                 // (EXT-X-PROGRAM-DATE-TIME de la playlist HLS). nil si absent.
                 let total = player?.currentItem?.currentDate().map { Date().timeIntervalSince($0) }
@@ -343,18 +552,53 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 // Retard sur le direct tel que le voient les autres spectateurs :
                 // la base de la synchro du chat (LiveSyncEstimator). Un direct
                 // n'a pas de durée finie.
-                if let self, let item = player?.currentItem, item.duration.isIndefinite,
+                if let item = player?.currentItem, item.duration.isIndefinite,
                    let edge = item.seekableTimeRanges.last?.timeRangeValue.end, edge.isNumeric {
                     onBehind(self.sync.offset(latency: total,
                                               behind: (edge - item.currentTime()).seconds))
                 } else {
                     onBehind(nil)
                 }
-                if let self, self.isLive, let item = player?.currentItem {
+                if self.isLive, let item = player?.currentItem {
                     self.diagnostics?.tick(item: item)
                 }
-                self?.catchUpIfNeeded()
+                // Durée d'une VOD connue après coup : la barre de la Live
+                // Activity en a besoin. Celle d'un enregistrement en cours
+                // grandit sans cesse : renvoyée par paliers d'une minute.
+                if !self.isLive, let item = player?.currentItem {
+                    let length = Coordinator.vodLength(item)
+                    if length > 0, self.activityDuration == 0 || abs(length - self.activityDuration) > 60 {
+                        self.updateActivity()
+                    }
+                }
+                self.catchUpIfNeeded()
             }
+        }
+
+        // MARK: Live Activity
+        /// L'état réel de la lecture (pause comprise) et, pour une VOD, sa
+        /// position et sa durée : elle restait « en lecture », sans progression.
+        /// PlayerActivity n'envoie que ce qui change à l'écran.
+        func updateActivity() {
+            guard !tornDown, let meta = metadataShown, let player = playerRef,
+                  let item = player.currentItem else { return }
+            let length = isLive ? 0 : Coordinator.vodLength(item)
+            activityDuration = length
+            let at = player.currentTime().seconds
+            PlayerActivity.update(meta, isLive: isLive,
+                                  isPlaying: player.timeControlStatus != .paused,
+                                  position: at.isFinite ? max(0, at) : 0, duration: length,
+                                  rate: isLive ? 1 : speed)
+        }
+
+        /// Durée d'une VOD ; pour un enregistrement en cours, la fin de ce
+        /// qu'on peut déjà lire. 0 si on ne la connaît pas encore.
+        private static func vodLength(_ item: AVPlayerItem) -> Double {
+            let d = item.duration.seconds
+            if d.isFinite, d > 0 { return d }
+            guard let range = item.seekableTimeRanges.last?.timeRangeValue else { return 0 }
+            let end = (range.start + range.duration).seconds
+            return end.isFinite && end > 0 ? end : 0
         }
 
         // MARK: Écran verrouillé
@@ -366,11 +610,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         private var artworkData: Data?
         private var artworkTask: Task<Void, Never>?
 
-        func applyMetadata(_ meta: NowPlayingMeta, isLive: Bool, to player: AVPlayer) {
+        func applyMetadata(_ meta: NowPlayingMeta, to player: AVPlayer) {
             guard let item = player.currentItem,
                   meta != metadataShown || item !== metadataItem else { return }
-            // Live Activity : ce lecteur ne suit pas la pause, elle reste en lecture.
-            PlayerActivity.update(meta, isLive: isLive, isPlaying: true)
             if meta.artworkURL != metadataShown?.artworkURL {
                 artworkData = nil
                 artworkTask?.cancel()
@@ -389,6 +631,8 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             metadataShown = meta
             metadataItem = item
             writeMetadata(meta, to: item)
+            // Live Activity : mêmes infos, plus l'état de la lecture.
+            updateActivity()
         }
 
         private func writeMetadata(_ meta: NowPlayingMeta, to item: AVPlayerItem) {
@@ -410,9 +654,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
 
         deinit {
             if let obs = timeObserver { playerRef?.removeTimeObserver(obs) }
-            if let stopObserver { NotificationCenter.default.removeObserver(stopObserver) }
-            if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
-            if let rateObserver { NotificationCenter.default.removeObserver(rateObserver) }
+            removeObservers()
             artworkTask?.cancel()
         }
     }
@@ -428,6 +670,9 @@ struct VideoPlayerView: View {
     /// d'identifiant de VOD mais ne sont pas des directs. Décide de la tenue
     /// du direct, de la latence et de la synchro du chat.
     let isLive: Bool
+    /// Ce qui se lit, quelle que soit la qualité (« vod:<id> »…) : changer de
+    /// qualité garde la lecture où elle en est (NativeVideoPlayer).
+    var contentID: String = ""
     /// Hauteur et cadence de chaque qualité (qualité préférée) ; vide quand
     /// la source ne les donne pas.
     var variants: [String: VariantInfo] = [:]
@@ -464,7 +709,14 @@ struct VideoPlayerView: View {
     @State private var noticeShown: String? = nil
 
     private var qualities: [String] { sortQualities(Array(qualityLinks.keys), variants: variants) }
-    private var currentURL: URL? { qualityLinks[selectedQuality].flatMap(URL.init) }
+    /// Qualité lue : celle choisie, sinon (pas encore choisie, ou absente des
+    /// nouveaux liens) la préférence. Calculée ici plutôt que corrigée après
+    /// coup : le temps d'un rendu, l'adresse manquait, et le lecteur était
+    /// détruit puis recréé (ou restait absent, zone vidéo vide).
+    private var quality: String {
+        qualityLinks[selectedQuality] != nil ? selectedQuality : preferredSelection(qualityLinks)
+    }
+    private var currentURL: URL? { qualityLinks[quality].flatMap(URL.init) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -483,7 +735,7 @@ struct VideoPlayerView: View {
             HStack(spacing: 8) {
                 // Qualité : bouton compact, il laisse la place aux actions.
                 Button { showQualityPicker.toggle() } label: {
-                    actionLabel(text: qualityLabel(selectedQuality), emoji: "🎬",
+                    actionLabel(text: qualityLabel(quality), emoji: "🎬",
                                 fg: .white, bg: Color.tPrimary)
                 }
 
@@ -521,7 +773,7 @@ struct VideoPlayerView: View {
                     ForEach(qualities, id: \.self) { q in
                         Button {
                             // Toucher la qualité déjà cochée ne change pas la préférence.
-                            if q != selectedQuality {
+                            if q != quality {
                                 store.rememberQualityChoice(q, among: qualities, variants: variants)
                             }
                             currentTime = 0
@@ -529,11 +781,11 @@ struct VideoPlayerView: View {
                             showQualityPicker = false
                         } label: {
                             HStack {
-                                Text(q == selectedQuality ? "✓  " : "    ")
-                                    .foregroundColor(q == selectedQuality ? .tPrimary : .clear)
+                                Text(q == quality ? "✓  " : "    ")
+                                    .foregroundColor(q == quality ? .tPrimary : .clear)
                                 Text(qualityLabel(q))
-                                    .foregroundColor(q == selectedQuality ? .tPrimary : .tMuted)
-                                    .fontWeight(q == selectedQuality ? .bold : .semibold)
+                                    .foregroundColor(q == quality ? .tPrimary : .tMuted)
+                                    .fontWeight(q == quality ? .bold : .semibold)
                                 Spacer()
                             }
                             .padding(.horizontal, 16)
@@ -574,6 +826,7 @@ struct VideoPlayerView: View {
         NativeVideoPlayer(
             url: url,
             savedTime: vodId.map { store.getVodProgress($0) } ?? 0,
+            contentID: contentID,
             onProgress: { time in
                 currentTime = time
                 onTime(time)

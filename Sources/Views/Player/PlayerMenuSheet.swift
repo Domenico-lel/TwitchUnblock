@@ -131,11 +131,13 @@ struct PlayerMenuSheet: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: TSpace.sm) {
                                 // Dans l'ordre des réglages ; en choisir une la met en tête.
-                                // Lecture par le compte : aucune n'est cochée, en
-                                // choisir une quitte le compte pour cette chaîne.
+                                // Cochée : celle qui sert le flux (la première de
+                                // l'ordre a pu ne pas répondre). Lecture par le
+                                // compte ou par le Worker : aucune, l'en-tête la
+                                // nomme ; en choisir une quitte le compte pour
+                                // cette chaîne.
                                 ForEach(store.liveSourceOrder, id: \.self) { id in
-                                    TChip(title: store.t("src_\(id)"),
-                                          isOn: used != "account" && id == store.liveSourceOrder.first) {
+                                    TChip(title: store.t("src_\(id)"), isOn: id == used) {
                                         onSelectSource(id)
                                     }
                                 }

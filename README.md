@@ -32,8 +32,8 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🎬 **Immersive player** — custom controls drawn over the picture, the way
   Twitch does it. Play/pause, scrubbing, quality, refresh, orientation. Apple's
   native player stays available as a fallback in Settings. Changing quality
-  keeps your place (a live you rewound keeps its delay); a VOD you had
-  finished starts over from the beginning; when the stream drops for good, the
+  keeps your place, in Apple's player too (a live you rewound keeps its delay);
+  a VOD you had finished starts over from the beginning; when the stream drops for good, the
   player says so with **Retry** instead of freezing (a live first reloads
   itself twice).
 * 🐢 **Playback speed** — 0.25× to 2× on VODs and clips, from the ⋯ menu (or
@@ -117,7 +117,7 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🖥 **Fill the screen** — crops the video to remove the black bars in
   landscape. Cuts off the top and bottom: 16:9 in a phone screen can't do both.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
-  right in the player.
+  right in the player. It stops multi-live too.
 * 📡 **AirPlay** — send the stream to an Apple TV or a compatible TV.
 * 🎧 **Spatial audio (AirPods)** — turn it off in the app, head tracking
   included (Settings → Player). iOS doesn't let apps pick "Fixed" or "Head

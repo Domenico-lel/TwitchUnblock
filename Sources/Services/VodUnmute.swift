@@ -30,9 +30,17 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     private let queue = DispatchQueue(label: "twitchunblock.unmute")
     /// Annonce d'une playlist réécrite (voir `resultNotification`).
     private struct Outcome { let restored: Int; let remaining: [MutedRange] }
-    /// Playlists déjà réécrites (changement de qualité, retour en arrière),
-    /// avec leur annonce (nil : rien de coupé, pas d'annonce).
+    /// Playlists terminées déjà réécrites (changement de qualité, retour en
+    /// arrière), avec leur annonce (nil : rien de coupé, pas d'annonce). Une
+    /// VOD encore en cours d'enregistrement (rembobinage d'un direct) n'y
+    /// entre pas : AVPlayer relit sa playlist, qui grandit, et la copie du
+    /// premier chargement arrêtait la lecture là où elle finissait alors.
     private var cache: [String: (data: Data, outcome: Outcome?)] = [:]
+    /// Originaux des passages coupés déjà sondés (adresse → servi ou non) : une
+    /// playlist en cours, réécrite à chaque relecture, ne refait pas ses HEAD.
+    private var probed: [String: Bool] = [:]
+    /// Dernier bilan écrit au journal, par playlist.
+    private var summaries: [String: String] = [:]
     private let lock = NSLock()
 
     // MARK: Adresses
@@ -95,33 +103,56 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         item.audioTimePitchAlgorithm = .timeDomain
     }
 
-    /// AirPlay en cours : on repasse sur la playlist du CDN, à la même position.
-    static func fallBackForAirPlay(_ player: AVPlayer) {
+    /// AirPlay en cours : on repasse sur la playlist du CDN, à la même position
+    /// — sauf un direct (`tulive://`) : la nouvelle playlist part au bord, et
+    /// l'ancienne position n'a pas de sens dans sa fenêtre. Une VOD, même en
+    /// cours d'enregistrement (`tuunmute://`), garde sa base de temps. La
+    /// lecture ne repart que si elle tournait : une VOD en pause repartait.
+    /// `keepPosition` faux : le lecteur a encore un départ en attente (reprise
+    /// d'une VOD) qu'il appliquera lui-même au nouvel élément. Rend ce nouvel
+    /// élément, nil s'il n'y avait rien à changer.
+    @discardableResult
+    static func fallBackForAirPlay(_ player: AVPlayer, keepPosition: Bool = true) -> AVPlayerItem? {
         guard player.isExternalPlaybackActive,
-              let asset = player.currentItem?.asset as? AVURLAsset else { return }
+              let asset = player.currentItem?.asset as? AVURLAsset else { return nil }
         let plain: URL?
         switch asset.url.scheme {
         case scheme:                  plain = unwrap(asset.url)
         case LivePlaylistLoader.scheme: plain = LivePlaylistLoader.unwrap(asset.url)
         default:                      plain = nil
         }
-        guard let plain else { return }
+        guard let plain else { return nil }
         logger.info("UNMUTE", "AirPlay : retour à la playlist d'origine", nil)
+        let live = asset.url.scheme == LivePlaylistLoader.scheme
         let t = player.currentTime()
+        let playing = player.rate != 0
         let item = AVPlayerItem(url: plain)
         SpatialAudio.apply(to: item)
         keepPitch(item)
         AdBreakMonitor.attach(to: item)
+        if keepPosition, !live, t.isNumeric, t.seconds > 0 { seek(player, to: t, whenReady: item) }
+        player.replaceCurrentItem(with: item)
+        if playing { player.play() }
+        return item
+    }
+
+    /// Recherche faite une fois `item` prêt (avant, la playlist n'est pas
+    /// chargée et la recherche se perd), s'il est encore celui du lecteur.
+    /// L'observation se défait d'elle-même, élément prêt ou en échec, et ne
+    /// retient pas le lecteur : elle se gardait elle-même, lecteur compris,
+    /// tant que l'élément n'était pas prêt (échec du CDN).
+    static func seek(_ player: AVPlayer, to time: CMTime, whenReady item: AVPlayerItem) {
         var obs: NSKeyValueObservation?
-        obs = item.observe(\.status, options: [.new]) { item, _ in
-            guard item.status == .readyToPlay else { return }
+        obs = item.observe(\.status, options: [.new]) { [weak player] item, _ in
+            guard item.status != .unknown else { return }
             DispatchQueue.main.async {
-                player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-                obs?.invalidate(); obs = nil
+                if item.status == .readyToPlay, let player, player.currentItem === item {
+                    player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                }
+                obs?.invalidate()
+                obs = nil
             }
         }
-        player.replaceCurrentItem(with: item)
-        player.play()
     }
 
     // MARK: Chargement
@@ -151,6 +182,27 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         cache[key] = (data, outcome)
     }
 
+    /// Résultat déjà connu pour cet original (nil : jamais sondé).
+    private func probeResult(_ url: URL) -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        return probed[url.absoluteString]
+    }
+
+    private func rememberProbes(_ results: [(URL, Bool)]) {
+        lock.lock(); defer { lock.unlock() }
+        if probed.count > 10_000 { probed.removeAll() }
+        for (url, ok) in results { probed[url.absoluteString] = ok }
+    }
+
+    /// Bilan pas encore écrit au journal pour cette playlist.
+    private func isNewSummary(_ summary: String, for key: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard summaries[key] != summary else { return false }
+        if summaries.count > 50 { summaries.removeAll() }
+        summaries[key] = summary
+        return true
+    }
+
     private func playlist(_ url: URL) async -> Data? {
         // Playlist déjà réécrite : on refait l'annonce. Le lecteur remet la
         // barre aux passages coupés de GQL à chaque ouverture : sans elle, une
@@ -165,7 +217,9 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         guard text.hasPrefix("#EXTM3U") else { return nil }
         let (rewritten, outcome) = await rewrite(text, base: url)
         let out = Data(rewritten.utf8)
-        store(out, outcome: outcome, for: url.absoluteString)
+        // Seulement une playlist terminée : celle d'un enregistrement en cours
+        // est réécrite à chaque relecture (ses sondes, elles, sont gardées).
+        if text.contains("#EXT-X-ENDLIST") { store(out, outcome: outcome, for: url.absoluteString) }
         if let outcome { await announce(outcome, for: url.absoluteString) }
         return out
     }
@@ -223,17 +277,36 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         // (`exist([])` rend [] sans requête).
         guard !muted.isEmpty || kept > 0 else { return (lines.joined(separator: "\n"), nil) }
 
-        // Quatre premiers d'abord : tous refusés, les originaux sont effacés
-        // (VOD trop ancienne) — inutile d'interroger les centaines suivants.
+        // Originaux déjà sondés (relecture d'un enregistrement en cours) : pas
+        // de nouvelle requête, seuls les nouveaux passages sont interrogés.
         var available = Set<Int>()
-        let probe = Array(muted.prefix(4))
-        let first = await exist(probe.map(\.original))
-        for (k, ok) in first.enumerated() where ok { available.insert(probe[k].index) }
-        if !available.isEmpty, muted.count > probe.count {
-            let rest = Array(muted.dropFirst(probe.count))
-            let others = await exist(rest.map(\.original))
-            for (k, ok) in others.enumerated() where ok { available.insert(rest[k].index) }
+        var unknown: [Muted] = []
+        for m in muted {
+            switch probeResult(m.original) {
+            case true?:  available.insert(m.index)
+            case false?: break
+            case nil:    unknown.append(m)
+            }
         }
+        // Quatre premiers d'abord (si aucun original connu n'est servi) : tous
+        // refusés, les originaux sont effacés (VOD trop ancienne) — inutile
+        // d'interroger les centaines suivants, comptés refusés eux aussi.
+        var results: [(URL, Bool)] = []
+        let probe = available.isEmpty ? Array(unknown.prefix(4)) : unknown
+        let first = await exist(probe.map(\.original))
+        for (k, ok) in first.enumerated() { results.append((probe[k].original, ok)) }
+        if unknown.count > probe.count {
+            let rest = Array(unknown.dropFirst(probe.count))
+            if first.contains(true) {
+                let others = await exist(rest.map(\.original))
+                for (k, ok) in others.enumerated() { results.append((rest[k].original, ok)) }
+            } else {
+                for m in rest { results.append((m.original, false)) }
+            }
+        }
+        // `results` suit l'ordre de `unknown`.
+        for (k, m) in unknown.enumerated() where results[k].1 { available.insert(m.index) }
+        rememberProbes(results)
         for m in muted where available.contains(m.index) { lines[m.index] = m.original.absoluteString }
 
         // Passages encore muets, fusionnés, pour la barre de lecture.
@@ -245,8 +318,13 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
                 remaining.append(MutedRange(start: m.start, end: m.start + m.duration))
             }
         }
-        logger.info("UNMUTE", "Passages coupés : \(available.count)/\(muted.count) segments rétablis, \(kept) déjà avec le son (-unmuted.mp4)",
-                    base.deletingLastPathComponent().lastPathComponent)
+        let summary = "\(available.count)/\(muted.count) segments rétablis, \(kept) déjà avec le son (-unmuted.mp4)"
+        // Une fois par bilan : un enregistrement en cours est réécrit à
+        // chaque relecture, toutes les quelques secondes.
+        if isNewSummary(summary, for: base.absoluteString) {
+            logger.info("UNMUTE", "Passages coupés : " + summary,
+                        base.deletingLastPathComponent().lastPathComponent)
+        }
         // Les « -unmuted.mp4 » comptent comme rétablis : ils se lisent avec le son.
         let outcome = Outcome(restored: available.count + kept, remaining: remaining)
         return (lines.joined(separator: "\n"), outcome)
