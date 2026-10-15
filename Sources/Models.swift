@@ -193,7 +193,7 @@ struct VodMeta {
 }
 
 // MARK: – App Models
-struct HistoryItem: Codable, Identifiable {
+struct HistoryItem: Codable, Identifiable, Equatable {
     var id: String { term }
     let term: String
     let type: HistoryType
@@ -201,6 +201,9 @@ struct HistoryItem: Codable, Identifiable {
     let thumb: String?
     let streamer: String?
     let addedAt: Double
+    /// Photo d'une chaîne, mise par le site : gardée et renvoyée telle
+    /// quelle, sinon un envoi de l'app la faisait disparaître du site.
+    var avatar: String? = nil
 
     enum HistoryType: String, Codable { case vod, channel }
 }
@@ -218,6 +221,7 @@ extension HistoryItem {
         thumb    = try? c.decodeIfPresent(String.self, forKey: .thumb)
         streamer = try? c.decodeIfPresent(String.self, forKey: .streamer)
         addedAt  = (try? c.decodeIfPresent(Double.self, forKey: .addedAt)) ?? 0
+        avatar   = try? c.decodeIfPresent(String.self, forKey: .avatar)
     }
 }
 

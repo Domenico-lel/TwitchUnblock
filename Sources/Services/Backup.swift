@@ -29,16 +29,25 @@ enum Backup {
     enum ImportError: Error { case invalid }
 
     static func fileName() -> String {
+        // Date grégorienne quel que soit le calendrier de l'appareil : sinon
+        // « twitchunblock-2569-10-13 » sur un iPhone en calendrier bouddhiste.
         let df = DateFormatter()
+        df.calendar = Calendar(identifier: .gregorian)
+        df.locale = Locale(identifier: "en_US_POSIX")
         df.dateFormat = "yyyy-MM-dd"
         return "twitchunblock-\(df.string(from: Date()))"
+    }
+
+    /// Langue du top écrite comme le site (« zh_hk » là où l'app dit « zh-hk »).
+    private static func siteTopLang(_ code: String) -> String {
+        code.replacingOccurrences(of: "-", with: "_")
     }
 
     static func export(store: AppStore) -> Data {
         let settings: [String: Any] = [
             // Communs avec le site (mêmes noms)
             "lang": store.lang.rawValue,
-            "topLang": store.topLang.map { $0 as Any } ?? NSNull(),
+            "topLang": store.topLang.map { siteTopLang($0) as Any } ?? NSNull(),
             "homeList": store.homeListLayout,
             "showRecent": store.showRecentChannels,
             "timestamps": store.chatTimestamps,
@@ -93,8 +102,9 @@ enum Backup {
     }
 
     /// Fusionne la sauvegarde : suivis ajoutés (rien n'est retiré), réglages
-    /// connus repris. Renvoie le nombre de chaînes ajoutées.
-    static func importData(_ data: Data, store: AppStore) throws -> Int {
+    /// connus repris. Renvoie le nombre de chaînes ajoutées, et celui des
+    /// chaînes laissées de côté (300 suivis au plus sur l'appareil).
+    static func importData(_ data: Data, store: AppStore) throws -> (added: Int, skipped: Int) {
         guard data.count < 2_000_000,
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               root["format"] as? String == format else { throw ImportError.invalid }
@@ -105,9 +115,15 @@ enum Backup {
         let incoming = ((root["follows"] as? [String] ?? []) + (root["accountFollows"] as? [String] ?? []))
             .map { $0.lowercased() }.filter(validLogin)
         var follows = store.localFollows
-        var added = 0
-        for l in incoming where !follows.contains(l) { follows.append(l); added += 1 }
-        store.localFollows = Array(follows.prefix(300))
+        var fresh = 0
+        for l in incoming where !follows.contains(l) { follows.append(l); fresh += 1 }
+        // Comptées après la limite : avant, « 400 chaînes ajoutées » quand
+        // 100 tombaient en silence. Les suivis déjà là restent tous.
+        let before = store.localFollows.count
+        let kept = Array(follows.prefix(max(300, before)))
+        let added = kept.count - before
+        store.localFollows = kept
+        let skipped = fresh - added
 
         var cats = store.followedCategories
         for c in root["followedCategories"] as? [[String: Any]] ?? [] {
@@ -122,18 +138,27 @@ enum Backup {
         hidden.merge(backup: root["hidden"])
         store.hidden = hidden
 
-        guard let s = root["settings"] as? [String: Any] else { return added }
+        guard let s = root["settings"] as? [String: Any] else { return (added, skipped) }
         func bool(_ k: String, _ apply: (Bool) -> Void) { if let v = s[k] as? Bool { apply(v) } }
         func num(_ k: String, _ range: ClosedRange<Double>, _ apply: (Double) -> Void) {
             if let v = s[k] as? Double, range.contains(v) { apply(v) }
+        }
+        // Tailles du chat : ramenées dans les bornes des curseurs des Réglages.
+        func size(_ k: String, _ range: ClosedRange<Double>, _ apply: (Double) -> Void) {
+            if let v = s[k] as? Double, v.isFinite { apply(AppStore.clamped(v, to: range)) }
         }
         func words(_ k: String, _ max: Int, _ apply: ([String]) -> Void) {
             if let v = s[k] as? [String] { apply(Array(v.map { $0.lowercased() }.prefix(max))) }
         }
 
         if let l = s["lang"] as? String, let lang = Lang(rawValue: l) { store.lang = lang }
+        // Langue du top : « zh_hk » du site ramené à « zh-hk », et seulement
+        // une langue que l'app connaît (sinon aucune case n'était cochée).
         if s["topLang"] is NSNull { store.topLang = nil }
-        else if let t = s["topLang"] as? String, t.count <= 8 { store.topLang = t }
+        else if let t = s["topLang"] as? String {
+            let code = t.lowercased().replacingOccurrences(of: "_", with: "-")
+            if TopLanguage.codes.contains(code) { store.topLang = code }
+        }
         bool("homeList") { store.homeListLayout = $0 }
         bool("showRecent") { store.showRecentChannels = $0 }
         bool("timestamps") { store.chatTimestamps = $0 }
@@ -161,11 +186,11 @@ enum Backup {
         bool("ios_immersivePlayer") { store.immersivePlayer = $0 }
         bool("ios_fillScreen") { store.fillScreen = $0 }
         if let v = s["ios_landscapeChat"] as? String, let lc = LandscapeChat(rawValue: v) { store.landscapeChat = lc }
-        num("ios_chatFontSize", 8...30) { store.chatFontSize = $0 }
-        num("ios_chatSpacing", 0...30) { store.chatSpacing = $0 }
-        num("ios_chatBadgeScale", 0.3...3) { store.chatBadgeScale = $0 }
-        num("ios_chatEmoteScale", 0.3...3) { store.chatEmoteScale = $0 }
-        num("ios_chatWidthRatio", 0.1...0.9) { store.chatWidthRatio = $0 }
+        size("ios_chatFontSize", AppStore.chatFontRange) { store.chatFontSize = $0 }
+        size("ios_chatSpacing", AppStore.chatSpacingRange) { store.chatSpacing = $0 }
+        size("ios_chatBadgeScale", AppStore.chatScaleRange) { store.chatBadgeScale = $0 }
+        size("ios_chatEmoteScale", AppStore.chatScaleRange) { store.chatEmoteScale = $0 }
+        size("ios_chatWidthRatio", AppStore.chatWidthRange) { store.chatWidthRatio = $0 }
         bool("ios_chatAutocomplete") { store.chatAutocomplete = $0 }
         // Qualité préférée (nom du site). « auto » du site devient « source »
         // tant que l'app n'a pas d'Auto ; une hauteur hors paliers retenue
@@ -183,6 +208,6 @@ enum Backup {
             if audio { store.preferredQuality = "audio" }
             else if store.preferAudioOnly { store.preferredQuality = "source" }
         }
-        return added
+        return (added, skipped)
     }
 }

@@ -74,6 +74,19 @@ enum APIConfig {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
         return json["error"] != nil || json["links"] != nil
     }
+
+    /// Le Worker a-t-il sa base D1 (sauvegarde, retours, annonces,
+    /// notifications) ? Sans elle, /api/sync/get répond 500 avant même de
+    /// lire le jeton ; avec, une demande sans jeton est refusée (401).
+    /// nil : pas de réponse claire.
+    static func hasDatabase(_ base: String) async -> Bool? {
+        guard let url = URL(string: base + "/api/sync/get?userId=0") else { return nil }
+        let req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
+        guard let (_, resp) = try? await URLSession.shared.data(for: req),
+              let code = (resp as? HTTPURLResponse)?.statusCode else { return nil }
+        if code == 500 { return false }
+        return [400, 401, 403].contains(code) ? true : nil
+    }
 }
 
 /// Miroirs Luminous, essayés dans l'ordre : si l'un est indisponible on passe
@@ -588,6 +601,7 @@ private let translations: [Lang: [String: String]] = [
         "retry": "Réessayer",
         "web_login_sub": "Points, prédictions, sondages, suivi et drops",
         "web_only": "Session web seulement",
+        "import_capped": "— %d laissée(s) de côté : 300 chaînes suivies au plus sur cet appareil",
         "drops_help_title": "Comment gagner des drops",
         "drops_help_1": "Connecte ta session web Twitch ici, avec le même compte que l'app.",
         "drops_help_2": "Si la campagne le demande, lie ton compte de jeu (bouton « Lier ») : sans liaison, Twitch ne donne rien. Les badges et emotes Twitch n'en ont pas besoin.",
@@ -734,6 +748,7 @@ private let translations: [Lang: [String: String]] = [
         "expert_reset": "Revenir aux Workers officiels",
         "expert_all": "Tout passer par ce Worker",
         "expert_all_sub": "Aussi la sauvegarde de l'historique, les retours, les annonces, les notifications ntfy et le comptage. Ton jeton Twitch lui est alors envoyé (sauvegarde) : n'active ça que pour un Worker que tu héberges toi-même.",
+        "expert_all_no_db": "Ce Worker n'a pas de base D1 : la sauvegarde, les retours et les notifications n'y marcheraient pas. L'option reste coupée.",
         "expert_using": "En service : {u}",
         "chat_mode_followers": "Followers uniquement",
         "chat_mode_followers_min": "Followers depuis {d}",
@@ -1134,6 +1149,7 @@ private let translations: [Lang: [String: String]] = [
         "retry": "Retry",
         "web_login_sub": "Points, predictions, polls, follows and drops",
         "web_only": "Web session only",
+        "import_capped": "— %d left out: at most 300 followed channels on this device",
         "drops_help_title": "How to earn drops",
         "drops_help_1": "Connect your Twitch web session here, with the same account as the app.",
         "drops_help_2": "If the campaign asks for it, link your game account (“Link” button): without it, Twitch gives nothing. Twitch badges and emotes don't need it.",
@@ -1280,6 +1296,7 @@ private let translations: [Lang: [String: String]] = [
         "expert_reset": "Back to the official Workers",
         "expert_all": "Send everything through this Worker",
         "expert_all_sub": "Also history backups, feedback, announcements, ntfy notifications and the usage count. Your Twitch token is then sent to it (backups): only turn this on for a Worker you host yourself.",
+        "expert_all_no_db": "This Worker has no D1 database: backups, feedback and notifications wouldn't work on it. The option stays off.",
         "expert_using": "In use: {u}",
         "chat_mode_followers": "Followers only",
         "chat_mode_followers_min": "Followers for {d}",
@@ -1680,6 +1697,7 @@ private let translations: [Lang: [String: String]] = [
         "retry": "Reintentar",
         "web_login_sub": "Puntos, predicciones, encuestas, seguir y drops",
         "web_only": "Solo sesión web",
+        "import_capped": "— %d sin añadir: 300 canales seguidos como máximo en este dispositivo",
         "drops_help_title": "Cómo ganar drops",
         "drops_help_1": "Conecta aquí tu sesión web de Twitch, con la misma cuenta que la app.",
         "drops_help_2": "Si la campaña lo pide, vincula tu cuenta del juego (botón «Vincular»): sin vincularla, Twitch no da nada. Las insignias y emotes de Twitch no lo necesitan.",
@@ -1826,6 +1844,7 @@ private let translations: [Lang: [String: String]] = [
         "expert_reset": "Volver a los Workers oficiales",
         "expert_all": "Pasar todo por este Worker",
         "expert_all_sub": "También las copias del historial, los comentarios, los anuncios, las notificaciones ntfy y el recuento. Tu token de Twitch se le envía entonces (copias): actívalo solo para un Worker que alojes tú mismo.",
+        "expert_all_no_db": "Este Worker no tiene base de datos D1: las copias, los comentarios y las notificaciones no funcionarían en él. La opción sigue desactivada.",
         "expert_using": "En uso: {u}",
         "chat_mode_followers": "Solo seguidores",
         "chat_mode_followers_min": "Seguidores desde hace {d}",

@@ -28,6 +28,8 @@ struct SettingsView: View {
     @State private var workerInput = ""
     @State private var workerChecking = false
     @State private var workerOK: Bool? = nil
+    /// « Tout par ce Worker » refusé : il n'a pas de base D1.
+    @State private var workerNoDatabase = false
     @AppStorage("onboarding_done") private var onboardingDone = false
     @State private var showLogoutAlert = false
     @State private var showClearAlert  = false
@@ -103,7 +105,7 @@ struct SettingsView: View {
             Button(store.t("cancel"), role: .cancel) {}
             Button(store.t("erase"), role: .destructive) {
                 logger.historyCleared()
-                store.history = []
+                store.clearHistory()
             }
         } message: {
             Text(store.t("confirm"))
@@ -568,6 +570,24 @@ struct SettingsView: View {
                     .tint(.tPrimary)
                     .onChange(of: customWorkerAll) { on in
                         logger.settingChanged("Tout par le Worker personnel", value: on ? "oui" : "non")
+                        guard on, let base = APIConfig.custom else { return }
+                        workerNoDatabase = false
+                        // Sans base D1, sauvegarde, retours et notifications y
+                        // échoueraient en silence, pour toujours : l'option
+                        // reste coupée. (La sauvegarde, elle, relit et fusionne
+                        // avant d'écrire sur un nouveau Worker.)
+                        Task {
+                            guard await APIConfig.hasDatabase(base) == false,
+                                  customWorkerAll, APIConfig.custom == base else { return }
+                            customWorkerAll = false
+                            workerNoDatabase = true
+                            logger.warn("SETTINGS", "Worker personnel sans base D1", base)
+                        }
+                    }
+                    if workerNoDatabase {
+                        Text(store.t("expert_all_no_db"))
+                            .font(.tMeta).foregroundColor(.tDanger)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -587,7 +607,13 @@ struct SettingsView: View {
             guard ok else { return }
             customWorker = base
             workerInput = base
+            workerNoDatabase = false
             logger.settingChanged("Worker personnel", value: base)
+            // « Tout par ce Worker » déjà actif : le nouveau doit avoir sa base D1.
+            if customWorkerAll, await APIConfig.hasDatabase(base) == false, APIConfig.custom == base {
+                customWorkerAll = false
+                workerNoDatabase = true
+            }
         }
     }
 
@@ -596,6 +622,7 @@ struct SettingsView: View {
         customWorkerAll = false
         workerInput = ""
         workerOK = nil
+        workerNoDatabase = false
         logger.settingChanged("Worker personnel", value: "officiels")
     }
 
@@ -1054,16 +1081,17 @@ struct SettingsView: View {
                           $store.chatTimestamps, log: "Horodatage du chat")
                 Divider().background(Color.tBorder)
 
+                // Mêmes bornes que l'import d'une sauvegarde (AppStore).
                 sliderRow(store.t("cfg_font_size"), value: $store.chatFontSize,
-                          range: 10...20, step: 1) { String(format: "%.0f pt", $0) }
+                          range: AppStore.chatFontRange, step: 1) { String(format: "%.0f pt", $0) }
                 sliderRow(store.t("cfg_msg_spacing"), value: $store.chatSpacing,
-                          range: 0...16, step: 1) { String(format: "%.0f px", $0) }
+                          range: AppStore.chatSpacingRange, step: 1) { String(format: "%.0f px", $0) }
                 sliderRow(store.t("cfg_badge_scale"), value: $store.chatBadgeScale,
-                          range: 0.5...2, step: 0.05) { String(format: "%.2fx", $0) }
+                          range: AppStore.chatScaleRange, step: 0.05) { String(format: "%.2fx", $0) }
                 sliderRow(store.t("cfg_emote_scale"), value: $store.chatEmoteScale,
-                          range: 0.5...2, step: 0.05) { String(format: "%.2fx", $0) }
+                          range: AppStore.chatScaleRange, step: 0.05) { String(format: "%.2fx", $0) }
                 sliderRow(store.t("cfg_chat_width"), value: $store.chatWidthRatio,
-                          range: 0.20...0.60, step: 0.01) { String(format: "%.0f %%", $0 * 100) }
+                          range: AppStore.chatWidthRange, step: 0.01) { String(format: "%.0f %%", $0 * 100) }
 
                 Text(store.t("cfg_chat_width_sub"))
                     .font(.tMeta).foregroundColor(.tMuted)
@@ -1490,11 +1518,16 @@ struct SettingsView: View {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url),
-                  let added = try? Backup.importData(data, store: store) else {
+                  let result = try? Backup.importData(data, store: store) else {
                 backupMessage = store.t("import_bad"); return
             }
-            backupMessage = String(format: store.t("import_done"), added)
-            logger.info("SAUVEGARDE", "Import : \(added) chaîne(s) ajoutée(s)", nil)
+            var message = String(format: store.t("import_done"), result.added)
+            // Au-delà de 300 suivis sur l'appareil, le reste n'est pas pris :
+            // dit, plutôt que compté comme ajouté.
+            if result.skipped > 0 { message += " " + String(format: store.t("import_capped"), result.skipped) }
+            backupMessage = message
+            logger.info("SAUVEGARDE", "Import : \(result.added) chaîne(s) ajoutée(s)",
+                        result.skipped > 0 ? "\(result.skipped) ignorée(s) (limite de 300)" : nil)
         }
     }
 

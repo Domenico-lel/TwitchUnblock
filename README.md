@@ -275,7 +275,12 @@ no key to paste. The backend is already hosted and shared by every install.
 * ℹ️ **About** — a channel's description, followers, social links and panels.
 * 🕒 **History** — recently watched VODs and channels, each removable.
 * 🔄 **Cloud sync** — watch progress and history follow your Twitch account, so
-  you pick up where you left off on another device.
+  you pick up where you left off on another device. Every send reads the backup
+  first and merges, so what the website or another device added is never
+  overwritten (and nothing is sent until a read has worked). A VOD or channel
+  removed here, or a cleared history, is sent right away and doesn't come
+  back; each account keeps its own history — switching accounts never mixes
+  them.
 * ⬆️ **Update check** — the app tells you when a new version is out on the
   source, with a shortcut to Feather / SideStore / AltStore.
 * 🔔 **Live notifications** — be told when a followed channel goes live

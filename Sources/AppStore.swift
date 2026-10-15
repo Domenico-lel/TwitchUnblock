@@ -23,6 +23,9 @@ final class AppStore: ObservableObject {
         didSet {
             if let id = twitchUserId { UserDefaults.standard.set(id, forKey: "twitch_user_id") }
             else { UserDefaults.standard.removeObject(forKey: "twitch_user_id") }
+            // Historique et progression d'ici rattachés à ce compte : ceux
+            // d'un autre compte ne partent jamais sur le sien.
+            if let id = twitchUserId, !id.isEmpty, id != oldValue { adoptSyncOwner(id) }
             // Compte de l'app connu ou changé : la session web doit être la sienne.
             if let id = twitchUserId, id != oldValue, twitchWebToken != nil {
                 Task { @MainActor [weak self] in await self?.validateWebSession() }
@@ -349,6 +352,19 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(chatWidthRatio, forKey: "cfg_chat_width") }
     }
 
+    /// Bornes des tailles du chat, communes aux curseurs des Réglages, à
+    /// l'import d'une sauvegarde et aux valeurs enregistrées : une valeur
+    /// importée hors bornes (largeur du chat à 85 %) mettait le curseur en
+    /// butée sur un chiffre qu'il ne pouvait pas montrer.
+    static let chatFontRange: ClosedRange<Double> = 10...20
+    static let chatSpacingRange: ClosedRange<Double> = 0...16
+    static let chatScaleRange: ClosedRange<Double> = 0.5...2
+    static let chatWidthRange: ClosedRange<Double> = 0.20...0.60
+
+    static func clamped(_ v: Double, to range: ClosedRange<Double>) -> Double {
+        min(max(v, range.lowerBound), range.upperBound)
+    }
+
     // MARK: – Comportement du chat
     /// Charger les derniers messages du canal à l'arrivée (API tierce
     /// recent-messages.robotty.de : Twitch n'envoie rien d'antérieur au JOIN).
@@ -568,7 +584,13 @@ final class AppStore: ObservableObject {
 
     // MARK: – History
     @Published var history: [HistoryItem] = [] {
-        didSet { persistHistory(); syncDirty = true }
+        didSet {
+            persistHistory()
+            // Fusion venue du serveur : pas un changement d'ici à renvoyer.
+            guard !applyingSync else { return }
+            syncDirty = true
+            localRevision &+= 1
+        }
     }
 
     // MARK: – VOD Progress
@@ -667,17 +689,22 @@ final class AppStore: ObservableObject {
         landscapeChat      = LandscapeChat(rawValue: ud.string(forKey: "cfg_landscape_chat") ?? "")
                              ?? .column
         if landscapeChat != .hidden { lastShownLandscapeChat = landscapeChat }
-        chatFontSize       = ud.object(forKey: "cfg_chat_font")    as? Double ?? 13
-        chatSpacing        = ud.object(forKey: "cfg_chat_spacing") as? Double ?? 8
-        chatBadgeScale     = ud.object(forKey: "cfg_chat_badge")   as? Double ?? 1
-        chatEmoteScale     = ud.object(forKey: "cfg_chat_emote")   as? Double ?? 1
+        // Ramenées dans les bornes des curseurs : un import d'avant pouvait
+        // les en sortir.
+        chatFontSize       = Self.clamped(ud.object(forKey: "cfg_chat_font")    as? Double ?? 13, to: Self.chatFontRange)
+        chatSpacing        = Self.clamped(ud.object(forKey: "cfg_chat_spacing") as? Double ?? 8, to: Self.chatSpacingRange)
+        chatBadgeScale     = Self.clamped(ud.object(forKey: "cfg_chat_badge")   as? Double ?? 1, to: Self.chatScaleRange)
+        chatEmoteScale     = Self.clamped(ud.object(forKey: "cfg_chat_emote")   as? Double ?? 1, to: Self.chatScaleRange)
         chatTimestamps     = ud.object(forKey: "cfg_chat_time")    as? Bool   ?? true
-        chatWidthRatio     = ud.object(forKey: "cfg_chat_width")   as? Double ?? 0.32
+        chatWidthRatio     = Self.clamped(ud.object(forKey: "cfg_chat_width")   as? Double ?? 0.32, to: Self.chatWidthRange)
         chatLoadRecent     = ud.object(forKey: "cfg_chat_recent")       as? Bool ?? true
         chatAutocomplete   = ud.object(forKey: "cfg_chat_autocomplete") as? Bool ?? true
         chatShowDeleted    = ud.object(forKey: "cfg_chat_deleted")      as? Bool ?? false
         shareUsage         = ud.object(forKey: "cfg_share_usage") as? Bool ?? true
+        // « zh_hk » importé du site par une version d'avant : ramené à « zh-hk ».
         topLang            = ud.string(forKey: "cfg_top_lang")
+            .map { $0.replacingOccurrences(of: "_", with: "-") }
+            .flatMap { TopLanguage.codes.contains($0) ? $0 : nil }
         categoryLang       = ud.string(forKey: "cfg_category_lang").flatMap { TopLanguage.codes.contains($0) ? $0 : nil }
         localFollows       = ud.stringArray(forKey: "local_follows") ?? []
         pinnedStreamers    = ud.stringArray(forKey: "pinned_streamers") ?? []
@@ -703,13 +730,45 @@ final class AppStore: ObservableObject {
         autoChatDelay      = ud.object(forKey: "dbg_chat_delay") as? Bool ?? false
         chatSyncNudge      = ud.double(forKey: "chat_sync_nudge")
         restoreMutedAudio  = ud.object(forKey: "cfg_restore_muted") as? Bool ?? true
-        if let data = ud.data(forKey: "twitch_vod_history"),
-           let decoded = try? JSONDecoder().decode([HistoryItem].self, from: data) {
-            history = decoded
+        // Lu élément par élément : un seul illisible ne vide plus toute la
+        // liste. S'il en manque, la base de la synchro n'est plus fiable (un
+        // élément perdu ici passerait pour supprimé) : elle est oubliée.
+        var localIntact = true
+        if let data = ud.data(forKey: "twitch_vod_history") {
+            let items = try? JSONDecoder().decode([LossyDecodable<HistoryItem>].self, from: data)
+            let readable = items?.compactMap(\.value) ?? []
+            history = readable
+            localIntact = items?.count == readable.count
         }
-        if let data = ud.data(forKey: "vod_progress_all"),
-           let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
-            vodProgress = decoded
+        if let data = ud.data(forKey: "vod_progress_all") {
+            if let decoded = try? JSONDecoder().decode([String: Double].self, from: data) {
+                vodProgress = decoded
+            } else {
+                localIntact = false
+            }
+        }
+        // Compte dont ces données sont la copie : celui de l'app quand on est
+        // connecté (installations d'avant ce suivi comprises).
+        let storedOwner = ud.string(forKey: "sync_owner")
+        if let id = twitchUserId, !id.isEmpty {
+            if let other = storedOwner, other != id {
+                // Données d'un autre compte : jamais envoyées sur celui-ci.
+                history = []
+                vodProgress = [:]
+                ud.removeObject(forKey: "twitch_vod_history")
+                ud.removeObject(forKey: "vod_progress_all")
+                localIntact = false
+            }
+            syncOwner = id
+            ud.set(id, forKey: "sync_owner")
+        } else {
+            syncOwner = storedOwner
+        }
+        if localIntact, let data = ud.data(forKey: "sync_base"),
+           let base = try? JSONDecoder().decode(SyncBase.self, from: data) {
+            syncBase = base
+        } else {
+            ud.removeObject(forKey: "sync_base")
         }
         // Le chargement initial n'est pas un changement à envoyer.
         syncDirty = false
@@ -729,7 +788,11 @@ final class AppStore: ObservableObject {
     /// compte, le nouveau jeton partait avec l'ancien id — sauvegarde et chat
     /// visaient le mauvais compte.
     func adoptToken(_ token: String) {
-        if token != twitchToken {
+        let isNew = token != twitchToken
+        if isNew {
+            // Ce qui restait à envoyer part sur le compte d'avant, avec son
+            // jeton, avant que son identité ne soit oubliée.
+            finalCloudFlush()
             twitchUserId = nil
             twitchLogin  = nil
             twitchAvatar = nil
@@ -737,7 +800,6 @@ final class AppStore: ObservableObject {
             // revérifié pour le nouveau dès que son identifiant est connu.
             webSessionMismatch = nil
         }
-        let isNew = token != twitchToken
         twitchToken = token
         // Compté tout de suite comme compte, sans attendre l'heure suivante :
         // le Worker reprend l'historique anonyme de l'appareil et l'efface.
@@ -747,7 +809,10 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// L'historique d'ici reste celui du compte (repris tel quel s'il se
+    /// reconnecte, retiré si un autre compte se connecte : adoptSyncOwner).
     func logout() {
+        finalCloudFlush()
         twitchToken    = nil
         twitchWebToken = nil
         webSessionMismatch = nil
@@ -774,10 +839,35 @@ final class AppStore: ObservableObject {
 
     func removeFromHistory(term: String) {
         history.removeAll { $0.term == term }
+        sendDeletion()
     }
 
     func clearChannelHistory() {
         history = history.filter { $0.type == .vod }
+        sendDeletion()
+    }
+
+    /// Réglages → Effacer l'historique : chaînes, VODs et positions de reprise.
+    func clearHistory() {
+        history = []
+        vodProgress = [:]
+        progressChanged()
+        sendDeletion()
+    }
+
+    /// Bibliothèque → Effacer : les VODs et leurs positions de reprise.
+    func clearVodHistory() {
+        let ids = Set(history.filter { $0.type == .vod }.map(\.term))
+        history = history.filter { $0.type != .vod }
+        vodProgress = vodProgress.filter { !ids.contains($0.key) }
+        progressChanged()
+        sendDeletion()
+    }
+
+    /// Une suppression part tout de suite (relecture et fusion d'abord) : le
+    /// site et les autres appareils la voient sans attendre le prochain envoi.
+    private func sendDeletion() {
+        Task { @MainActor [weak self] in self?.flushToCloud(force: true) }
     }
 
     private func persistHistory() {
@@ -794,15 +884,18 @@ final class AppStore: ObservableObject {
         // tout le dictionnaire dans UserDefaults et republiait le store (donc
         // redessinait l'interface). Écart de 5 s minimum, sauf saut (reprise
         // DVR, retour au début).
+        guard time.isFinite, time >= 0 else { return }
         if let old = vodProgress[vodId], abs(time - old) < 5 { return }
         vodProgress[vodId] = time
         // Borné aux 500 VODs les plus récentes (identifiants croissants).
-        if vodProgress.count > 500 {
-            let keep = Set(vodProgress.keys.sorted { (Int($0) ?? 0) > (Int($1) ?? 0) }.prefix(500))
-            vodProgress = vodProgress.filter { keep.contains($0.key) }
-        }
+        if vodProgress.count > 500 { vodProgress = Self.cappedProgress(vodProgress) }
+        progressChanged()
+    }
+
+    private func progressChanged() {
         persistProgress()
         syncDirty = true
+        localRevision &+= 1
     }
 
     private func persistProgress() {
@@ -811,129 +904,410 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Les 500 VODs les plus récentes (identifiants croissants).
+    private static func cappedProgress(_ p: [String: Double]) -> [String: Double] {
+        guard p.count > 500 else { return p }
+        let keep = Set(p.keys.sorted { (Int($0) ?? 0) > (Int($1) ?? 0) }.prefix(500))
+        return p.filter { keep.contains($0.key) }
+    }
+
     // MARK: – Cloud Sync
     //
-    // Sauvegarde partagée avec le site, sur le Worker (KV Cloudflare). Le KV
-    // gratuit n'offre que 1 000 écritures par jour au total : un changement
-    // ne fait que marquer la sauvegarde « à envoyer », et l'envoi part à la
-    // fermeture d'une vidéo, au passage en arrière-plan, sinon au plus toutes
-    // les 10 minutes — jamais si rien n'a changé depuis le dernier envoi.
+    // Sauvegarde partagée avec le site, sur le Worker. Les écritures gratuites
+    // sont comptées : un changement ne fait que marquer la sauvegarde « à
+    // envoyer », et l'envoi part à la fermeture d'une vidéo, au passage en
+    // arrière-plan, après une suppression, sinon au plus toutes les
+    // 10 minutes — jamais si le serveur a déjà tout.
+    //
+    // Le Worker garde l'historique reçu tel quel : chaque envoi relit donc
+    // d'abord le serveur et fusionne (syncOnce). Sans ça, un envoi effaçait
+    // ce que le site ou un autre appareil avait ajouté entre-temps, et une
+    // relecture ratée (réinstallation hors ligne) laissait remplacer tout
+    // l'historique du compte. Les échanges passent un par un, sur le fil
+    // principal, et seulement pour le compte dont les données d'ici sont la
+    // copie (syncOwner).
 
     private var syncDirty = false
-    private var lastSyncedBody: Data?
+    /// Compte les changements d'ici (historique, progression) : un envoi
+    /// réussi ne marque la sauvegarde « à jour » que s'il n'y en a pas eu
+    /// pendant la requête.
+    private var localRevision = 0
+    /// Vrai pendant qu'une fusion venue du serveur s'applique.
+    private var applyingSync = false
     private var lastSyncAt  = Date.distantPast
+    /// Dernière relecture RÉUSSIE : une relecture ratée se retente au
+    /// prochain passage au premier plan au lieu d'attendre 10 minutes.
     private var lastPullAt  = Date.distantPast
     private var syncTimer: Timer?
     private let syncEvery: TimeInterval = 600
     private let pullEvery: TimeInterval = 600
+    /// Change avec le compte : un échange parti pour l'ancien ne touche plus
+    /// aux données d'ici.
+    private var syncGeneration = 0
+    /// Échanges en file, un seul à la fois ; une demande identique déjà en
+    /// attente suffit.
+    private var syncChain: Task<Void, Never>?
+    private var pullQueued = false
+    private var pushQueued = false
+    /// Le site ne garde que 30 éléments d'historique (l'app et le Worker,
+    /// 50) : un élément peut manquer à une liste qu'il a envoyée sans y
+    /// avoir été supprimé (mergeHistory).
+    private static let siteHistoryCap = 30
 
-    /// Relit la sauvegarde si la dernière lecture date de plus de 10 minutes.
-    /// Une lecture ne coûte presque rien (100 000 par jour en gratuit).
-    func refreshFromCloudIfStale(userId: String? = nil) async {
-        guard let id = userId ?? twitchUserId, !id.isEmpty,
-              Date().timeIntervalSince(lastPullAt) > pullEvery else { return }
-        await pullFromCloud(userId: id)
+    /// Compte dont l'historique et la progression d'ici sont la copie (nil :
+    /// aucun compte encore, ils rejoindront le premier).
+    private var syncOwner: String? {
+        didSet {
+            if let o = syncOwner { UserDefaults.standard.set(o, forKey: "sync_owner") }
+            else { UserDefaults.standard.removeObject(forKey: "sync_owner") }
+        }
     }
 
-    func pullFromCloud(userId: String) async {
-        lastPullAt = Date()
-        // Le Worker exige le jeton Twitch du propriétaire de la sauvegarde.
-        guard let token = twitchToken,
-              let url = URL(string: "\(APIConfig.base)/api/sync/get?userId=\(userId)") else { return }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        guard let (data, resp) = try? await URLSession.shared.data(for: request),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+    /// Ce que le serveur avait au dernier échange réussi, pour ce compte et
+    /// ce Worker : dit de quel côté un élément a disparu.
+    private var syncBase: SyncBase? {
+        didSet {
+            if let b = syncBase, let data = try? JSONEncoder().encode(b) {
+                UserDefaults.standard.set(data, forKey: "sync_base")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "sync_base")
+            }
+        }
+    }
 
-        var remote: [HistoryItem] = []
-        if let raw = json["history"],
+    /// Compte, jeton et Worker d'un échange.
+    private struct SyncTarget {
+        let userId: String
+        let token: String
+        let base: String
+        var key: String { "\(base)|\(userId)" }
+    }
+
+    /// Terme (minuscules) → date d'ajout, et VOD → position, tels que le
+    /// serveur les avait.
+    private struct SyncBase: Codable {
+        let key: String
+        var history: [String: Double]
+        var progress: [String: Double]
+    }
+
+    /// Données d'un compte au moment d'un dernier envoi (déconnexion, autre
+    /// jeton) : ce qui part si l'appareil a changé de compte entre-temps.
+    private struct SyncSnapshot {
+        let history: [HistoryItem]
+        let progress: [String: Double]
+        let base: SyncBase?
+    }
+
+    private var syncTarget: SyncTarget? {
+        guard let id = twitchUserId, !id.isEmpty, id == syncOwner,
+              let token = twitchToken, !token.isEmpty else { return nil }
+        return SyncTarget(userId: id, token: token, base: APIConfig.base)
+    }
+
+    /// Compte de l'app connu (connexion, changement de compte) : les données
+    /// d'ici deviennent les siennes. Celles d'un AUTRE compte sont retirées
+    /// de l'appareil — déjà parties sur leur compte (finalCloudFlush) —,
+    /// sinon le premier envoi les écrivait sur la sauvegarde de celui-ci, et
+    /// sur le site. Celles d'avant toute connexion le rejoignent, comme avant.
+    private func adoptSyncOwner(_ id: String) {
+        // Nouvelle connexion : relue tout de suite, pas 10 minutes plus tard.
+        lastPullAt = .distantPast
+        lastSyncAt = .distantPast
+        guard syncOwner != id else { return }
+        if syncOwner != nil {
+            logger.info("SYNC", "☁️ Autre compte : historique du précédent retiré de l'appareil", nil)
+            applyingSync = true
+            history = []
+            applyingSync = false
+            vodProgress = [:]
+            persistProgress()
+            syncDirty = false
+        }
+        syncBase = nil
+        syncOwner = id
+        syncGeneration &+= 1
+    }
+
+    /// Relit la sauvegarde si la dernière relecture réussie date de plus de
+    /// 10 minutes. Une lecture ne coûte presque rien.
+    @MainActor
+    func refreshFromCloudIfStale(userId: String? = nil) async {
+        guard let target = syncTarget, userId == nil || userId == target.userId,
+              Date().timeIntervalSince(lastPullAt) > pullEvery else { return }
+        await requestSync(push: false).value
+    }
+
+    /// Envoie la sauvegarde si elle a changé, après relecture et fusion.
+    /// `force` ignore l'intervalle minimal (fermeture d'une vidéo,
+    /// arrière-plan, suppression).
+    @MainActor
+    func flushToCloud(force: Bool = false) {
+        guard syncDirty, syncTarget != nil,
+              force || Date().timeIntervalSince(lastSyncAt) >= syncEvery else { return }
+        lastSyncAt = Date()
+        // Laisse à l'échange le temps de finir si l'app vient de passer en
+        // arrière-plan : sans ça, iOS peut la suspendre en pleine requête.
+        let bg = BackgroundTaskBox()
+        bg.id = UIApplication.shared.beginBackgroundTask(withName: "sync") { bg.end() }
+        let task = requestSync(push: true)
+        Task { @MainActor in
+            await task.value
+            bg.end()
+        }
+    }
+
+    /// Dernier envoi pour le compte en place, juste avant que son jeton ne
+    /// parte (déconnexion, autre jeton) : compte, jeton et données pris
+    /// maintenant.
+    private func finalCloudFlush() {
+        guard syncDirty, let target = syncTarget else { return }
+        let snapshot = SyncSnapshot(history: history, progress: vodProgress,
+                                    base: syncBase?.key == target.key ? syncBase : nil)
+        let bg = BackgroundTaskBox()
+        bg.id = UIApplication.shared.beginBackgroundTask(withName: "sync") { bg.end() }
+        Task { @MainActor [weak self] in
+            if let self {
+                await self.enqueueSync { _ = await self.syncOnce(target, push: true, snapshot: snapshot) }.value
+            }
+            bg.end()
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    private func requestSync(push: Bool) -> Task<Void, Never> {
+        if let chain = syncChain, pushQueued || (!push && pullQueued) { return chain }
+        if push { pushQueued = true } else { pullQueued = true }
+        return enqueueSync { [weak self] in
+            guard let self else { return }
+            if push { self.pushQueued = false } else { self.pullQueued = false }
+            // Compte lu au moment de l'échange, pas à la demande.
+            guard let target = self.syncTarget else { return }
+            _ = await self.syncOnce(target, push: push)
+        }
+    }
+
+    @MainActor
+    private func enqueueSync(_ work: @escaping @MainActor () async -> Void) -> Task<Void, Never> {
+        let previous = syncChain
+        let task = Task { @MainActor in
+            await previous?.value
+            await work()
+        }
+        syncChain = task
+        return task
+    }
+
+    /// Un échange : relecture, fusion (appliquée ici si le compte n'a pas
+    /// changé entre-temps), puis envoi si `push` et que le serveur n'a pas
+    /// déjà tout. Rien ne part sans une relecture réussie juste avant.
+    /// false si la relecture ou l'envoi a échoué.
+    @MainActor
+    @discardableResult
+    private func syncOnce(_ target: SyncTarget, push: Bool, snapshot: SyncSnapshot? = nil) async -> Bool {
+        let generation = syncGeneration
+        guard let remote = await Self.fetchCloud(target) else { return false }
+        // Même compte qu'à la demande : la fusion s'applique ici. Sinon (autre
+        // compte entre-temps), seul l'instantané d'un dernier envoi part.
+        let live = generation == syncGeneration && syncOwner == target.userId
+        guard live || snapshot != nil else { return false }
+        let base = live ? (syncBase?.key == target.key ? syncBase : nil) : snapshot?.base
+        let local = live ? history : (snapshot?.history ?? [])
+        let merged = Self.mergeHistory(local: local, remote: remote.history, base: base?.history)
+        let progress = Self.mergeProgress(local: live ? vodProgress : (snapshot?.progress ?? [:]),
+                                          remote: remote.progress, base: base?.progress)
+        // Seule la progression des VODs de l'historique part : le Worker garde
+        // les autres (il fusionne en gardant la plus avancée).
+        let vodIds = Set(merged.filter { $0.type == .vod }.map(\.term))
+        let sent = progress.filter { vodIds.contains($0.key) && $0.value.isFinite }.mapValues { $0.rounded() }
+        let changed = Self.historyKeys(merged) != Self.historyKeys(remote.history)
+            || sent.contains { $0.value > (remote.progress[$0.key] ?? 0) }
+        if live {
+            let known = Set(local.map { $0.term.lowercased() })
+            applyFromCloud(history: merged, progress: progress)
+            syncBase = SyncBase(key: target.key, history: Self.terms(remote.history),
+                                progress: remote.progress)
+            lastPullAt = Date()
+            syncDirty = changed
+            logger.syncPull(items: merged.filter { !known.contains($0.term.lowercased()) }.count)
+        }
+        guard push, changed else { return true }
+
+        guard let body = Self.syncBody(userId: target.userId, history: merged, progress: sent),
+              let url = URL(string: "\(target.base)/api/sync/post") else { return false }
+        let revision = localRevision
+        var request = URLRequest(url: url, timeoutInterval: 20)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(target.token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = body
+        let status = ((try? await URLSession.shared.data(for: request))?.1 as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            // Toujours « à envoyer » : le prochain passage réessaie.
+            logger.warn("SYNC", "☁️ Envoi refusé", status == 0 ? "réseau" : "HTTP \(status)")
+            return false
+        }
+        logger.syncPush(items: merged.count)
+        // Le serveur a maintenant cette liste ; pour la progression, il garde
+        // la plus avancée des deux.
+        if generation == syncGeneration, syncOwner == target.userId,
+           var b = syncBase, b.key == target.key {
+            b.history = Self.terms(merged)
+            for (id, t) in sent { b.progress[id] = max(b.progress[id] ?? 0, t) }
+            syncBase = b
+            if localRevision == revision { syncDirty = false }
+        }
+        return true
+    }
+
+    /// Sauvegarde du compte sur le Worker ; nil si elle n'a pas pu être lue
+    /// (réseau, jeton refusé, erreur du serveur).
+    private static func fetchCloud(_ target: SyncTarget) async -> (history: [HistoryItem], progress: [String: Double])? {
+        // Le Worker exige le jeton Twitch du propriétaire de la sauvegarde.
+        guard let url = URL(string: "\(target.base)/api/sync/get?userId=\(target.userId)") else { return nil }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.setValue("Bearer \(target.token)", forHTTPHeaderField: "Authorization")
+        guard let (data, resp) = try? await URLSession.shared.data(for: request) else {
+            logger.warn("SYNC", "☁️ Relecture impossible", "réseau — rien n'est envoyé")
+            return nil
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            logger.warn("SYNC", "☁️ Relecture refusée", "HTTP \(status) — rien n'est envoyé")
+            return nil
+        }
+        var history: [HistoryItem] = []
+        if let raw = json["history"] as? [Any],
            let histData = try? JSONSerialization.data(withJSONObject: raw),
            let items = try? JSONDecoder().decode([LossyDecodable<HistoryItem>].self, from: histData) {
-            remote = items.compactMap(\.value)
+            history = items.compactMap(\.value)
         }
-        var remoteProgress: [String: Double] = [:]
+        var progress: [String: Double] = [:]
         for (id, value) in json["progress"] as? [String: Any] ?? [:] {
             // Borné : une valeur aberrante venue du serveur faisait planter
             // la conversion en Int de la bibliothèque.
             if let n = value as? NSNumber, n.doubleValue.isFinite, n.doubleValue > 0 {
-                remoteProgress[id] = min(n.doubleValue, 7 * 24 * 3600)
+                progress[id] = min(n.doubleValue, 7 * 24 * 3600)
             }
         }
+        return (history, progress)
+    }
 
-        await MainActor.run {
-            // Fusion, pas remplacement : ce qui a été vu ici depuis le dernier
-            // envoi ne doit pas disparaître. Le plus récent d'abord ; les
-            // éléments sans date (anciens, venus du site) en fin de liste.
-            let known = Set(history.map { $0.term.lowercased() })
-            let added = remote.filter { !known.contains($0.term.lowercased()) }
-            if !added.isEmpty {
-                let merged = (history + added).enumerated()
-                    .sorted { a, b in
-                        a.element.addedAt != b.element.addedAt
-                            ? a.element.addedAt > b.element.addedAt
-                            : a.offset < b.offset
-                    }
-                    .map(\.element)
-                history = Array(merged.prefix(50))
+    /// Fusion de l'historique d'ici et de celui du serveur, à trois voies :
+    /// la base (le serveur au dernier échange réussi) dit de quel côté un
+    /// élément a disparu.
+    /// - Supprimé ici (connu de la base, absent d'ici, pas rajouté là-bas
+    ///   depuis) : il ne revient pas. Avant, toute relecture le remettait.
+    /// - Absent du serveur seulement : retiré ici aussi, sauf si la liste du
+    ///   serveur a pu être coupée par le site (siteHistoryCap) ; l'élément
+    ///   reste alors ici et repart, comme avant.
+    /// - Sans base (premier échange, autre compte, autre Worker) : union.
+    /// Le plus récent d'abord, 50 au plus.
+    private static func mergeHistory(local: [HistoryItem], remote: [HistoryItem],
+                                     base: [String: Double]?) -> [HistoryItem] {
+        func key(_ h: HistoryItem) -> String { h.term.lowercased() }
+        // Connu de la base et pas rajouté depuis (1 ms de marge : dates
+        // passées par le JSON du serveur).
+        func unchanged(_ h: HistoryItem) -> Bool {
+            guard let b = base?[key(h)] else { return false }
+            return h.addedAt <= b + 1
+        }
+        var remoteByKey: [String: HistoryItem] = [:]
+        for r in remote where remoteByKey[key(r)] == nil { remoteByKey[key(r)] = r }
+        // Une liste coupée par le site a plus de 30 éléments avant la coupe :
+        // si celle du serveur et ce qui lui manque tiennent dans 30, rien
+        // n'a été coupé, ce qui manque a été supprimé.
+        let goneThere = local.filter { remoteByKey[key($0)] == nil && unchanged($0) }.count
+        let followRemovals = !remote.isEmpty && remoteByKey.count + goneThere <= siteHistoryCap
+        var seen = Set<String>()
+        var out: [HistoryItem] = []
+        for l in local {
+            let k = key(l)
+            guard seen.insert(k).inserted else { continue }
+            if let r = remoteByKey[k] {
+                out.append(r.addedAt > l.addedAt ? r.filled(from: l) : l.filled(from: r))
+            } else if followRemovals && unchanged(l) {
+                continue   // supprimé ailleurs depuis le dernier échange
+            } else {
+                out.append(l)
             }
-            // Progression : la position la plus avancée l'emporte.
-            var changed = false
-            for (id, t) in remoteProgress where t > (vodProgress[id] ?? 0) {
-                vodProgress[id] = t
-                changed = true
+        }
+        for r in remote {
+            // Supprimé ici depuis le dernier échange : il ne revient pas.
+            guard seen.insert(key(r)).inserted, !unchanged(r) else { continue }
+            out.append(r)
+        }
+        // Le plus récent d'abord ; les éléments sans date (anciens, venus du
+        // site) en fin de liste, dans leur ordre.
+        return Array(out.enumerated()
+            .sorted { a, b in
+                a.element.addedAt != b.element.addedAt
+                    ? a.element.addedAt > b.element.addedAt
+                    : a.offset < b.offset
             }
-            if changed { persistProgress() }
-            logger.syncPull(items: added.count)
+            .map(\.element)
+            .prefix(50))
+    }
+
+    /// Positions de reprise : la plus avancée l'emporte, comme sur le Worker.
+    /// Une position effacée ici (« Effacer », plafond de 500) que le serveur
+    /// n'a pas bougée depuis le dernier échange ne revient pas.
+    private static func mergeProgress(local: [String: Double], remote: [String: Double],
+                                      base: [String: Double]?) -> [String: Double] {
+        var out = local
+        for (id, r) in remote {
+            if let l = local[id] {
+                out[id] = max(l, r)
+            } else if let b = base?[id], abs(r - b) < 1 {
+                continue
+            } else {
+                out[id] = r
+            }
+        }
+        return cappedProgress(out)
+    }
+
+    /// Résultat d'une fusion, sans le marquer « à envoyer » : syncOnce dit
+    /// lui-même si le serveur l'a déjà.
+    private func applyFromCloud(history newHistory: [HistoryItem], progress newProgress: [String: Double]) {
+        if newHistory != history {
+            applyingSync = true
+            history = newHistory
+            applyingSync = false
+        }
+        if newProgress != vodProgress {
+            vodProgress = newProgress
+            persistProgress()
         }
     }
 
-    /// Envoie la sauvegarde si elle a changé. `force` ignore l'intervalle
-    /// minimal — pour la fermeture d'une vidéo et le passage en arrière-plan.
-    func flushToCloud(force: Bool = false) {
-        guard syncDirty, let userId = twitchUserId, !userId.isEmpty, let token = twitchToken else { return }
-        guard force || Date().timeIntervalSince(lastSyncAt) >= syncEvery else { return }
+    /// Ce que le serveur doit avoir de l'historique (terme, date) : une
+    /// différence suffit à justifier un envoi.
+    private static func historyKeys(_ h: [HistoryItem]) -> [String] {
+        h.map { "\($0.term.lowercased())|\($0.addedAt.rounded())" }
+    }
 
-        // Seule la progression des VODs de l'historique part : le Worker garde
-        // déjà les autres (il fusionne), inutile d'alourdir chaque envoi.
-        let vodIds = Set(history.filter { $0.type == .vod }.map(\.term))
-        let progress = vodProgress.filter { vodIds.contains($0.key) }.mapValues { $0.rounded() }
+    private static func terms(_ h: [HistoryItem]) -> [String: Double] {
+        Dictionary(h.map { ($0.term.lowercased(), $0.addedAt) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    private static func syncBody(userId: String, history: [HistoryItem], progress: [String: Double]) -> Data? {
         guard let histData = try? JSONEncoder().encode(history),
-              let histJSON = try? JSONSerialization.jsonObject(with: histData),
-              let body = try? JSONSerialization.data(
-                  withJSONObject: ["userId": userId, "data": ["history": histJSON, "progress": progress]],
-                  options: [.sortedKeys]),
-              let url = URL(string: "\(APIConfig.base)/api/sync/post") else { return }
+              let histJSON = try? JSONSerialization.jsonObject(with: histData) else { return nil }
+        return try? JSONSerialization.data(
+            withJSONObject: ["userId": userId, "data": ["history": histJSON, "progress": progress]],
+            options: [.sortedKeys])
+    }
+}
 
-        syncDirty = false
-        guard body != lastSyncedBody else { return }
-        lastSyncAt = Date()
-
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.httpBody = body
-
-        // Laisse à l'envoi le temps de finir si l'app vient de passer en
-        // arrière-plan : sans ça, iOS peut la suspendre en pleine requête.
-        // Boîte de référence plutôt qu'une `var` capturée : les deux blocs
-        // sont `@Sendable` dans les SDK récents, où muter une variable
-        // capturée ne compile pas.
-        let request = req   // une `var` capturée par un Task ne compile pas
-        let bg = BackgroundTaskBox()
-        bg.id = UIApplication.shared.beginBackgroundTask(withName: "sync") { bg.end() }
-        Task {
-            let ok = ((try? await URLSession.shared.data(for: request))?.1 as? HTTPURLResponse)
-                .map { (200..<300).contains($0.statusCode) } ?? false
-            await MainActor.run {
-                // Retenu comme envoyé seulement si le Worker l'a accepté :
-                // sinon le prochain passage réessaie au lieu d'oublier.
-                if ok { self.lastSyncedBody = body } else { self.syncDirty = true }
-                bg.end()
-            }
-        }
-        logger.syncPush(items: history.count)
+private extension HistoryItem {
+    /// Champs absents de cette version repris de l'autre version du même
+    /// élément (la photo d'une chaîne, mise par le site, par exemple).
+    func filled(from other: HistoryItem) -> HistoryItem {
+        HistoryItem(term: term, type: type, display: display,
+                    thumb: thumb ?? other.thumb, streamer: streamer ?? other.streamer,
+                    addedAt: addedAt, avatar: avatar ?? other.avatar)
     }
 }
 

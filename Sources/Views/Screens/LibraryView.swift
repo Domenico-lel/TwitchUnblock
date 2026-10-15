@@ -66,7 +66,8 @@ struct LibraryView: View {
         .alert(store.t("btn_clear"), isPresented: $confirmClear) {
             Button(store.t("cancel"), role: .cancel) {}
             Button(store.t("erase"), role: .destructive) {
-                store.history = store.history.filter { $0.type != .vod }
+                // Positions de reprise comprises, et envoyé tout de suite.
+                store.clearVodHistory()
             }
         } message: {
             Text(store.t("confirm"))

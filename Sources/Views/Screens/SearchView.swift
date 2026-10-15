@@ -877,10 +877,12 @@ struct SearchView: View {
             errorMsg = store.t("not_found")
             searchedName = ""
         } else {
+            // Photo gardée dans l'historique, comme le site l'y met.
             store.saveToHistory(HistoryItem(
                 term: login, type: .channel, display: login,
                 thumb: nil, streamer: nil,
-                addedAt: Date().timeIntervalSince1970 * 1000))
+                addedAt: Date().timeIntervalSince1970 * 1000,
+                avatar: avatarURL.isEmpty ? nil : avatarURL))
             liveData    = live
             Task { await loadFollowState(login: login, channelId: live.userId) }
             vods        = ch.videos
