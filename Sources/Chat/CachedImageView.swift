@@ -85,8 +85,12 @@ struct CachedEmoteImage: View {
             if let img {
                 let size = fitted(aspect: img.aspect)
                 if img.isAnimated, animated {
+                    // Vue UIKit qui ne prend pas le toucher : il va à ce qui
+                    // est posé dessus (fiche, voir chatInfoTap) ou dessous
+                    // (le message, qui ouvre son fil).
                     AnimatedImageView(image: img)
                         .frame(width: size.width, height: size.height)
+                        .allowsHitTesting(false)
                 } else if let ui = img.first {
                     Image(uiImage: ui)
                         .resizable()

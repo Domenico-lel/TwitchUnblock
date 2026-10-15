@@ -365,13 +365,24 @@ extension View {
     /// Toucher → fiche, seulement si un chat la propose : sinon le geste
     /// prendrait le toucher destiné au message. Annoncé comme un bouton à
     /// VoiceOver, qui peut alors l'ouvrir aussi.
+    ///
+    /// Le toucher est pris par une couche SwiftUI transparente posée dessus :
+    /// une emote ou un badge animé est une vue UIKit (AnimatedImageView) qui
+    /// ne prend aucun toucher, et un geste posé sur elle ne recevait rien —
+    /// le toucher allait au message, qui ouvrait son fil.
     @ViewBuilder
     func chatInfoTap(_ action: ((ChatInfoItem) -> Void)?, _ item: @escaping @autoclosure () -> ChatInfoItem) -> some View {
         if let action {
-            onTapGesture { action(item()) }
-                .accessibilityAddTraits(.isButton)
+            accessibilityAddTraits(.isButton)
                 .accessibilityLabel(Text(item().accessibilityName))
                 .accessibilityAction { action(item()) }
+                .overlay {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { action(item()) }
+                        // VoiceOver garde l'image, déjà annoncée comme un bouton.
+                        .accessibilityHidden(true)
+                }
         } else {
             self
         }
