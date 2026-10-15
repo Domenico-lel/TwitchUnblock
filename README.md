@@ -99,9 +99,9 @@ no key to paste. The backend is already hosted and shared by every install.
   on the progress bar, with a notice and a **Skip** button. For a day or two
   after a stream, Twitch's CDN still serves the original sound: the app puts it
   back automatically (Settings → Player; not over AirPlay). On VODs in the newer
-  MP4 format, Twitch often still serves muted parts with their sound: when
-  streaming, the app plays them as they are instead of swapping in the silent
-  version (offline downloads still keep the silent one for now).
+  MP4 format, Twitch often still serves muted parts with their sound: the app
+  plays and downloads them as they are instead of swapping in the silent
+  version.
 * 🗂 **Unlisted & deleted broadcasts** — streams whose VOD is hidden or was
   deleted show up among the channel's VODs as "Unlisted VOD", rebuilt from
   Twitch's CDN as long as it still has them (stream IDs from `vodvod.top`,
@@ -115,7 +115,8 @@ no key to paste. The backend is already hosted and shared by every install.
   under the download); when you leave it, what's left goes to iOS's background
   downloads, in batches, and keeps going even with the app closed (resumed if
   you swipe it away). Parts muted for copyrighted music keep their original sound when
-  Twitch still has it (a day or two after the stream). The chat can be kept
+  Twitch still has it (a day or two after the stream; on VODs in the MP4
+  format, whenever Twitch serves them with their sound). The chat can be kept
   too and is replayed offline, emotes included. Export a download as a single
   file (Files, AirDrop, VLC). Pause, resume and delete from the list.
 * 🧩 **Multi-live** — up to four videos side by side, lives and VODs mixed,

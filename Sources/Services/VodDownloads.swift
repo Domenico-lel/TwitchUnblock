@@ -23,7 +23,9 @@ import UserNotifications
 //  Passages coupés pour musique protégée : un jour ou deux après le live, le
 //  CDN de Twitch garde encore le son d'origine (« N.ts » à la place de
 //  « N-muted.ts », comme pour VodUnmuteLoader). S'il existe, c'est lui qui
-//  est téléchargé ; sinon, la version muette.
+//  est téléchargé ; sinon, la version muette. VODs en fMP4 : « N-unmuted.mp4 »
+//  est servi AVEC le son (« N-muted.mp4 » est silencieux, « N.mp4 » refusé) :
+//  il est téléchargé tel quel, comme un segment ordinaire.
 //
 //  Le chat du passage peut être gardé avec (VodChatArchive), pour être
 //  rejoué hors ligne ; un téléchargement fini s'exporte en un seul fichier.
@@ -92,6 +94,9 @@ struct VodDownloadPlan: Codable {
         let discontinuity: Bool
 
         var ext: String { url.pathExtension.isEmpty ? "ts" : url.pathExtension }
+        /// Passage coupé que le CDN sert avec le son (« N-unmuted.mp4 », VODs
+        /// en fMP4) : segment ordinaire, compté comme rétabli.
+        var keepsSound: Bool { url.absoluteString.contains("-unmuted.mp4") }
         /// Le segment (son d'origine pour un passage coupé), et sa version muette.
         var fileName: String { "seg_\(String(format: "%05d", index)).\(ext)" }
         var mutedFileName: String { "seg_\(String(format: "%05d", index)).muted.\(ext)" }
@@ -140,10 +145,14 @@ struct VodDownloadPlan: Codable {
                 var url = abs
                 var original: URL? = nil
                 let s = abs.absoluteString
-                // « N-muted.ts », ou « N-muted.mp4 » pour les VODs en fMP4.
-                if let r = s.range(of: #"-(un)?muted\.(ts|mp4)"#, options: .regularExpression) {
+                // « N-unmuted.mp4 » (VODs en fMP4) : servi AVEC le son, comme dans
+                // VodUnmuteLoader.rewrite — gardé tel quel (adresse absolue, ni
+                // original ni repli muet). Sinon « N-muted.ts » / « N-unmuted.ts »,
+                // ou « N-muted.mp4 » en fMP4.
+                if !s.contains("-unmuted.mp4"),
+                   let r = s.range(of: #"-(un)?muted\.(ts|mp4)"#, options: .regularExpression) {
                     let ext = s[r].hasSuffix(".mp4") ? "mp4" : "ts"
-                    // « -unmuted » n'existe pas sur le CDN : la version muette sert de repli.
+                    // « -unmuted.ts » est refusé par le CDN : la version muette sert de repli.
                     url = URL(string: s.replacingCharacters(in: r, with: "-muted.\(ext)")) ?? abs
                     original = URL(string: s.replacingCharacters(in: r, with: ".\(ext)"))
                 }
@@ -588,7 +597,8 @@ final class VodDownloads: ObservableObject {
         for s in plan.segments {
             if fm.fileExists(atPath: folder.appendingPathComponent(s.fileName).path) {
                 names[s.index] = s.fileName
-                if s.original != nil { restored += s.duration }
+                // Original remis, ou « -unmuted.mp4 » (le son y est).
+                if s.original != nil || s.keepsSound { restored += s.duration }
             } else if fm.fileExists(atPath: folder.appendingPathComponent(s.mutedFileName).path) {
                 names[s.index] = s.mutedFileName
                 muted += s.duration
