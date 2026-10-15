@@ -24,8 +24,9 @@ final class AppStore: ObservableObject {
             if let id = twitchUserId { UserDefaults.standard.set(id, forKey: "twitch_user_id") }
             else { UserDefaults.standard.removeObject(forKey: "twitch_user_id") }
             // Historique et progression d'ici rattachés à ce compte : ceux
-            // d'un autre compte ne partent jamais sur le sien.
-            if let id = twitchUserId, !id.isEmpty, id != oldValue { adoptSyncOwner(id) }
+            // d'un autre compte ne partent jamais sur le sien. Pas avant
+            // qu'init ait lu ces données (il s'en charge lui-même).
+            if syncLoaded, let id = twitchUserId, !id.isEmpty, id != oldValue { adoptSyncOwner(id) }
             // Compte de l'app connu ou changé : la session web doit être la sienne.
             if let id = twitchUserId, id != oldValue, twitchWebToken != nil {
                 Task { @MainActor [weak self] in await self?.validateWebSession() }
@@ -750,26 +751,30 @@ final class AppStore: ObservableObject {
         // Compte dont ces données sont la copie : celui de l'app quand on est
         // connecté (installations d'avant ce suivi comprises).
         let storedOwner = ud.string(forKey: "sync_owner")
-        if let id = twitchUserId, !id.isEmpty {
-            if let other = storedOwner, other != id {
-                // Données d'un autre compte : jamais envoyées sur celui-ci.
-                history = []
-                vodProgress = [:]
-                ud.removeObject(forKey: "twitch_vod_history")
-                ud.removeObject(forKey: "vod_progress_all")
-                localIntact = false
-            }
-            syncOwner = id
-            ud.set(id, forKey: "sync_owner")
-        } else {
-            syncOwner = storedOwner
-        }
+        syncOwner = storedOwner
+        syncDetachedTerms = ud.dictionary(forKey: "sync_detached") as? [String: Double]
         if localIntact, let data = ud.data(forKey: "sync_base"),
            let base = try? JSONDecoder().decode(SyncBase.self, from: data) {
             syncBase = base
         } else {
             ud.removeObject(forKey: "sync_base")
         }
+        if let id = twitchUserId, !id.isEmpty {
+            if storedOwner == nil {
+                syncOwner = id
+                ud.set(id, forKey: "sync_owner")
+            } else if storedOwner != id {
+                // Données d'un autre compte : jamais envoyées sur celui-ci,
+                // mises de côté pour lui (adoptSyncOwner).
+                adoptSyncOwner(id)
+            } else if syncDetachedTerms != nil {
+                // Son compte est là : rien n'a été vu sans lui (sinon aucun
+                // échange ne s'appliquerait plus, isLive).
+                syncDetachedTerms = nil
+                ud.removeObject(forKey: "sync_detached")
+            }
+        }
+        syncLoaded = true
         // Le chargement initial n'est pas un changement à envoyer.
         syncDirty = false
         // Filet de sécurité pendant une longue lecture : au plus un envoi par
@@ -793,12 +798,15 @@ final class AppStore: ObservableObject {
             // Ce qui restait à envoyer part sur le compte d'avant, avec son
             // jeton, avant que son identité ne soit oubliée.
             finalCloudFlush()
+            // Vu d'ici à ce que le compte de ce jeton soit connu : à lui, pas
+            // au compte d'avant (adoptSyncOwner).
+            markSyncDetached()
             twitchUserId = nil
             twitchLogin  = nil
             twitchAvatar = nil
-            // Refus propre à l'ancien compte (« session web de @x ») :
-            // revérifié pour le nouveau dès que son identifiant est connu.
-            webSessionMismatch = nil
+            // Le refus « session web de @x » reste tant que la session web
+            // manque : il ne part que si un AUTRE compte se connecte
+            // (adoptSyncOwner), pas quand le même renouvelle son jeton.
         }
         twitchToken = token
         // Compté tout de suite comme compte, sans attendre l'heure suivante :
@@ -810,9 +818,12 @@ final class AppStore: ObservableObject {
     }
 
     /// L'historique d'ici reste celui du compte (repris tel quel s'il se
-    /// reconnecte, retiré si un autre compte se connecte : adoptSyncOwner).
+    /// reconnecte, mis de côté pour lui si un autre compte se connecte :
+    /// adoptSyncOwner). Ce qui est vu ensuite, sans compte, suivra le
+    /// prochain compte connecté.
     func logout() {
         finalCloudFlush()
+        markSyncDetached()
         twitchToken    = nil
         twitchWebToken = nil
         webSessionMismatch = nil
@@ -926,8 +937,18 @@ final class AppStore: ObservableObject {
     // l'historique du compte. Les échanges passent un par un, sur le fil
     // principal, et seulement pour le compte dont les données d'ici sont la
     // copie (syncOwner).
+    //
+    // Règle de la fusion : rien de ce qui est ici ne disparaît parce que le
+    // serveur ne l'a pas. Le Worker n'a ni révision ni marqueur de
+    // suppression, et un onglet du site ouvert avant, une app 1.3.0 ou un
+    // autre appareil dont l'envoi croise celui-ci réécrivent la liste
+    // entière avec ce qu'ils connaissent : une absence ne prouve rien. Seule
+    // une suppression faite ici se propage (mergeHistory).
 
     private var syncDirty = false
+    /// Faux tant qu'init n'a pas lu les données de la synchro : le
+    /// changement de compte (adoptSyncOwner) attend qu'elles soient là.
+    private var syncLoaded = false
     /// Compte les changements d'ici (historique, progression) : un envoi
     /// réussi ne marque la sauvegarde « à jour » que s'il n'y en a pas eu
     /// pendant la requête.
@@ -949,10 +970,6 @@ final class AppStore: ObservableObject {
     private var syncChain: Task<Void, Never>?
     private var pullQueued = false
     private var pushQueued = false
-    /// Le site ne garde que 30 éléments d'historique (l'app et le Worker,
-    /// 50) : un élément peut manquer à une liste qu'il a envoyée sans y
-    /// avoir été supprimé (mergeHistory).
-    private static let siteHistoryCap = 30
 
     /// Compte dont l'historique et la progression d'ici sont la copie (nil :
     /// aucun compte encore, ils rejoindront le premier).
@@ -963,8 +980,23 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// Historique d'ici (terme → date d'ajout) au moment où le compte en
+    /// place a perdu son jeton (déconnexion, autre jeton) ; nil s'il n'en a
+    /// pas perdu. Ce qui n'y figure pas, ou y a été revu depuis, a été vu
+    /// sans ce compte : il suit le prochain compte connecté (adoptSyncOwner).
+    private var syncDetachedTerms: [String: Double]? {
+        didSet {
+            if let t = syncDetachedTerms { UserDefaults.standard.set(t, forKey: "sync_detached") }
+            else { UserDefaults.standard.removeObject(forKey: "sync_detached") }
+        }
+    }
+
     /// Ce que le serveur avait au dernier échange réussi, pour ce compte et
-    /// ce Worker : dit de quel côté un élément a disparu.
+    /// ce Worker. Sert de marqueur des suppressions faites ici : un élément
+    /// qu'elle contient et qui n'est plus ici a été retiré ici. Le marqueur
+    /// tient tant que le serveur a encore l'élément (une relecture remet la
+    /// liste du serveur) et tombe avec l'envoi qui le retire (la base devient
+    /// la liste envoyée).
     private var syncBase: SyncBase? {
         didSet {
             if let b = syncBase, let data = try? JSONEncoder().encode(b) {
@@ -999,6 +1031,55 @@ final class AppStore: ObservableObject {
         let base: SyncBase?
     }
 
+    /// Copie d'ici d'un compte qui a laissé l'appareil à un autre, avec sa
+    /// base (ses suppressions pas encore envoyées). Le dernier envoi peut
+    /// avoir échoué, et un client périmé peut encore retirer un élément de
+    /// son serveur : tant que cette copie existe, rien n'est perdu. Reprise
+    /// quand le compte revient, puis fusionnée et renvoyée.
+    private struct SyncStash: Codable {
+        var history: [HistoryItem]
+        var progress: [String: Double]
+        var base: SyncBase?
+        /// Pour ne garder que les comptes les plus récents.
+        var savedAt: Double
+
+        init(history: [HistoryItem], progress: [String: Double], base: SyncBase?, savedAt: Double) {
+            self.history = history
+            self.progress = progress
+            self.base = base
+            self.savedAt = savedAt
+        }
+
+        // Lu élément par élément, comme l'historique : un élément illisible
+        // (écrit par une version plus récente) ne fait pas perdre le reste.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            history = ((try? c.decode([LossyDecodable<HistoryItem>].self, forKey: .history)) ?? [])
+                .compactMap(\.value)
+            progress = (try? c.decode([String: Double].self, forKey: .progress)) ?? [:]
+            base = try? c.decodeIfPresent(SyncBase.self, forKey: .base)
+            savedAt = (try? c.decode(Double.self, forKey: .savedAt)) ?? 0
+        }
+    }
+
+    private static let stashesKey = "sync_stashes"
+    /// Comptes dont une copie est gardée, au plus.
+    private static let stashesMax = 5
+
+    private static func loadStashes() -> [String: SyncStash] {
+        guard let data = UserDefaults.standard.data(forKey: stashesKey),
+              let stashes = try? JSONDecoder().decode([String: SyncStash].self, from: data) else { return [:] }
+        return stashes
+    }
+
+    private static func saveStashes(_ stashes: [String: SyncStash]) {
+        if stashes.isEmpty {
+            UserDefaults.standard.removeObject(forKey: stashesKey)
+        } else if let data = try? JSONEncoder().encode(stashes) {
+            UserDefaults.standard.set(data, forKey: stashesKey)
+        }
+    }
+
     private var syncTarget: SyncTarget? {
         guard let id = twitchUserId, !id.isEmpty, id == syncOwner,
               let token = twitchToken, !token.isEmpty else { return nil }
@@ -1006,27 +1087,103 @@ final class AppStore: ObservableObject {
     }
 
     /// Compte de l'app connu (connexion, changement de compte) : les données
-    /// d'ici deviennent les siennes. Celles d'un AUTRE compte sont retirées
-    /// de l'appareil — déjà parties sur leur compte (finalCloudFlush) —,
-    /// sinon le premier envoi les écrivait sur la sauvegarde de celui-ci, et
-    /// sur le site. Celles d'avant toute connexion le rejoignent, comme avant.
+    /// d'ici deviennent les siennes.
+    /// - Même compte (reconnexion) : rien ne change, ce qui a été vu sans
+    ///   compte entre-temps part sur lui.
+    /// - AUTRE compte : les données du précédent quittent l'affichage, sinon
+    ///   le premier envoi les écrivait sur la sauvegarde de celui-ci (et sur
+    ///   le site). Elles ne sont pas effacées : mises de côté pour lui
+    ///   (dernier envoi peut-être raté), reprises s'il revient. Ce qui a été
+    ///   vu depuis qu'il a perdu son jeton (sans compte, ou déjà avec
+    ///   celui-ci) n'est pas à lui : ça reste ici et part sur le nouveau.
+    /// - Aucun compte avant : tout le rejoint, comme avant.
     private func adoptSyncOwner(_ id: String) {
         // Nouvelle connexion : relue tout de suite, pas 10 minutes plus tard.
         lastPullAt = .distantPast
         lastSyncAt = .distantPast
+        let detached = syncDetachedTerms
+        syncDetachedTerms = nil
         guard syncOwner != id else { return }
-        if syncOwner != nil {
-            logger.info("SYNC", "☁️ Autre compte : historique du précédent retiré de l'appareil", nil)
+        if let previous = syncOwner {
+            // Absent de l'historique quand le jeton est parti, ou revu depuis.
+            let was = detached ?? [:]
+            let kept = detached == nil ? [] : history.filter { h in
+                guard let at = was[h.term.lowercased()] else { return true }
+                return h.addedAt > at + 1
+            }
+            let keptTerms = Set(kept.map { $0.term.lowercased() })
+            stashLocalData(for: previous, detached: was, kept: keptTerms)
+            logger.info("SYNC", "☁️ Autre compte : historique du précédent mis de côté",
+                        kept.isEmpty ? nil : "\(kept.count) élément(s) vu(s) sans lui gardé(s)")
             applyingSync = true
-            history = []
+            history = kept
             applyingSync = false
-            vodProgress = [:]
+            vodProgress = vodProgress.filter { keptTerms.contains($0.key) }
             persistProgress()
-            syncDirty = false
+            syncDirty = !kept.isEmpty
+            // Refus propre au compte d'avant (« session web de @x ») : ne
+            // vaut plus pour celui-ci.
+            webSessionMismatch = nil
         }
         syncBase = nil
         syncOwner = id
         syncGeneration &+= 1
+        restoreStash(for: id)
+    }
+
+    /// Le compte en place perd son jeton (déconnexion, autre jeton) : ce que
+    /// l'historique contient maintenant est à lui, ce qui viendra ensuite ne
+    /// le sera pas. La première fois compte (déconnexion, puis connexion
+    /// d'un autre compte).
+    private func markSyncDetached() {
+        guard syncDetachedTerms == nil, syncOwner != nil else { return }
+        syncDetachedTerms = Self.terms(history)
+    }
+
+    /// Copie d'ici de `owner`, gardée jusqu'à son retour : son historique tel
+    /// qu'il était quand il a perdu son jeton (`detached`), ses positions et
+    /// sa base. `kept` part au nouveau compte : ce qui y était déjà avant
+    /// (revu sans lui) reste aussi dans la copie, à sa date d'alors ; seul
+    /// ce qui n'a été vu que sans lui n'y est pas.
+    private func stashLocalData(for owner: String, detached was: [String: Double], kept: Set<String>) {
+        let items = history.compactMap { h -> HistoryItem? in
+            let k = h.term.lowercased()
+            guard kept.contains(k) else { return h }
+            guard let at = was[k] else { return nil }
+            return HistoryItem(term: h.term, type: h.type, display: h.display, thumb: h.thumb,
+                               streamer: h.streamer, addedAt: at, avatar: h.avatar)
+        }
+        let onlyWithout = kept.filter { was[$0] == nil }
+        let progress = vodProgress.filter { !onlyWithout.contains($0.key) }
+        // Rien ici mais une base : ce qu'elle contient a été retiré ici
+        // (« Effacer ») sans être encore envoyé, à garder aussi.
+        let removedHere = !(syncBase?.history.isEmpty ?? true) || !(syncBase?.progress.isEmpty ?? true)
+        guard !items.isEmpty || !progress.isEmpty || removedHere else { return }
+        var stashes = Self.loadStashes()
+        stashes[owner] = SyncStash(history: items, progress: progress, base: syncBase,
+                                   savedAt: Date().timeIntervalSince1970)
+        while stashes.count > Self.stashesMax,
+              let oldest = stashes.min(by: { $0.value.savedAt < $1.value.savedAt })?.key {
+            stashes.removeValue(forKey: oldest)
+        }
+        Self.saveStashes(stashes)
+    }
+
+    /// Ce qui avait été mis de côté pour ce compte revient : uni à ce qui est
+    /// ici (le plus récent, la position la plus avancée), avec sa base pour
+    /// que ses suppressions pas encore envoyées tiennent. Envoyé ensuite,
+    /// après relecture, comme toujours.
+    private func restoreStash(for owner: String) {
+        var stashes = Self.loadStashes()
+        guard let stash = stashes.removeValue(forKey: owner) else { return }
+        let merged = Self.mergeHistory(local: history, remote: stash.history, base: nil)
+        if merged != history { history = merged }
+        vodProgress = Self.mergeProgress(local: vodProgress, remote: stash.progress, base: nil)
+        progressChanged()
+        syncBase = stash.base
+        Self.saveStashes(stashes)
+        logger.info("SYNC", "☁️ Historique mis de côté pour ce compte repris",
+                    "\(stash.history.count) élément(s)")
     }
 
     /// Relit la sauvegarde si la dernière relecture réussie date de plus de
@@ -1099,6 +1256,12 @@ final class AppStore: ObservableObject {
         return task
     }
 
+    /// Échange dont le résultat peut s'appliquer ici : même compte qu'à son
+    /// départ, toujours connecté.
+    private func isLive(_ target: SyncTarget, _ generation: Int) -> Bool {
+        generation == syncGeneration && syncOwner == target.userId && syncDetachedTerms == nil
+    }
+
     /// Un échange : relecture, fusion (appliquée ici si le compte n'a pas
     /// changé entre-temps), puis envoi si `push` et que le serveur n'a pas
     /// déjà tout. Rien ne part sans une relecture réussie juste avant.
@@ -1108,9 +1271,12 @@ final class AppStore: ObservableObject {
     private func syncOnce(_ target: SyncTarget, push: Bool, snapshot: SyncSnapshot? = nil) async -> Bool {
         let generation = syncGeneration
         guard let remote = await Self.fetchCloud(target) else { return false }
-        // Même compte qu'à la demande : la fusion s'applique ici. Sinon (autre
-        // compte entre-temps), seul l'instantané d'un dernier envoi part.
-        let live = generation == syncGeneration && syncOwner == target.userId
+        // Même compte qu'à la demande, qui a toujours son jeton : la fusion
+        // s'applique ici. Sinon (autre compte, ou déconnexion entre-temps),
+        // seul l'instantané d'un dernier envoi part, et rien du serveur de ce
+        // compte n'entre plus ici : ce qui arriverait passerait pour vu sans
+        // lui et suivrait le compte suivant (adoptSyncOwner).
+        let live = isLive(target, generation)
         guard live || snapshot != nil else { return false }
         let base = live ? (syncBase?.key == target.key ? syncBase : nil) : snapshot?.base
         let local = live ? history : (snapshot?.history ?? [])
@@ -1121,7 +1287,11 @@ final class AppStore: ObservableObject {
         // les autres (il fusionne en gardant la plus avancée).
         let vodIds = Set(merged.filter { $0.type == .vod }.map(\.term))
         let sent = progress.filter { vodIds.contains($0.key) && $0.value.isFinite }.mapValues { $0.rounded() }
-        let changed = Self.historyKeys(merged) != Self.historyKeys(remote.history)
+        // Comparé en ensembles : l'ordre ne compte pas (l'app trie à la
+        // lecture). Deux appareils qui rangent autrement des éléments sans
+        // date (anciens, venus du site) réécrivaient sinon le serveur à
+        // chaque échange.
+        let changed = Set(Self.historyKeys(merged)) != Set(Self.historyKeys(remote.history))
             || sent.contains { $0.value > (remote.progress[$0.key] ?? 0) }
         if live {
             let known = Set(local.map { $0.term.lowercased() })
@@ -1150,8 +1320,10 @@ final class AppStore: ObservableObject {
         }
         logger.syncPush(items: merged.count)
         // Le serveur a maintenant cette liste ; pour la progression, il garde
-        // la plus avancée des deux.
-        if generation == syncGeneration, syncOwner == target.userId,
+        // la plus avancée des deux. Seulement si elle est aussi celle d'ici :
+        // après un instantané, la base dirait « supprimé ici » de ce que le
+        // serveur avait en plus.
+        if live, isLive(target, generation),
            var b = syncBase, b.key == target.key {
             b.history = Self.terms(merged)
             for (id, t) in sent { b.progress[id] = max(b.progress[id] ?? 0, t) }
@@ -1194,14 +1366,15 @@ final class AppStore: ObservableObject {
         return (history, progress)
     }
 
-    /// Fusion de l'historique d'ici et de celui du serveur, à trois voies :
-    /// la base (le serveur au dernier échange réussi) dit de quel côté un
-    /// élément a disparu.
+    /// Fusion de l'historique d'ici et de celui du serveur.
+    /// - Ici : tout reste. Absent du serveur ne veut pas dire supprimé
+    ///   ailleurs (liste périmée du site, d'une app 1.3.0, envoi croisé d'un
+    ///   autre appareil) : l'élément repart. Une suppression faite sur le
+    ///   site ou un autre appareil n'est donc pas suivie ici, comme avant ;
+    ///   au pire un élément revient, jamais un élément vu ici ne se perd.
     /// - Supprimé ici (connu de la base, absent d'ici, pas rajouté là-bas
-    ///   depuis) : il ne revient pas. Avant, toute relecture le remettait.
-    /// - Absent du serveur seulement : retiré ici aussi, sauf si la liste du
-    ///   serveur a pu être coupée par le site (siteHistoryCap) ; l'élément
-    ///   reste alors ici et repart, comme avant.
+    ///   depuis) : il ne revient pas, et l'envoi suivant le retire du
+    ///   serveur. Avant, toute relecture le remettait.
     /// - Sans base (premier échange, autre compte, autre Worker) : union.
     /// Le plus récent d'abord, 50 au plus.
     private static func mergeHistory(local: [HistoryItem], remote: [HistoryItem],
@@ -1209,17 +1382,12 @@ final class AppStore: ObservableObject {
         func key(_ h: HistoryItem) -> String { h.term.lowercased() }
         // Connu de la base et pas rajouté depuis (1 ms de marge : dates
         // passées par le JSON du serveur).
-        func unchanged(_ h: HistoryItem) -> Bool {
-            guard let b = base?[key(h)] else { return false }
-            return h.addedAt <= b + 1
+        func deletedHere(_ r: HistoryItem) -> Bool {
+            guard let b = base?[key(r)] else { return false }
+            return r.addedAt <= b + 1
         }
         var remoteByKey: [String: HistoryItem] = [:]
         for r in remote where remoteByKey[key(r)] == nil { remoteByKey[key(r)] = r }
-        // Une liste coupée par le site a plus de 30 éléments avant la coupe :
-        // si celle du serveur et ce qui lui manque tiennent dans 30, rien
-        // n'a été coupé, ce qui manque a été supprimé.
-        let goneThere = local.filter { remoteByKey[key($0)] == nil && unchanged($0) }.count
-        let followRemovals = !remote.isEmpty && remoteByKey.count + goneThere <= siteHistoryCap
         var seen = Set<String>()
         var out: [HistoryItem] = []
         for l in local {
@@ -1227,15 +1395,13 @@ final class AppStore: ObservableObject {
             guard seen.insert(k).inserted else { continue }
             if let r = remoteByKey[k] {
                 out.append(r.addedAt > l.addedAt ? r.filled(from: l) : l.filled(from: r))
-            } else if followRemovals && unchanged(l) {
-                continue   // supprimé ailleurs depuis le dernier échange
             } else {
                 out.append(l)
             }
         }
         for r in remote {
             // Supprimé ici depuis le dernier échange : il ne revient pas.
-            guard seen.insert(key(r)).inserted, !unchanged(r) else { continue }
+            guard seen.insert(key(r)).inserted, !deletedHere(r) else { continue }
             out.append(r)
         }
         // Le plus récent d'abord ; les éléments sans date (anciens, venus du
@@ -1250,15 +1416,22 @@ final class AppStore: ObservableObject {
             .prefix(50))
     }
 
-    /// Positions de reprise : la plus avancée l'emporte, comme sur le Worker.
-    /// Une position effacée ici (« Effacer », plafond de 500) que le serveur
-    /// n'a pas bougée depuis le dernier échange ne revient pas.
+    /// Positions de reprise : la plus avancée l'emporte, comme sur le Worker,
+    /// sauf un recul fait ici (VOD reprise du début) quand le serveur n'a pas
+    /// bougé depuis le dernier échange : la position d'ici reste, au lieu de
+    /// remonter dès l'envoi de la fermeture (le serveur, lui, garde la plus
+    /// avancée). Une position effacée ici (« Effacer », plafond de 500) que
+    /// le serveur n'a pas bougée depuis le dernier échange ne revient pas.
     private static func mergeProgress(local: [String: Double], remote: [String: Double],
                                       base: [String: Double]?) -> [String: Double] {
         var out = local
         for (id, r) in remote {
             if let l = local[id] {
-                out[id] = max(l, r)
+                if let b = base?[id], abs(r - b) < 1, abs(l - b) >= 1 {
+                    out[id] = l
+                } else {
+                    out[id] = max(l, r)
+                }
             } else if let b = base?[id], abs(r - b) < 1 {
                 continue
             } else {

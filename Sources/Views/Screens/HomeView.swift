@@ -514,8 +514,11 @@ struct HomeView: View {
             }
             // Dans les deux cas, et plus seulement au premier chargement du
             // profil : l'identifiant étant désormais gardé entre deux
-            // lancements, la relecture n'aurait sinon plus jamais lieu.
-            await store.refreshFromCloudIfStale(userId: currentUserId)
+            // lancements, la relecture n'aurait sinon plus jamais lieu. Sans
+            // l'attendre : une relecture ratée se retente à chaque passage,
+            // et les lives suivis attendaient sinon son délai (15 s) quand le
+            // Worker ne répond pas.
+            Task { await store.refreshFromCloudIfStale(userId: currentUserId) }
             followedStreams = try await getFollowedStreams(token: token, userId: currentUserId)
         } catch is CancellationError {
             loadingFollowed = false
