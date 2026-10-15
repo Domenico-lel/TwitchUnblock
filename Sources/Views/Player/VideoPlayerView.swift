@@ -103,6 +103,8 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
 
     // Force l'arrêt de la vidéo quand la vue est détruite
     static func dismantleUIViewController(_ vc: AVPlayerViewController, coordinator: Coordinator) {
+        // Lecteur fermé : une fin d'interruption ne doit plus le relancer.
+        coordinator.interruptions = nil
         vc.player?.pause()
         coordinator.adBreaks?.detach()
         vc.player = nil
@@ -132,6 +134,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         private var sync = LiveSyncEstimator()
         private var diagnostics: LiveDiagnostics?
         private var jumpObserver: NSObjectProtocol?
+        /// Appel, Siri, autre app qui prend le son : la lecture repart à la
+        /// fin (PlaybackInterruptions). nil une fois le lecteur fermé.
+        var interruptions: PlaybackInterruptions?
 
 
         /// Prépare le direct : le mode faible latence tient ensuite le bord du
@@ -206,6 +211,49 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 self?.playerVC?.player?.pause()
                 self?.playerVC?.player = nil
             }
+            interruptions = PlaybackInterruptions(name: "lecteur natif") { [weak self] since in
+                self?.resumeAfterInterruption(since: since)
+            }
+        }
+
+        /// Fin d'une interruption du son : la lecture repart. VOD, clip, VOD
+        /// téléchargée, recul voulu (mode faible latence) : à l'endroit ;
+        /// direct : au bord, comme « Direct » dans le lecteur immersif (un
+        /// saut, jamais la vitesse), relu après une longue coupure. Rend ce
+        /// qui a été fait (journal).
+        private func resumeAfterInterruption(since: TimeInterval) -> String? {
+            guard let player = playerRef, let item = player.currentItem, item.status != .failed,
+                  player.timeControlStatus == .paused else { return nil }
+            guard isLive else {
+                let length = item.duration.seconds, at = item.currentTime().seconds
+                // VOD finie : rien à reprendre.
+                if length.isFinite, length > 0, at >= length - 1 { return nil }
+                player.play()
+                return String(format: "à %.0f s", at)
+            }
+            if since >= PlaybackInterruptions.longInterruption, let asset = item.asset as? AVURLAsset {
+                // App suspendue pendant un long appel : le bord a pu partir
+                // sans nous. Nouvel élément, pris au bord.
+                latency.reset()
+                lastCatchUp = Date()
+                player.replaceCurrentItem(with: VodUnmuteLoader.playerItem(url: asset.url))
+                if let meta = metadataShown { applyMetadata(meta, isLive: true, to: player) }
+                player.play()
+                return "direct relu au bord"
+            }
+            if lowLatency, latency.holdingBehind {
+                player.play()
+                return "direct, à l'endroit (recul voulu)"
+            }
+            if let edge = item.seekableTimeRanges.last?.timeRangeValue.end, edge.isNumeric {
+                // Même recul que la tenue du direct ; tolérance avant
+                // seulement : jamais plus près du bord que la cible.
+                let back = CMTime(seconds: latency.minBehind(for: item), preferredTimescale: 600)
+                player.seek(to: edge - back, toleranceBefore: .positiveInfinity, toleranceAfter: .zero)
+                latency.hold(false)
+            }
+            player.play()
+            return "direct, au bord"
         }
 
         /// Réglage « Audio spatial » changé : l'élément est recréé au même
@@ -243,6 +291,10 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                            onBehind: @escaping (Double?) -> Void = { _ in }) {
             if let existing = timeObserver { playerRef?.removeTimeObserver(existing) }
             playerRef = player
+            // Nouvel AVPlayer (qualité, bascule direct ↔ enregistrement) :
+            // c'est lui que les interruptions suivent, sans reprise en attente.
+            interruptions?.watch(player)
+            interruptions?.settle()
             sync.reset()
             // Journaux LIVE et sauts du lecteur : réabonnés à chaque nouvel
             // AVPlayer (changement de qualité).

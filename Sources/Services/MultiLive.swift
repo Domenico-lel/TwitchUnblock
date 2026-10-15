@@ -516,6 +516,10 @@ final class MultiLiveSession: ObservableObject {
     private var resume: (String) -> Double = { _ in 0 }
     private var save: (String, Double) -> Void = { _, _ in }
     private var onStarted: @MainActor (String, VodMeta?) -> Void = { _, _ in }
+    /// Appel, Siri, autre app qui prend le son : iOS met les tuiles en pause ;
+    /// elles repartent à la fin (PlaybackInterruptions) — les VODs à
+    /// l'endroit, les directs relus au bord.
+    private var interruptions: PlaybackInterruptions?
 
     func configure(resume: @escaping (String) -> Double,
                    save: @escaping (String, Double) -> Void,
@@ -540,21 +544,35 @@ final class MultiLiveSession: ObservableObject {
         }
         if audible.map({ !wanted.contains($0) }) ?? true { audible = entries.first?.id }
         applyAudio()
+        if interruptions == nil, !tiles.isEmpty {
+            interruptions = PlaybackInterruptions(name: "multi-live") { [weak self] _ in
+                Task { @MainActor in self?.tiles.values.forEach { $0.resumeIfStopped() } }
+                return "tuiles relancées (VODs à l'endroit, directs au bord)"
+            }
+        }
+        interruptions?.watch(tiles.values.map { $0.player })
     }
 
     /// Fermeture : chaque VOD enregistre sa position avant de s'arrêter.
     func stopAll() {
+        interruptions = nil
         tiles.values.forEach { $0.stop() }
         tiles = [:]
     }
 
     /// Avant l'arrière-plan, les positions (la sauvegarde part en
-    /// `.background`) ; au retour, ce qu'iOS a mis en pause repart.
+    /// `.background`) ; au retour, ce qu'iOS a mis en pause repart — sauf
+    /// après une interruption par le son d'une autre app : la reprise attend
+    /// alors qu'il s'arrête (PlaybackInterruptions), pour ne pas le couper.
     func sceneChanged(_ phase: ScenePhase) {
         switch phase {
-        case .inactive, .background: tiles.values.forEach { $0.saveProgress() }
-        case .active:                tiles.values.forEach { $0.resumeIfStopped() }
-        @unknown default:            break
+        case .inactive, .background:
+            tiles.values.forEach { $0.saveProgress() }
+        case .active:
+            guard interruptions?.isPending != true else { return }
+            tiles.values.forEach { $0.resumeIfStopped() }
+        @unknown default:
+            break
         }
     }
 

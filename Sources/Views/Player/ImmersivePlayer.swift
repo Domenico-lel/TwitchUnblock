@@ -141,6 +141,9 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// Durée de VOD déjà envoyée à la Live Activity.
     private var activityDuration: Double = 0
     private var spatialObs: NSObjectProtocol?
+    /// Appel, Siri, autre app qui prend le son : la lecture repart à la fin
+    /// (PlaybackInterruptions).
+    private var interruptions: PlaybackInterruptions?
     /// Lecteur qui a publié « À l'écoute » en dernier : la fermeture d'un
     /// ancien lecteur, arrivée après l'ouverture du suivant, effaçait ses
     /// infos (écran verrouillé et Centre de contrôle vides quelques secondes).
@@ -197,6 +200,10 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         spatialObs = NotificationCenter.default.addObserver(
             forName: .tuSpatialAudioChanged, object: nil, queue: .main
         ) { [weak self] _ in self?.reloadForSpatialAudio() }
+        interruptions = PlaybackInterruptions(name: "lecteur") { [weak self] since in
+            self?.resumeAfterInterruption(since: since)
+        }
+        interruptions?.watch(player)
     }
 
     /// Réglage « Audio spatial » changé : l'élément est recréé au même endroit
@@ -217,6 +224,8 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // Même modèle pour un changement de qualité ou une bascule direct ↔
         // enregistrement : la tenue du direct repart de zéro (recalage compris).
         latency.reset()
+        // Nouvelle source, lancée : plus de reprise en attente.
+        interruptions?.settle()
         if self.isLive { LiveDiagnostics.logAudioRoute("début du direct") }
 
         // Adresse `tuunmute://` : passages coupés rétablis (VodUnmuteLoader).
@@ -252,13 +261,12 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         position = t
     }
 
-    private func tick(_ t: CMTime) {
-        guard let item = player.currentItem else { return }
-
-        // La durée d'abord : sur un enregistrement, la fenêtre cherchable ne
-        // couvre au départ que les premières secondes chargées, et la barre
-        // affichait « 0:00 / 0:24 » sur une VOD de plusieurs heures. Un direct
-        // n'a pas de durée finie, il retombe donc sur la fenêtre.
+    /// Bornes de la barre. La durée d'abord : sur un enregistrement, la
+    /// fenêtre cherchable ne couvre au départ que les premières secondes
+    /// chargées, et la barre affichait « 0:00 / 0:24 » sur une VOD de
+    /// plusieurs heures. Un direct n'a pas de durée finie, il retombe donc
+    /// sur la fenêtre.
+    private func updateWindow(_ item: AVPlayerItem) {
         let dur = item.duration.seconds
         if dur.isFinite, dur > 0 {
             startTime = 0
@@ -268,6 +276,12 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
             startTime = range.start.seconds
             endTime   = (range.start + range.duration).seconds
         }
+    }
+
+    private func tick(_ t: CMTime) {
+        guard let item = player.currentItem else { return }
+
+        updateWindow(item)
         if t.seconds.isFinite {
             position = t.seconds
             onProgress(position)
@@ -316,6 +330,8 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     func setPlaying(_ on: Bool) {
         if on { player.play() } else { player.pause() }
+        // Pause voulue (bouton, écran verrouillé) : rien ne la relance seul.
+        if !on { interruptions?.settle() }
         isPlaying = on
         refreshNowPlaying(force: true)
         updateActivity()
@@ -343,12 +359,47 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     func seekBy(_ delta: Double) { seek(to: position + delta) }
 
     func goLive() {
+        // Bornes relues : en pause, `tick` ne tourne plus et le bord du direct
+        // a avancé sans elles (longue pause, interruption).
+        if let item = player.currentItem { updateWindow(item) }
         // Même recul que la tenue du direct : plus près sur une playlist
         // relue toutes les 2 s (mode faible latence), jamais sous le plancher.
         let back = player.currentItem.map { latency.minBehind(for: $0) } ?? 6
         seek(to: endTime - back, exact: false)
         latency.hold(false)
         if !isPlaying { togglePlay() }
+    }
+
+    // MARK: Interruptions
+    /// Fin d'une interruption du son (appel, Siri, autre app) : la lecture
+    /// repart (voir PlaybackInterruptions). VOD, clip, VOD téléchargée, recul
+    /// voulu dans un direct : à l'endroit exact. Direct suivi au bord : au
+    /// bord, comme le bouton « Direct » — par un saut, jamais par la vitesse —
+    /// et relu après une longue coupure. Rend ce qui a été fait (journal).
+    private func resumeAfterInterruption(since: TimeInterval) -> String? {
+        guard let item = player.currentItem, item.status != .failed,
+              player.timeControlStatus == .paused else { return nil }
+        guard isLive else {
+            // VOD finie : rien à reprendre.
+            if endTime > 0, position >= endTime - 1 { return nil }
+            setPlaying(true)
+            return String(format: "à %.0f s", position)
+        }
+        if since >= PlaybackInterruptions.longInterruption, let asset = item.asset as? AVURLAsset {
+            // App suspendue pendant un long appel : le bord a pu partir sans
+            // nous. Nouvel élément, pris au bord (recalage compris).
+            load(url: asset.url, seek: 0)
+            return "direct relu au bord"
+        }
+        if latency.holdingBehind {
+            setPlaying(true)
+            return "direct, à l'endroit (recul voulu)"
+        }
+        goLive()
+        // goLive ne relance que si `isPlaying` est déjà faux : la pause
+        // d'iOS peut ne pas encore avoir été vue.
+        setPlaying(true)
+        return "direct, au bord"
     }
 
     // MARK: Vitesse (VODs)
@@ -434,6 +485,8 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         statusObs = nil
         timeControlObs = nil
         pendingSeek = nil
+        // Lecteur fermé : une fin d'interruption ne doit plus le relancer.
+        interruptions = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
         adBreaks.detach()

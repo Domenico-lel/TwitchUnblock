@@ -70,6 +70,9 @@ final class TVPlayerModel: ObservableObject {
     private var vodId: String?
     private var statusObs: NSKeyValueObservation?
     private var timeObs: Any?
+    /// Siri, FaceTime… : la lecture mise en pause par tvOS repart à la fin
+    /// (PlaybackInterruptions) — VOD à l'endroit, direct relu au bord.
+    private var interruptions: PlaybackInterruptions?
 
     func load(_ item: TVPlayback, session: TVSession) async {
         current = item
@@ -128,8 +131,14 @@ final class TVPlayerModel: ObservableObject {
         let p = player ?? AVPlayer()
         p.replaceCurrentItem(with: item)
         p.play()
+        interruptions?.settle()
         if player == nil {
             player = p
+            interruptions = PlaybackInterruptions(name: "Apple TV") { [weak self] _ in
+                Task { @MainActor in self?.resumeAfterInterruption() }
+                return "lecture relancée (VOD à l'endroit, direct au bord)"
+            }
+            interruptions?.watch(p)
             // Avancement d'une VOD gardé toutes les 10 s (reprise au même endroit).
             if let id = vodId {
                 timeObs = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 10, preferredTimescale: 1),
@@ -157,7 +166,20 @@ final class TVPlayerModel: ObservableObject {
         await load(current, session: session)
     }
 
+    /// Fin d'une interruption du son : VOD à l'endroit (rien en fin de VOD),
+    /// direct relu au bord (même qualité).
+    private func resumeAfterInterruption() {
+        guard let p = player, let item = p.currentItem, item.status != .failed,
+              p.timeControlStatus == .paused else { return }
+        if isLive { start(at: 0); return }
+        let length = item.duration.seconds
+        if length.isFinite, length > 0, p.currentTime().seconds >= length - 1 { return }
+        p.play()
+    }
+
     func stop() {
+        // Lecteur fermé : une fin d'interruption ne doit plus le relancer.
+        interruptions = nil
         if let p = player, let id = vodId {
             let duration = p.currentItem?.duration.seconds ?? 0
             TVProgress.save(id, at: p.currentTime().seconds, duration: duration.isFinite ? duration : 0)
