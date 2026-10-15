@@ -301,7 +301,7 @@ struct HomeView: View {
                 }
                 // ── Sondage du développeur (si un est en cours) ─────
                 if let p = polls.poll {
-                    PollCard(poll: p)
+                    DevPollCard(poll: p)
                         .padding(.horizontal, TSpace.lg)
                         .padding(.top, announcements.current == nil ? TSpace.md : 0)
                 }

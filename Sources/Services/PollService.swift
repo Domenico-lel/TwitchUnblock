@@ -107,7 +107,7 @@ final class PollService: ObservableObject {
 }
 
 /// Carte du sondage, sous l'annonce, dans le même style.
-struct PollCard: View {
+struct DevPollCard: View {
     let poll: PollService.Poll
     @EnvironmentObject private var store: AppStore
     @ObservedObject private var service = PollService.shared
