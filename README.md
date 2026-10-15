@@ -76,7 +76,9 @@ no key to paste. The backend is already hosted and shared by every install.
   player's ⋯ menu (which also shows the source in use) moves it to the top.
   Channels that stream with multiple encodes (Enhanced Broadcasting) keep each
   quality's own name on every source. No source escapes the channel's own ad
-  breaks: Twitch stitches them into the stream itself.
+  breaks: Twitch stitches them into the stream itself. When Twitch's own API
+  doesn't answer (filtered network), the sources are still tried; when none of
+  them answers, the player says so — not "offline" — with **Retry**.
 * ⭐ **Ad-free with your sub** — subscribed to the channel (or Turbo, when the
   channel allows it)? With the web session connected, the live goes through
   your Twitch account and Twitch serves it without ad breaks, just like on
@@ -100,7 +102,9 @@ no key to paste. The backend is already hosted and shared by every install.
   target follows how long Twitch takes to publish each segment, and skipping
   ahead or **Live** stop there too. It never changes the playback speed
   (speeding up could pull the sound out of sync): the player only makes a
-  small jump when it really falls behind, and never undoes a rewind.
+  small jump when it really falls behind, and never undoes a rewind. Turned
+  off, the proxies (Luminous, TTV.LOL) serve the regular stream too, like
+  official Twitch.
 * 🖥 **Fill the screen** — crops the video to remove the black bars in
   landscape. Cuts off the top and bottom: 16:9 in a phone screen can't do both.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
@@ -253,8 +257,9 @@ no key to paste. The backend is already hosted and shared by every install.
 
 ### Finding things
 
-* 🏠 **Home** — your followed channels that are live, top streams (France or
-  worldwide; without an account, **Load more** adds 30 at a time).
+* 🏠 **Home** — your followed channels that are live (up to 300 at once), top
+  streams (France or worldwide; without an account, **Load more** adds 30 at a
+  time).
 * 📜 **Long lists without an account** — a channel's VODs and clips, the
   categories and the live channels in a category keep loading past the first
   100 without logging in (the next pages are asked the way Twitch's Android
@@ -333,7 +338,10 @@ no key to paste. The backend is already hosted and shared by every install.
   Workers go down (or the project disappears), give the address of your own
   (deployed from the [website's repository](https://github.com/MXFia19/TwitchUnblock-Web),
   on Cloudflare or with Docker). It's checked, then tried first for lives,
-  VODs and playlists; **Send everything through this Worker** also moves
+  VODs and playlists; a failed check says why (no answer, quota reached, not a
+  TwitchUnblock Worker). iOS only allows `http://` on your local network: a
+  Docker Worker on a server needs HTTPS in front of it (Caddy, Cloudflare
+  Tunnel). **Send everything through this Worker** also moves
   history backups, feedback, announcements, ntfy notifications and the usage
   count there (your Twitch token is then sent to it — only for a Worker you
   host yourself).

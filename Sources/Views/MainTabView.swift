@@ -587,9 +587,17 @@ struct MainTabView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 } else if let err = errorMsg {
-                    TEmptyState(icon: "exclamationmark.triangle", title: err,
-                                actionTitle: store.t("back"), action: { stopPlayer() })
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Réessayer : une source a pu revenir, le direct a pu
+                    // commencer. « Retour » ferme le lecteur, comme avant.
+                    VStack(spacing: TSpace.sm) {
+                        TEmptyState(icon: "exclamationmark.triangle", title: err,
+                                    actionTitle: store.t("retry"), action: { reloadCurrent() })
+                        Button(store.t("back")) { stopPlayer() }
+                            .font(.tLabel)
+                            .foregroundColor(.tMuted)
+                            .buttonStyle(.plain)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 } else if let links = qualityLinks {
                     playerBody(links: links, size: geo.size, landscape: landscape)
@@ -1390,7 +1398,7 @@ struct MainTabView: View {
                 if let err = data.error, data.links.isEmpty {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }
-                        errorMsg = err; loading = false; switchingSource = false
+                        errorMsg = store.t(apiErrorKey(err)); loading = false; switchingSource = false
                     }
                 } else {
                     // VOD récente avec des passages coupés : le son d'origine
@@ -1445,10 +1453,12 @@ struct MainTabView: View {
                 } else if data.error != "offline" {
                     await MainActor.run { UsageService.shared.count("live_fail") }
                 }
+                // Chaîne introuvable, réseau, ou aucune source n'a répondu
+                // (Twitch la dit en direct) : dit tel quel, plus « hors ligne ».
                 if let err = data.error, err != "offline" {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }
-                        errorMsg = err; loading = false; switchingSource = false
+                        errorMsg = store.t(apiErrorKey(err)); loading = false; switchingSource = false
                     }
                 } else if let links = data.links, !links.isEmpty {
                     // Mode faible latence : playlist réécrite avec la vraie

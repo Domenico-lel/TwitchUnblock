@@ -451,7 +451,23 @@ func getM3U8(vodId: String) async -> M3U8Data {
     }
 
     logger.error("M3U8", "❌ Toutes les tentatives ont échoué pour VOD \(vodId)")
-    return M3U8Data(links: [:], error: "VOD introuvable ou réservée aux abonnés")
+    return M3U8Data(links: [:], error: "vod_unavailable")
+}
+
+// MARK: – Codes d'erreur
+/// Clé du texte d'un code d'erreur de getLive, getM3U8 ou getChannelInfo
+/// (`error`) : les messages ne sont plus écrits en français ici (affichés
+/// tels quels sur iPhone et Apple TV), l'écran les traduit. Un code inconnu
+/// est rendu tel quel.
+func apiErrorKey(_ code: String) -> String {
+    switch code {
+    case "not_found":       return "not_found"
+    case "network":         return "err_network"
+    case "no_source":       return "err_no_source"
+    case "vod_unavailable": return "err_vod_unavailable"
+    case "offline":         return "offline_msg"
+    default:                return code
+    }
 }
 
 // MARK: – getLive (STREAMS)
@@ -481,41 +497,59 @@ func getLive(channelName: String, webToken: String? = nil,
     // En même temps que le reste : 6 s au plus en tout (accountPlaybackIfAsked).
     async let accountTask = accountPlaybackIfAsked(login: login, webToken: webToken, integrity: integrity)
 
-    guard let (streamJSON, token) = try? await (streamTask, tokenTask),
-          let json = streamJSON as? [String: Any],
-          let data = json["data"] as? [String: Any],
-          let user = data["user"] as? [String: Any] else {
+    // Réponse de Twitch lue : « user » nul, sans erreur, = la chaîne n'existe
+    // pas. Sans réponse lisible (réseau filtré, GQL en panne ou qui ralentit),
+    // on ne sait rien : les sources sont essayées quand même — elles ne
+    // passent pas par GQL, et le Worker rend titre, jeu et avatar. Avant,
+    // toute erreur de transport disait « Streamer introuvable » sans rien
+    // essayer.
+    let gql = (try? await streamTask) as? [String: Any]
+    let token = await tokenTask
+    let gqlData = gql?["data"] as? [String: Any]
+    let gqlErrors = !((gql?["errors"] as? [Any]) ?? []).isEmpty
+    let userValue = gqlData?["user"]
+    let user = userValue as? [String: Any]
+    if user == nil, userValue is NSNull, !gqlErrors {
         logger.error("LIVE", "Streamer \"\(login)\" introuvable")
-        return LiveData(title: "", game: "", thumbnail: "", error: "Streamer introuvable")
+        return LiveData(title: "", game: "", thumbnail: "", error: "not_found")
     }
 
-    let avatar = user["profileImageURL"] as? String
-    let userId = user["id"] as? String   // ← récupéré ici
+    var avatar = user?["profileImageURL"] as? String
+    let userId = user?["id"] as? String   // ← récupéré ici
+    let stream = user?["stream"] as? [String: Any]
 
-    guard let stream = user["stream"] as? [String: Any] else {
+    if user != nil, stream == nil {
         logger.warn("LIVE", "\"\(login)\" est hors ligne")
         return LiveData(title: "Hors ligne", game: "", thumbnail: "", avatar: avatar,
                         userId: userId, error: "offline")
     }
 
-    let title       = stream["title"] as? String ?? ""
-    let game        = (stream["game"] as? [String: Any])?["name"] as? String ?? ""
-    let thumbnail   = stream["previewImageURL"] as? String ?? ""
-    let viewerCount = stream["viewersCount"] as? Int ?? 0
+    var title       = stream?["title"] as? String ?? ""
+    var game        = (stream?["game"] as? [String: Any])?["name"] as? String ?? ""
+    var thumbnail   = stream?["previewImageURL"] as? String ?? ""
+    let viewerCount = stream?["viewersCount"] as? Int ?? 0
     // VOD en cours d'enregistrement → rembobinage du live (DVR)
-    let dvrVideoId  = (stream["archiveVideo"] as? [String: Any])?["id"] as? String
-    if let d = dvrVideoId {
+    let dvrVideoId  = (stream?["archiveVideo"] as? [String: Any])?["id"] as? String
+    if user == nil {
+        logger.warn("LIVE", "Twitch ne répond pas pour \"\(login)\"", "sources essayées quand même")
+    } else if let d = dvrVideoId {
         logger.success("LIVE", "Rembobinage disponible (DVR)", "vod \(d)")
     } else {
         logger.debug("LIVE", "Pas de rembobinage", "le streamer n'archive pas ses lives")
     }
 
     var startedAt: Date? = nil
-    if let createdAtStr = stream["createdAt"] as? String {
+    if let createdAtStr = stream?["createdAt"] as? String {
         let df = ISO8601DateFormatter()
         df.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         startedAt = df.date(from: createdAtStr) ?? ISO8601DateFormatter().date(from: createdAtStr)
     }
+
+    // Mode faible latence (réglage, actif par défaut comme dans AppStore) :
+    // demandé à chaque source, et plus seulement au flux officiel — Luminous
+    // et TTV.LOL demandaient toujours la variante faible latence, même quand
+    // on la coupe pour éviter des coupures.
+    let lowLatency = UserDefaults.standard.object(forKey: "cfg_low_latency") as? Bool ?? true
 
     var found: MasterPlaylist = ([:], [:])
     var usedSource: String? = nil
@@ -528,7 +562,8 @@ func getLive(channelName: String, webToken: String? = nil,
     case .token(let pat):
         subscriber = pat.subscriber
         if pat.adFree && !pat.forbidden {
-            found = await usherLiveLinks(login: login, token: (value: pat.value, signature: pat.signature))
+            found = await usherLiveLinks(login: login, token: (value: pat.value, signature: pat.signature),
+                                         lowLatency: lowLatency)
             if !found.links.isEmpty {
                 usedSource = "account"
                 logger.success("LIVE", "✅ Direct par le compte (sans pub)", "\(found.links.count) qualités")
@@ -549,13 +584,18 @@ func getLive(channelName: String, webToken: String? = nil,
     // l'une après l'autre, pour que le direct se lance quand même.
     let steps = liveSourceSteps()
     logger.info("LIVE", "Ordre des sources : \(steps.joined(separator: " → ").uppercased())")
+    var workerInfo: [String: Any]? = nil
     for src in steps where found.links.isEmpty {
         switch src {
-        case "as":     found = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login)
-        case "al":     found = await ttvlolLiveLinks(login: login)
-        case "eu":     found = await luminousLiveLinks(hosts: kLuminousHosts.filter { $0 != "as.luminous.dev" }, login: login)
-        case "twitch": if let token { found = await usherLiveLinks(login: login, token: token) }
-        default:       found = await workerLiveLinks(login: login)
+        case "as":     found = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login, lowLatency: lowLatency)
+        case "al":     found = await ttvlolLiveLinks(login: login, lowLatency: lowLatency)
+        case "eu":     found = await luminousLiveLinks(hosts: kLuminousHosts.filter { $0 != "as.luminous.dev" },
+                                                       login: login, lowLatency: lowLatency)
+        case "twitch": if let token { found = await usherLiveLinks(login: login, token: token, lowLatency: lowLatency) }
+        default:
+            let worker = await workerLiveLinks(login: login)
+            found = worker.master
+            workerInfo = worker.info
         }
         if !found.links.isEmpty { usedSource = src }
     }
@@ -564,9 +604,29 @@ func getLive(channelName: String, webToken: String? = nil,
         logger.success("LIVE", "userId récupéré : \(uid) → emotes canal disponibles")
     }
 
+    // Twitch n'a rien dit : titre, jeu, miniature et avatar du Worker, s'il
+    // a servi le direct (une chaîne vide de sa part ne remplace rien).
+    if user == nil, let info = workerInfo {
+        func text(_ key: String) -> String? { (info[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+        title = text("title") ?? title
+        game = text("game") ?? game
+        thumbnail = text("thumbnail") ?? thumbnail
+        avatar = text("avatar") ?? avatar
+    }
+
+    // Aucune source n'a répondu alors que Twitch dit « en direct » : on le
+    // dit, au lieu de laisser croire la chaîne hors ligne. Sans réponse de
+    // Twitch non plus, c'est le réseau.
+    var error: String? = nil
+    if found.links.isEmpty {
+        error = user == nil ? "network" : "no_source"
+        logger.error("LIVE", user == nil ? "❌ Ni Twitch ni aucune source n'ont répondu"
+                                         : "❌ Aucune source n'a répondu", login)
+    }
+
     return LiveData(title: title, game: game, thumbnail: thumbnail, avatar: avatar,
                     userId: userId, links: found.links, viewerCount: viewerCount,
-                    startedAt: startedAt, dvrVideoId: dvrVideoId, source: usedSource,
+                    startedAt: startedAt, dvrVideoId: dvrVideoId, error: error, source: usedSource,
                     variants: found.variants, webSessionExpired: webSessionExpired,
                     subscriber: subscriber)
 }
@@ -656,7 +716,7 @@ func liveSourceSteps() -> [String] {
 /// « sans pub » : les pré-rolls et les pauses pub de la chaîne y arrivent
 /// comme sur Twitch (écran « Commercial break in progress » ou vraie pub,
 /// cousus dans la playlist ; voir AdBreakMonitor).
-private func luminousLiveLinks(hosts: [String], login: String) async -> MasterPlaylist {
+private func luminousLiveLinks(hosts: [String], login: String, lowLatency: Bool) async -> MasterPlaylist {
     for host in hosts {
         logger.info("LIVE", "Tentative Luminous…", host)
         guard var comps = URLComponents(string: "https://\(host)/live/\(login)") else { continue }
@@ -664,7 +724,7 @@ private func luminousLiveLinks(hosts: [String], login: String) async -> MasterPl
             .init(name: "allow_source",     value: "true"),
             .init(name: "allow_audio_only", value: "true"),
             // fast_bread = variante faible latence côté Twitch.
-            .init(name: "fast_bread",       value: "true")
+            .init(name: "fast_bread",       value: lowLatency ? "true" : "false")
         ]
         guard let url = comps.url else { continue }
         var req = URLRequest(url: url)
@@ -691,10 +751,10 @@ private func luminousLiveLinks(hosts: [String], login: String) async -> MasterPl
 
 /// Proxy albanais (format TTV.LOL : la requête usher encodée après
 /// /playlist/<chaîne>.m3u8). Mêmes pauses pub de la chaîne que Luminous.
-private func ttvlolLiveLinks(login: String) async -> MasterPlaylist {
+private func ttvlolLiveLinks(login: String, lowLatency: Bool) async -> MasterPlaylist {
     var allowed = CharacterSet.alphanumerics
     allowed.insert(charactersIn: "-._~")
-    let query = "allow_source=true&allow_audio_only=true&fast_bread=true"
+    let query = "allow_source=true&allow_audio_only=true&fast_bread=\(lowLatency)"
         .addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
     for host in kTTVLOLHosts {
         guard let url = URL(string: "https://\(host)/playlist/\(login).m3u8%3F\(query)") else { continue }
@@ -718,15 +778,14 @@ private func ttvlolLiveLinks(login: String) async -> MasterPlaylist {
 }
 
 /// Flux officiel de Twitch (usher), avec ses pubs.
-private func usherLiveLinks(login: String, token: (value: String, signature: String)) async -> MasterPlaylist {
+/// `lowLatency` : Twitch sert alors la variante « low latency » (segments
+/// plus courts, playlist rafraîchie plus souvent).
+private func usherLiveLinks(login: String, token: (value: String, signature: String),
+                            lowLatency wantsLowLatency: Bool) async -> MasterPlaylist {
     guard login.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }), !login.isEmpty,
           var comps = URLComponents(string: "https://usher.ttvnw.net/api/channel/hls/\(login).m3u8")
     else { return ([:], [:]) }
     logger.info("LIVE", "Tentative Twitch officiel...")
-    // Mode faible latence : Twitch sert alors la variante « low latency »
-    // (segments plus courts, playlist rafraîchie plus souvent).
-    // Même valeur par défaut que le réglage (AppStore) : actif.
-    let wantsLowLatency = UserDefaults.standard.object(forKey: "cfg_low_latency") as? Bool ?? true
     comps.queryItems = [
         .init(name: "allow_source",              value: "true"),
         .init(name: "allow_audio_only",           value: "true"),
@@ -752,12 +811,14 @@ private func usherLiveLinks(login: String, token: (value: String, signature: Str
 }
 
 /// Worker Cloudflare : sa propre chaîne de sources, en dernier recours.
-private func workerLiveLinks(login: String) async -> MasterPlaylist {
+/// `info` : sa réponse (titre, jeu, miniature, avatar), pour quand Twitch
+/// n'a rien dit à l'app.
+private func workerLiveLinks(login: String) async -> (master: MasterPlaylist, info: [String: Any]?) {
     logger.info("LIVE", "Tentative Cloudflare Worker...")
     guard let json = await workerJSON("/api/get-live?name=\(login)&proxy=false"),
-          let links = json["links"] as? QualityLinks else { return ([:], [:]) }
+          let links = json["links"] as? QualityLinks else { return (([:], [:]), nil) }
     logger.success("LIVE", "✅ Cloudflare Worker : \(links.count) qualités")
-    return (links, workerVariants(json["variants"]))
+    return ((links, workerVariants(json["variants"])), json)
 }
 
 // MARK: – getStreamStats (rafraîchissement LÉGER viewers/uptime, sans re-fetch des liens)
@@ -787,8 +848,8 @@ func getStreamStats(channelName: String) async -> (viewerCount: Int, startedAt: 
 /// dernier live n'a pas laissé de VOD). Sans résoudre les liens du direct :
 /// getLive essayait toutes les sources (jusqu'à une minute par miroir muet)
 /// avant d'afficher la page, et « Regarder » les résout de toute façon.
-/// `live.error` : "offline" hors ligne, "Streamer introuvable" si la chaîne
-/// n'existe pas, "network" si Twitch n'a pas répondu.
+/// `live.error` : "offline" hors ligne, "not_found" si la chaîne n'existe
+/// pas, "network" si Twitch n'a pas répondu (voir apiErrorKey).
 func getChannelInfo(channelName: String) async -> (live: LiveData, lastStart: String?) {
     let login = channelName.trimmingCharacters(in: .whitespaces).lowercased()
     let q = """
@@ -804,7 +865,7 @@ func getChannelInfo(channelName: String) async -> (live: LiveData, lastStart: St
     }
     guard let user = d["user"] as? [String: Any] else {
         logger.warn("VIDEOS", "Streamer \"\(login)\" introuvable")
-        return (LiveData(title: "", game: "", thumbnail: "", error: "Streamer introuvable"), nil)
+        return (LiveData(title: "", game: "", thumbnail: "", error: "not_found"), nil)
     }
     let avatar = user["profileImageURL"] as? String
     let userId = user["id"] as? String
@@ -855,7 +916,7 @@ func getChannelVideosPage(channelName: String, cursor: String? = nil) async
         // d'intégrité ou rejet en 400/401/403 = refus, nil = panne.
         guard let page = await gqlNextRequest(q, [:]) else {
             logger.warn("VIDEOS", "Suite des VODs de \"\(channelName)\" indisponible (réseau)")
-            return (videos: [], avatar: nil, error: "Réseau", cursor: cursor, refused: false)
+            return (videos: [], avatar: nil, error: "network", cursor: cursor, refused: false)
         }
         if page.refused {
             logger.warn("VIDEOS", "Twitch refuse la suite des VODs de \"\(channelName)\"")
@@ -867,7 +928,7 @@ func getChannelVideosPage(channelName: String, cursor: String? = nil) async
     }
     guard let user = data?["user"] as? [String: Any] else {
         logger.error("VIDEOS", "Streamer \"\(channelName)\" introuvable")
-        return (videos: [], avatar: nil, error: "Streamer introuvable", cursor: nil, refused: false)
+        return (videos: [], avatar: nil, error: "not_found", cursor: nil, refused: false)
     }
 
     let avatar     = user["profileImageURL"] as? String
@@ -1030,21 +1091,52 @@ func getUserAvatarGQL(login: String) async -> String? {
     return img
 }
 
+/// Lives suivis par le compte : 100 par page (le plafond de Helix), puis les
+/// pages suivantes jusqu'à 300. Avant, les 50 premiers seulement : au-delà,
+/// des chaînes manquaient à l'accueil, et les notifications revenaient pour
+/// celles qui oscillaient autour de la 50ᵉ place (LiveNotifier les croyait
+/// reparties). Une page suivante en panne n'annule pas les précédentes ; la
+/// première lève l'erreur, comme avant.
 func getFollowedStreams(token: String, userId: String) async throws -> [TwitchStream] {
-    guard let url = URL(string: "https://api.twitch.tv/helix/streams/followed?user_id=\(userId)&first=50") else { return [] }
-    var req = URLRequest(url: url)
-    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-    let (data, resp) = try await URLSession.shared.data(for: req)
-    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
-    // 401 distingué : l'accueil s'en sert pour déconnecter un jeton expiré
-    // (le test sur le texte de l'erreur ne correspondait jamais).
-    if status == 401 { throw URLError(.userAuthenticationRequired) }
-    guard status == 200 else { throw URLError(.badServerResponse) }
-    let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-    let arr  = json?["data"] as? [[String: Any]] ?? []
-    logger.success("HELIX", "\(arr.count) streams suivis en direct")
-    return arr.map { streamFromDict($0) }
+    var streams: [TwitchStream] = []
+    var seen = Set<String>()
+    var cursor: String? = nil
+    for page in 0..<3 {
+        var address = "https://api.twitch.tv/helix/streams/followed?user_id=\(userId)&first=100"
+        if let cursor {
+            address += "&after=\(cursor.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? cursor)"
+        }
+        guard let url = URL(string: address) else { break }
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
+        let data: Data, status: Int
+        do {
+            let (d, resp) = try await URLSession.shared.data(for: req)
+            data = d
+            status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        } catch {
+            if page == 0 { throw error }
+            break
+        }
+        guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard page == 0 else { break }
+            // 401 distingué : l'accueil s'en sert pour déconnecter un jeton
+            // expiré (le test sur le texte de l'erreur ne correspondait jamais).
+            if status == 401 { throw URLError(.userAuthenticationRequired) }
+            throw URLError(.badServerResponse)
+        }
+        let arr = json["data"] as? [[String: Any]] ?? []
+        // Un live peut glisser d'une page à l'autre entre deux requêtes.
+        for d in arr {
+            let s = streamFromDict(d)
+            if seen.insert(s.id).inserted { streams.append(s) }
+        }
+        cursor = (json["pagination"] as? [String: Any])?["cursor"] as? String
+        guard let next = cursor, !next.isEmpty, !arr.isEmpty else { break }
+    }
+    logger.success("HELIX", "\(streams.count) streams suivis en direct")
+    return streams
 }
 
 /// `count` : 50 d'habitude, 100 (le plafond de Helix) quand des chaînes ou
@@ -1242,7 +1334,10 @@ func getVodMetaGQL(_ vodId: String) async -> VodMeta? {
     let owner = v["owner"] as? [String: Any]
     return VodMeta(
         title: title,
-        streamer: owner?["displayName"] as? String ?? "Inconnu",
+        // Pas de nom affiché : le login, sinon rien (« Inconnu », en français
+        // dans toutes les langues, partait dans l'historique et l'écran
+        // verrouillé).
+        streamer: owner?["displayName"] as? String ?? owner?["login"] as? String ?? "",
         thumb: v["previewThumbnailURL"] as? String ?? "",
         lengthSeconds: v["lengthSeconds"] as? Int ?? 0,
         viewCount: v["viewCount"] as? Int ?? 0,

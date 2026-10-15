@@ -247,7 +247,9 @@ final class MultiTileModel: ObservableObject {
             if let id = data.userId { self.channelId = id }
             guard let links = data.links, !links.isEmpty,
                   let url = MultiLive.pick(links, count: count, variants: data.variants) else {
-                let gone = data.error == "offline" || data.error == "Streamer introuvable"
+                // Hors ligne ou chaîne inexistante ; une panne (réseau,
+                // aucune source) n'est pas « hors ligne ».
+                let gone = data.error == "offline" || data.error == "not_found"
                 self.phase = gone ? .offline : .failed
                 return
             }

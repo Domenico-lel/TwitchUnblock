@@ -64,15 +64,54 @@ enum APIConfig {
         return s
     }
 
+    /// Résultat de la vérification d'un Worker personnel. Avant, un simple
+    /// oui/non : délai, réseau, refus d'iOS ou quota disaient tous « ne répond
+    /// pas comme un Worker TwitchUnblock ».
+    enum CheckResult {
+        case ok
+        /// http:// vers un hôte qu'iOS ne tient pas pour local : l'ATS refuse
+        /// la requête (seuls les médias et le réseau local y échappent).
+        case insecureHTTP
+        /// Pas de réponse : adresse, réseau, certificat, délai.
+        case unreachable
+        /// Quota atteint (Cloudflare : 429, « error code: 1027 » pour le jour).
+        case quota
+        /// Il répond, mais pas comme un Worker TwitchUnblock.
+        case notAWorker
+
+        /// Message affiché sous le champ (Réglages → Autres).
+        var messageKey: String {
+            switch self {
+            case .ok:           return "expert_ok"
+            case .insecureHTTP: return "expert_http"
+            case .unreachable:  return "expert_unreachable"
+            case .quota:        return "expert_quota"
+            case .notAWorker:   return "expert_bad"
+            }
+        }
+    }
+
     /// Un Worker TwitchUnblock répond à un nom de chaîne vide par une erreur
     /// JSON (400 « Nom invalide ») : c'est ce qu'on vérifie avant de s'en servir.
-    static func check(_ base: String) async -> Bool {
-        guard let url = URL(string: base + "/api/get-live?name=") else { return false }
+    static func check(_ base: String) async -> CheckResult {
+        guard let url = URL(string: base + "/api/get-live?name=") else { return .notAWorker }
         let req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              let code = (resp as? HTTPURLResponse)?.statusCode, code == 400 || code == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
-        return json["error"] != nil || json["links"] != nil
+        let data: Data, code: Int
+        do {
+            let (d, resp) = try await URLSession.shared.data(for: req)
+            data = d
+            code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        } catch {
+            // Refus de l'ATS : un Worker en http:// hors du réseau local (un
+            // VPS avec Docker) ne marchera jamais tel quel, même si Safari
+            // l'ouvre. Il lui faut du HTTPS (Caddy, Cloudflare Tunnel…).
+            if (error as? URLError)?.code == .appTransportSecurityRequiresSecureConnection { return .insecureHTTP }
+            return .unreachable
+        }
+        if code == 429 { return .quota }
+        guard code == 400 || code == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .notAWorker }
+        return json["error"] != nil || json["links"] != nil ? .ok : .notAWorker
     }
 
     /// Le Worker a-t-il sa base D1 (sauvegarde, retours, annonces,
@@ -265,6 +304,8 @@ private let translations: [Lang: [String: String]] = [
         "not_found": "❌ Streamer introuvable.", "err_missing": "Nom manquant.",
         "err_network": "Erreur réseau.", "err_live": "Erreur Live.",
         "err_conn": "Erreur connexion.", "err_loading": "Erreur lors du chargement.",
+        "err_no_source": "Aucune source n'a répondu pour ce direct.",
+        "err_vod_unavailable": "VOD introuvable ou réservée aux abonnés.",
         "login_prompt": "Connectez-vous pour retrouver vos chaînes préférées.",
         "login_required": "Connectez-vous pour voir les streams en cours.",
         "session_expired": "Session expirée. Veuillez vous reconnecter.",
@@ -750,6 +791,9 @@ private let translations: [Lang: [String: String]] = [
         "expert_check": "Vérifier et utiliser",
         "expert_ok": "Worker vérifié : il sert maintenant en premier.",
         "expert_bad": "Cette adresse ne répond pas comme un Worker TwitchUnblock.",
+        "expert_http": "iOS refuse les adresses en http:// hors du réseau local : il faut du HTTPS (Caddy, Cloudflare Tunnel…).",
+        "expert_unreachable": "Ce Worker ne répond pas (adresse, réseau ou certificat).",
+        "expert_quota": "Ce Worker a atteint son quota (Cloudflare) : réessaie plus tard (le quota du jour repart à minuit UTC).",
         "expert_reset": "Revenir aux Workers officiels",
         "expert_all": "Tout passer par ce Worker",
         "expert_all_sub": "Aussi la sauvegarde de l'historique, les retours, les annonces, les notifications ntfy et le comptage. Ton jeton Twitch lui est alors envoyé (sauvegarde) : n'active ça que pour un Worker que tu héberges toi-même.",
@@ -818,6 +862,8 @@ private let translations: [Lang: [String: String]] = [
         "not_found": "❌ Streamer not found.", "err_missing": "Name missing.",
         "err_network": "Network error.", "err_live": "Live error.",
         "err_conn": "Connection error.", "err_loading": "Error loading data.",
+        "err_no_source": "No source answered for this live stream.",
+        "err_vod_unavailable": "VOD not found or for subscribers only.",
         "login_prompt": "Log in to find your favorite channels.",
         "login_required": "Please log in to view live streams.",
         "session_expired": "Session expired. Please log in again.",
@@ -1303,6 +1349,9 @@ private let translations: [Lang: [String: String]] = [
         "expert_check": "Check and use",
         "expert_ok": "Worker checked: it's now tried first.",
         "expert_bad": "This address doesn't answer like a TwitchUnblock Worker.",
+        "expert_http": "iOS refuses http:// addresses outside your local network: it needs HTTPS (Caddy, Cloudflare Tunnel…).",
+        "expert_unreachable": "This Worker doesn't answer (address, network or certificate).",
+        "expert_quota": "This Worker has reached its quota (Cloudflare): try again later (the daily quota resets at midnight UTC).",
         "expert_reset": "Back to the official Workers",
         "expert_all": "Send everything through this Worker",
         "expert_all_sub": "Also history backups, feedback, announcements, ntfy notifications and the usage count. Your Twitch token is then sent to it (backups): only turn this on for a Worker you host yourself.",
@@ -1371,6 +1420,8 @@ private let translations: [Lang: [String: String]] = [
         "not_found": "❌ Streamer no encontrado.", "err_missing": "Falta el nombre.",
         "err_network": "Error de red.", "err_live": "Error de directo.",
         "err_conn": "Error de conexión.", "err_loading": "Error al cargar.",
+        "err_no_source": "Ninguna fuente respondió para este directo.",
+        "err_vod_unavailable": "VOD no encontrado o solo para suscriptores.",
         "login_prompt": "Inicia sesión para encontrar tus canales favoritos.",
         "login_required": "Inicia sesión para ver los streams.",
         "session_expired": "Sesión expirada. Inicia sesión de nuevo.",
@@ -1856,6 +1907,9 @@ private let translations: [Lang: [String: String]] = [
         "expert_check": "Comprobar y usar",
         "expert_ok": "Worker comprobado: ahora se prueba primero.",
         "expert_bad": "Esta dirección no responde como un Worker de TwitchUnblock.",
+        "expert_http": "iOS rechaza las direcciones http:// fuera de tu red local: hace falta HTTPS (Caddy, Cloudflare Tunnel…).",
+        "expert_unreachable": "Este Worker no responde (dirección, red o certificado).",
+        "expert_quota": "Este Worker alcanzó su cuota (Cloudflare): inténtalo más tarde (la cuota diaria se reinicia a medianoche UTC).",
         "expert_reset": "Volver a los Workers oficiales",
         "expert_all": "Pasar todo por este Worker",
         "expert_all_sub": "También las copias del historial, los comentarios, los anuncios, las notificaciones ntfy y el recuento. Tu token de Twitch se le envía entonces (copias): actívalo solo para un Worker que alojes tú mismo.",

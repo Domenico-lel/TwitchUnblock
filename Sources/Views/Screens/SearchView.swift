@@ -33,6 +33,9 @@ struct SearchView: View {
     @State private var filterText   = ""
     @State private var loading      = false
     @State private var errorMsg: String? = nil
+    /// Chaîne dont la page n'a pas pu se charger, Twitch n'ayant pas répondu :
+    /// « Réessayer » la redemande (rien à refaire pour une chaîne introuvable).
+    @State private var retryLogin: String? = nil
     @State private var searchedName = ""
 
     // Résultats « chaîne »
@@ -240,7 +243,9 @@ struct SearchView: View {
                     if loading {
                         TLoader()
                     } else if let err = errorMsg {
-                        TEmptyState(icon: "exclamationmark.triangle", title: err)
+                        TEmptyState(icon: "exclamationmark.triangle", title: err,
+                                    actionTitle: retryLogin == nil ? nil : store.t("retry"),
+                                    action: retryAction)
                     } else if !searchedName.isEmpty {
                         results
                     } else if !queryFocused, query.isEmpty, recentChannelItems.isEmpty {
@@ -871,6 +876,12 @@ struct SearchView: View {
     }
 
     // MARK: – Actions
+    /// « Réessayer » sous l'erreur : la page de la même chaîne, redemandée.
+    private var retryAction: (() -> Void)? {
+        guard let login = retryLogin else { return nil }
+        return { Task { await searchChannel(login) } }
+    }
+
     /// Aiguille vers la VOD ou la chaîne selon ce qui a été saisi.
     @MainActor private func submit() async {
         let raw = query.trimmingCharacters(in: .whitespaces)
@@ -887,9 +898,9 @@ struct SearchView: View {
 
     @MainActor private func openVod(_ raw: String) async {
         guard let vodId = extractVodId(raw) else {
-            errorMsg = store.t("err_bad_vod"); return
+            errorMsg = store.t("err_bad_vod"); retryLogin = nil; return
         }
-        loading = true; errorMsg = nil; searchedName = ""
+        loading = true; errorMsg = nil; retryLogin = nil; searchedName = ""
         suggestions = []
 
         async let metaTask = getVodMetaGQL(vodId)
@@ -898,13 +909,14 @@ struct SearchView: View {
         loading = false
 
         guard !(m3u8.links.isEmpty && m3u8.error != nil) else {
-            errorMsg = m3u8.error; return
+            errorMsg = m3u8.error.map { store.t(apiErrorKey($0)) }; return
         }
         // « ?t=1h2m3s » du lien : la VOD part de là (le lecteur reprend à la
         // position enregistrée).
         if let start = vodStartFromInput(raw) { store.setVodProgress(vodId, time: start) }
         // La lecture passe par le lecteur global : l'historique y est enregistré.
-        onPlayVod(vodId, meta?.title ?? "VOD \(vodId)", meta?.thumb, meta?.streamer)
+        onPlayVod(vodId, meta?.title ?? "VOD \(vodId)", meta?.thumb,
+                  meta.flatMap { $0.streamer.isEmpty ? nil : $0.streamer })
     }
 
     @MainActor private func searchChannel(_ name: String) async {
@@ -913,7 +925,7 @@ struct SearchView: View {
         let login = loginFromInput(name)
         guard !login.isEmpty else { return }
 
-        loading = true; errorMsg = nil; liveData = nil; lastBroadcastAt = nil; vods = []
+        loading = true; errorMsg = nil; retryLogin = nil; liveData = nil; lastBroadcastAt = nil; vods = []
         // Le suivi de la chaîne précédente ne doit ni s'afficher ni se modifier ici.
         follow.reset(); confirmUnfollow = false
         filterText = ""; searchedName = login; suggestions = []
@@ -953,8 +965,10 @@ struct SearchView: View {
         avatarURL = live.avatar ?? ch.avatar ?? ""
 
         if live.error != nil && ch.error != nil && live.avatar == nil {
-            // Twitch n'a pas répondu : ce n'est pas « introuvable ».
+            // Twitch n'a pas répondu : ce n'est pas « introuvable », et on
+            // peut réessayer.
             errorMsg = store.t(live.error == "network" ? "err_loading" : "not_found")
+            if live.error == "network" { retryLogin = login }
             searchedName = ""
         } else {
             // Photo gardée dans l'historique, comme le site l'y met.

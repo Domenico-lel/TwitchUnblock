@@ -27,7 +27,8 @@ struct SettingsView: View {
     @AppStorage(APIConfig.allKey) private var customWorkerAll = false
     @State private var workerInput = ""
     @State private var workerChecking = false
-    @State private var workerOK: Bool? = nil
+    /// Dernière vérification du Worker personnel (nil : rien à dire).
+    @State private var workerResult: APIConfig.CheckResult? = nil
     /// « Tout par ce Worker » refusé : il n'a pas de base D1.
     @State private var workerNoDatabase = false
     @AppStorage("onboarding_done") private var onboardingDone = false
@@ -550,9 +551,11 @@ struct SettingsView: View {
                 }
                 .font(.tLabel)
                 .buttonStyle(.borderless)
-                if let ok = workerOK {
-                    Text(store.t(ok ? "expert_ok" : "expert_bad"))
-                        .font(.tMeta).foregroundColor(ok ? .tSuccess : .tDanger)
+                if let result = workerResult {
+                    // Ce qui a échoué (http://, pas de réponse, quota, pas un
+                    // Worker TwitchUnblock), plus un seul message pour tout.
+                    Text(store.t(result.messageKey))
+                        .font(.tMeta).foregroundColor(result == .ok ? .tSuccess : .tDanger)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !customWorker.isEmpty {
                     Text(store.t("expert_using").replacingOccurrences(of: "{u}", with: customWorker))
@@ -597,14 +600,17 @@ struct SettingsView: View {
 
     /// Adresse vérifiée (c'est bien un Worker TwitchUnblock) avant d'être gardée.
     private func checkWorker() {
-        guard let base = APIConfig.normalize(workerInput) else { workerOK = false; return }
+        guard let base = APIConfig.normalize(workerInput) else { workerResult = .notAWorker; return }
         workerChecking = true
-        workerOK = nil
+        workerResult = nil
         Task {
-            let ok = await APIConfig.check(base)
+            let result = await APIConfig.check(base)
             workerChecking = false
-            workerOK = ok
-            guard ok else { return }
+            workerResult = result
+            guard result == .ok else {
+                logger.warn("SETTINGS", "Worker personnel refusé (\(result))", base)
+                return
+            }
             customWorker = base
             workerInput = base
             workerNoDatabase = false
@@ -621,7 +627,7 @@ struct SettingsView: View {
         customWorker = ""
         customWorkerAll = false
         workerInput = ""
-        workerOK = nil
+        workerResult = nil
         workerNoDatabase = false
         logger.settingChanged("Worker personnel", value: "officiels")
     }

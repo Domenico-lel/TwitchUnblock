@@ -101,7 +101,8 @@ final class TVPlayerModel: ObservableObject {
             let data = await getM3U8(vodId: id)
             let markers = await markersTask
             guard !data.links.isEmpty else {
-                error = data.error ?? session.t("tv_error_vod")
+                // Code d'erreur (getM3U8) traduit : le texte venait en français.
+                error = session.t(data.error.map(apiErrorKey) ?? "tv_error_vod")
                 return
             }
             // VOD récente avec des passages coupés : le son d'origine est
