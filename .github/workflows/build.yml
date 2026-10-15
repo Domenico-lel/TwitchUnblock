@@ -51,8 +51,10 @@ jobs:
           BASE=$(tr -d ' \n\r' < VERSION 2>/dev/null || echo "1.0")
           SINCE=$(git log -1 --format=%H -- VERSION)
           if [ -n "$SINCE" ]; then
-            # Seuls les commits qui touchent l'app comptent (pas les README…).
-            PATCH=$(git rev-list --count "$SINCE"..HEAD -- Sources Shared Widgets Info.plist project.yml buildipa.sh assets/icon.png assets/icons)
+            # Seuls les commits qui touchent l'app comptent (pas les README…),
+            # sans les fusions : sur master, les anciennes fusions de la
+            # branche de test comptaient (1.4.10 au lieu de 1.4.0).
+            PATCH=$(git rev-list --count --no-merges "$SINCE"..HEAD -- Sources Shared Widgets Info.plist project.yml buildipa.sh assets/icon.png assets/icons)
           else
             PATCH=${{ github.run_number }}
           fi
