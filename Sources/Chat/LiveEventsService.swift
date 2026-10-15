@@ -73,6 +73,8 @@ final class LiveEventsService: ObservableObject {
         var endsAt: Date? = nil
         var flash: Flash? = nil
         var flashUntil: Date? = nil
+        /// Niveau terminé pendant le départ : montré à la fin de « parti ».
+        var pendingLevelDone: Int? = nil
         /// Clé de fermeture (×) : un train fermé le reste jusqu'à sa fin.
         /// L'approche a la sienne (même id) : fermer l'annonce ne cache pas
         /// le départ qu'on attend.
@@ -114,6 +116,11 @@ final class LiveEventsService: ObservableObject {
     private var hypeRead = false
     /// Change à chaque arrêt : une réponse d'avant est ignorée.
     private var hypeGen = 0
+    /// Numéro de chaque relevé parti, et du dernier appliqué : la boucle et
+    /// la relecture à l'échéance peuvent se croiser, une réponse partie avant
+    /// celle déjà appliquée est ignorée (sinon l'écran de fin clignote).
+    private var hypeSeq = 0
+    private var hypeApplied = 0
 
     private enum H {
         static let streak     = "7d04fbaa5bb32d193c742caa2c855dfde371a2a8cb25afed5b5c3d45f5ee9278"
@@ -470,18 +477,22 @@ final class LiveEventsService: ObservableObject {
         hypeDeadlineTask?.cancel(); hypeDeadlineTask = nil
         hypeFlashTask?.cancel(); hypeFlashTask = nil
         hypeGen += 1
+        hypeSeq = 0; hypeApplied = 0
         hypeRead = false
         hype = nil
     }
 
     private func fetchHype() async {
         let gen = hypeGen
+        hypeSeq += 1
+        let seq = hypeSeq
         // Lecture ratée : rien ne change, rien n'est déduit.
         guard let d    = await rawGQL(Self.hypeQuery),
               let user = d["user"]       as? [String: Any],
               let chan = user["channel"] as? [String: Any],
               let ht   = chan["hypeTrain"] as? [String: Any],
-              gen == hypeGen else { return }
+              gen == hypeGen, seq > hypeApplied else { return }
+        hypeApplied = seq
         let now = Date()
         applyHype(readHype(ht, now: now), now: now)
     }
@@ -567,16 +578,27 @@ final class LiveEventsService: ObservableObject {
         }
         if next.phase == .running {
             if let prev, prev.phase == .running, prev.id == next.id {
+                let up = next.level > prev.level
+                if up { logger.success("EVENTS", "🚄 Hype train", "niveau \(next.level)") }
                 if case .ended = prev.flash {
                     // Relu après un faux départ de fin : il roule encore.
+                    if up { next.flash = .levelDone(prev.level); next.flashUntil = now.addingTimeInterval(4) }
                 } else if let f = prev.flash, (prev.flashUntil ?? .distantPast) > now {
-                    next.flash = f
-                    next.flashUntil = prev.flashUntil
-                    if f == .kickoff { next.bigGoal = prev.bigGoal }
-                } else if next.level > prev.level {
-                    next.flash = .levelDone(prev.level)
+                    if up, case .levelDone = f {
+                        // Encore un niveau pendant « niveau terminé » : le dernier.
+                        next.flash = .levelDone(prev.level)
+                        next.flashUntil = now.addingTimeInterval(4)
+                    } else {
+                        // Départ en cours : le niveau terminé attend la fin de « parti ».
+                        next.flash = f
+                        next.flashUntil = prev.flashUntil
+                        next.pendingLevelDone = up ? prev.level : prev.pendingLevelDone
+                        if f == .kickoff { next.bigGoal = prev.bigGoal }
+                    }
+                } else if let n = up ? Optional(prev.level) : prev.pendingLevelDone {
+                    // (« parti » échu juste avant sa minuterie : son niveau en attente.)
+                    next.flash = .levelDone(n)
                     next.flashUntil = now.addingTimeInterval(4)
-                    logger.success("EVENTS", "🚄 Hype train", "niveau \(next.level)")
                 }
             } else {
                 // Départ : la dernière pastille se coche après une approche ;
@@ -616,6 +638,11 @@ final class LiveEventsService: ObservableObject {
             setHype(h)
         case .ended:
             setHype(nil)
+        case .departed where h.pendingLevelDone != nil:
+            h.flash = .levelDone(h.pendingLevelDone ?? h.level)
+            h.flashUntil = Date().addingTimeInterval(4)
+            h.pendingLevelDone = nil
+            setHype(h)
         case .departed, .levelDone:
             h.flash = nil
             h.flashUntil = nil
