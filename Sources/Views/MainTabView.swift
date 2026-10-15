@@ -601,6 +601,11 @@ struct MainTabView: View {
             stopPlayer(wakeOthers: false)
         }
         .onChange(of: keepScreenOn) { ScreenAwake.set("player", $0) }
+        // Lecteur réduit (ou fermé) après le bouton de rotation : sur iPhone,
+        // le reste de l'app revient au portrait au lieu de rester couché.
+        .onChange(of: playerVisible) { visible in
+            if !visible { PlayerOrientation.restorePortraitIfForced() }
+        }
     }
 
     /// Feuilles et mosaïque attachées à cet écran : une notification touchée

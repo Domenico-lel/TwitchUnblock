@@ -89,6 +89,12 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     @Published var currentDate: Date? = nil
     @Published var pipActive  = false
     @Published var pipPossible = false
+    /// Son coupé (bouton du lecteur, ou pause pub) : suit `player.isMuted`.
+    @Published private(set) var muted = false
+    private var mutedObs: NSKeyValueObservation?
+
+    /// Bouton haut-parleur : coupe ou remet le son.
+    func toggleMute() { player.isMuted.toggle() }
     /// Élément en échec (réseau perdu longtemps, playlist ou segment refusés) :
     /// l'image restait figée et ▶ ne faisait rien. La vue le dit, avec
     /// « Réessayer ».
@@ -236,6 +242,11 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // AirPlay ne lit pas les playlists réécrites : retour à celle du CDN.
         externalObs = player.observe(\.isExternalPlaybackActive, options: [.new]) { p, _ in
             DispatchQueue.main.async { VodUnmuteLoader.fallBackForAirPlay(p) }
+        }
+        // Son coupé par le bouton ou par la pause pub : l'icône suit.
+        mutedObs = player.observe(\.isMuted, options: [.initial, .new]) { [weak self] p, _ in
+            let value = p.isMuted
+            DispatchQueue.main.async { if self?.muted != value { self?.muted = value } }
         }
         setupRemoteCommands()
         spatialObs = NotificationCenter.default.addObserver(
@@ -711,6 +722,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         if let o = spatialObs { NotificationCenter.default.removeObserver(o); spatialObs = nil }
         if let o = rateObs { NotificationCenter.default.removeObserver(o); rateObs = nil }
         if let o = failObs { NotificationCenter.default.removeObserver(o); failObs = nil }
+        mutedObs = nil
         clearNowPlaying()
     }
 
@@ -1265,6 +1277,8 @@ struct ImmersivePlayer: View {
         .onDisappear {
             hideTask?.cancel()
             flashTask?.cancel()
+            // Fermé en paysage forcé (rotation verrouillée) : retour au portrait.
+            PlayerOrientation.restorePortraitIfForced()
             // Toujours démonté, PiP compris : la vue ne disparaît que quand
             // on ferme le lecteur ou qu'on passe à autre chose (voir
             // ImmersivePlayerModel.teardown). Réduit ou en arrière-plan, elle
@@ -1681,6 +1695,12 @@ struct ImmersivePlayer: View {
                     .buttonStyle(.plain)
                 }
 
+                // Couper / remettre le son, sans toucher au volume du téléphone.
+                overlayButton(icon: model.muted ? "speaker.slash.fill" : "speaker.wave.2.fill") {
+                    model.toggleMute()
+                    flash(store.t(model.player.isMuted ? "player_muted" : "player_unmuted"))
+                    scheduleAutoHide()
+                }
                 if model.pipPossible {
                     overlayButton(icon: "pip.enter") { model.togglePiP(); scheduleAutoHide() }
                 }
@@ -2038,11 +2058,33 @@ struct ImmersivePlayer: View {
         guard let scene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene }).first else { return }
         let target: UIInterfaceOrientationMask = isLandscape ? .portrait : .landscapeRight
+        PlayerOrientation.forcedLandscape = target == .landscapeRight
         scene.requestGeometryUpdate(.iOS(interfaceOrientations: target)) { error in
             logger.warn("LECTEUR", "Rotation refusée", error.localizedDescription)
         }
         // Sans ça, iOS peut garder l'ancienne orientation tant qu'aucune vue
         // ne redemande la mise à jour.
+        UIViewController.attemptRotationToDeviceOrientation()
+    }
+}
+
+/// Paysage demandé par le bouton de rotation du lecteur. Avec la rotation
+/// verrouillée, l'app restait couchée une fois le lecteur fermé ou réduit :
+/// sur iPhone, elle revient alors au portrait. L'iPad, ou un téléphone
+/// simplement tourné (rotation libre), garde son orientation. Appelé
+/// seulement depuis l'interface (fil principal).
+enum PlayerOrientation {
+    static var forcedLandscape = false
+
+    static func restorePortraitIfForced() {
+        guard forcedLandscape else { return }
+        forcedLandscape = false
+        guard UIDevice.current.userInterfaceIdiom == .phone,
+              let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+              scene.effectiveGeometry.interfaceOrientation.isLandscape else { return }
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { error in
+            logger.warn("LECTEUR", "Retour au portrait refusé", error.localizedDescription)
+        }
         UIViewController.attemptRotationToDeviceOrientation()
     }
 }

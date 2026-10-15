@@ -30,7 +30,9 @@ no key to paste. The backend is already hosted and shared by every install.
 
 * 🚫 **No subscription required** — watch any VOD or live stream at full quality.
 * 🎬 **Immersive player** — custom controls drawn over the picture, the way
-  Twitch does it. Play/pause, scrubbing, quality, refresh, orientation. Apple's
+  Twitch does it. Play/pause, scrubbing, quality, refresh, a speaker button to
+  mute the stream, orientation (on iPhone, leaving the player after the
+  rotation button brings the app back to portrait). Apple's
   native player stays available as a fallback in Settings. Changing quality
   keeps your place, in Apple's player too (a live you rewound keeps its delay);
   a VOD you had finished starts over from the beginning; when the stream drops for good, the
@@ -182,7 +184,8 @@ no key to paste. The backend is already hosted and shared by every install.
   account** button for when you're unbanned (remembered until the app
   closes). A timeout only adds a line saying for how long.
 * 😀 **Emotes** — Twitch, BetterTTV, FrankerFaceZ and 7TV, global and
-  per-channel, animated (FrankerFaceZ included). BetterTTV's live connection
+  per-channel, animated (FrankerFaceZ included); GIFs sent with Twitch's GIF
+  keyboard show in the chat on their own line. BetterTTV's live connection
   adds the personal emotes of BTTV Pro users (once BTTV announces them, i.e.
   when they open the chat) and the emotes added to the channel during the
   stream. The emote picker is translated; long-press an emote there to open
