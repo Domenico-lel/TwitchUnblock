@@ -446,8 +446,9 @@ A first Apple TV app lives in `TV/` (target `TwitchUnblockTV`, tvOS 16+),
 built on its own by `.github/workflows/build-tvos.yml` and published as an
 unsigned `tv-test-N` pre-release:
 
-* Followed channels (sign in with a code or a QR code on twitch.tv/activate),
-  top streams, categories, search, a channel's VODs.
+* Followed channels (sign in with a code or a QR code on twitch.tv/activate):
+  the live ones, then the offline ones (most recently live first) to open
+  their videos; top streams, categories, search, a channel's VODs.
 * tvOS's native player, with Quality, **Chat** and, for lives, Source in its
   bar: the chat (read-only, no account needed) sits on the picture — live, or
   a VOD's chat replayed in sync — with Twitch, BTTV, FFZ and 7TV emotes. The
@@ -466,8 +467,17 @@ unsigned `tv-test-N` pre-release:
   own layered icon and Top Shelf banners (`TV/make_tv_icons.py`, drawn from
   the iPhone app's logo).
 
-Installing it needs a Mac with Xcode and the Apple TV paired with it
-(AltStore, SideStore and Feather don't handle tvOS).
+Installing it needs a tool that can sideload on tvOS, or a Mac with Xcode and
+the Apple TV paired with it (AltStore, SideStore and Feather don't handle
+tvOS). **ATVLoadly** (or any tool that reads AltStore sources) can update it
+on its own from this source, rewritten by each build with its release notes
+(`Changelog: Apple TV: …` lines of the commits that touch the TV):
+
+```
+https://raw.githubusercontent.com/MXFia19/TwitchUnblock/test-17d298/apps-tv.json
+```
+
+Its GitHub releases can't be used for that: they also hold the iPhone IPAs.
 
 ---
 

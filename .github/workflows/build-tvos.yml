@@ -5,6 +5,11 @@ name: Build tvOS (test)
 # publiée en pré-version « tv-test-N ». Les fichiers partagés avec l'iPhone
 # ne la déclenchent pas tous : la lancer à la main (workflow_dispatch) après
 # un gros changement dans Sources/Services.
+# Chaque build a ses notes (lignes « Changelog: Apple TV: … » des commits
+# qui touchent la TV) et met à jour apps-tv.json, une source au format
+# AltStore : ATVLoadly (ou un autre outil) y trouve la dernière version et
+# se met à jour seul — l'URL GitHub ne convient pas, les IPA de l'iPhone et
+# de la TV étant dans les mêmes releases.
 on:
   push:
     branches:
@@ -27,6 +32,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Historique complet : notes depuis le build précédent.
+          fetch-depth: 0
 
       - name: Generate Xcode Project
         run: |
@@ -70,20 +78,135 @@ jobs:
           name: TwitchUnblockTV-IPA
           path: TwitchUnblockTV.ipa
 
+      - name: Changelog since previous TV build
+        run: |
+          # Commits qui touchent la TV depuis le build précédent (commit gardé
+          # dans apps-tv.json) : leurs lignes « Changelog: Apple TV: … », en
+          # anglais ; un commit sans elles compte dans « Other improvements
+          # and fixes ». Les commits automatiques « [skip ci] » sont ignorés.
+          python3 - <<'PY'
+          import json, subprocess
+          prev = None
+          try:
+              prev = json.load(open('apps-tv.json', encoding='utf-8'))['apps'][0]['versions'][0].get('commit')
+          except Exception:
+              pass
+          def is_ancestor(c):
+              return subprocess.run(['git', 'merge-base', '--is-ancestor', c, 'HEAD'], capture_output=True).returncode == 0
+          args = ['git', 'log', '--no-merges', '--format=%H%x1f%s%x1f%b%x1e']
+          args += [f'{prev}..HEAD'] if prev and is_ancestor(prev) else ['-n', '6']
+          args += ['--', 'TV', 'project.yml']
+          out = subprocess.run(args, capture_output=True, text=True, encoding='utf-8').stdout
+          lines, other = [], 0
+          for rec in out.split('\x1e'):
+              if not rec.strip():
+                  continue
+              sha, _, rest = rec.strip('\n').partition('\x1f')
+              subject, _, body = rest.partition('\x1f')
+              if '[skip ci]' in subject:
+                  continue
+              custom = [l.split(':', 1)[1].strip() for l in body.splitlines() if l.lower().startswith('changelog:')]
+              tv = [c.split(':', 1)[1].strip() for c in custom if c.lower().startswith('apple tv:')]
+              if not tv:
+                  other += 1
+                  continue
+              for item in tv:
+                  item = item[:1].upper() + item[1:]
+                  if item and item not in lines:
+                      lines.append(item)
+          items = lines[:30]
+          if other and len(items) < 30:
+              items.append('Other improvements and fixes')
+          notes = '\n'.join(f'- {l}' for l in items) or '- Improvements and fixes'
+          open('tv-changelog.md', 'w', encoding='utf-8').write(notes + '\n')
+          print(notes)
+          PY
+
       - name: Create pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat > notes.md <<'EOF'
-          Version **Apple TV** de test (non signée), construite depuis la branche `test-17d298`.
-
-          Installation : il faut un Mac avec Xcode et l'Apple TV appairée (Xcode → Window → Devices and Simulators).
-          Le plus simple est de construire depuis les sources : `brew install xcodegen`, puis `xcodegen generate`
-          dans le dépôt, ouvrir `TwitchUnblock.xcodeproj`, choisir la cible **TwitchUnblockTV** et son équipe
-          (compte Apple) dans Signing & Capabilities, puis Run sur l'Apple TV. Avec un compte Apple gratuit,
-          l'app expire au bout de 7 jours.
-          EOF
+          {
+            cat tv-changelog.md
+            echo
+            echo 'Apple TV test build (unsigned), built from the `test-17d298` branch.'
+            echo
+            echo '**Automatic updates**: add this source in ATVLoadly (or another tool that reads AltStore sources):'
+            echo 'https://raw.githubusercontent.com/MXFia19/TwitchUnblock/test-17d298/apps-tv.json'
+            echo
+            echo '**With Xcode**: pair the Apple TV with a Mac (Xcode → Window → Devices and Simulators), run'
+            echo '`brew install xcodegen` then `xcodegen generate` in the repository, open `TwitchUnblock.xcodeproj`,'
+            echo 'pick the **TwitchUnblockTV** target and your team in Signing & Capabilities, then Run on the Apple TV.'
+            echo 'With a free Apple account, the app expires after 7 days.'
+          } > notes.md
           gh release create "tv-test-${{ github.run_number }}" TwitchUnblockTV.ipa --prerelease \
             --target "${{ github.sha }}" \
             --title "TwitchUnblock TV 0.1.${{ github.run_number }} (test)" \
             --notes-file notes.md
+
+      - name: Update TV source (apps-tv.json)
+        env:
+          VERSION: 0.1.${{ github.run_number }}
+          BUILD: ${{ github.run_number }}
+          URL: https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-${{ github.run_number }}/TwitchUnblockTV.ipa
+        run: |
+          DATE=$(date -u +%Y-%m-%d) IPA_SIZE=$(stat -f%z TwitchUnblockTV.ipa) python3 - <<'PY'
+          import json, os, subprocess
+          src = 'apps-tv.json'
+          icon = 'https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/assets/icon.png'
+          try:
+              d = json.load(open(src, encoding='utf-8'))
+          except Exception:
+              d = {
+                  'name': 'TwitchUnblock TV',
+                  'subtitle': 'Apple TV test builds of TwitchUnblock',
+                  'description': 'Unsigned test builds of the TwitchUnblock Apple TV app, from the test-17d298 branch. Add this source in ATVLoadly (or any tool that reads AltStore sources) to get updates automatically.',
+                  'iconURL': icon,
+                  'website': 'https://github.com/MXFia19/TwitchUnblock',
+                  'tintColor': '#9146ff',
+                  'featuredApps': ['com.mxfia19.TwitchUnblockTV'],
+                  'apps': [{
+                      'name': 'TwitchUnblock TV',
+                      'bundleIdentifier': 'com.mxfia19.TwitchUnblockTV',
+                      'developerName': 'MXFia19',
+                      'subtitle': 'Twitch lives and VODs on Apple TV (test)',
+                      'localizedDescription': 'Followed channels, top streams, categories and search, lives and VODs with the chat on the picture.',
+                      'iconURL': icon,
+                      'tintColor': '#9146ff',
+                      'category': 'entertainment',
+                      'screenshots': [],
+                      'appPermissions': {'entitlements': [], 'privacy': {}},
+                      'versions': [],
+                  }],
+              }
+          a = d['apps'][0]
+          entry = {
+              'version': os.environ['VERSION'], 'buildVersion': os.environ['BUILD'],
+              'date': os.environ['DATE'], 'localizedDescription': open('tv-changelog.md', encoding='utf-8').read().strip(),
+              'downloadURL': os.environ['URL'], 'size': int(os.environ['IPA_SIZE']),
+              'commit': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
+          }
+          a.update(version=entry['version'], versionDate=entry['date'], downloadURL=entry['downloadURL'], size=entry['size'])
+          a['versions'] = [entry] + [v for v in a.get('versions', []) if v.get('buildVersion') != entry['buildVersion']][:19]
+          json.dump(d, open(src, 'w', encoding='utf-8'), indent=2, ensure_ascii=False)
+          open(src, 'a', encoding='utf-8').write('\n')
+          PY
+
+          # Seule la branche de test publie la source ; un build lancé à la
+          # main ailleurs s'arrête là.
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" != "test-17d298" ]; then
+            echo "Branche $BRANCH : source TV laissée telle quelle."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps-tv.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: TV source $VERSION [skip ci]"
+            # Branche bougée pendant le build (version de l'iPhone…) : on
+            # rejoue par-dessus au lieu d'échouer sur une course bénigne.
+            git push origin HEAD:$BRANCH || {
+              git pull --rebase origin $BRANCH && git push origin HEAD:$BRANCH
+            }
+          fi
