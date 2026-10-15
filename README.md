@@ -309,14 +309,18 @@ no key to paste. The backend is already hosted and shared by every install.
   nothing is sent until a read has worked). What's on this device is never
   dropped because the backup lacks it — an old website tab or another device
   can send an outdated list — so a VOD watched here never vanishes because of
-  them. A VOD or channel removed here, or a cleared history, is removed from
-  the backup right away and this device won't bring it back; the website or
-  another device that still has it can send it again, and a removal made there
-  isn't followed here. A resume point moved back here (VOD restarted) stays
-  put on this device. Each account keeps its own history: switching accounts
-  never mixes them, the previous account's history is set aside on the device
-  (unsent changes included) and comes back when it signs in again, and what
-  you watch while signed out goes to the next account that signs in.
+  them. A VOD or channel removed here while signed in, or a history cleared
+  while signed in, is removed from the backup right away and this device
+  won't bring it back; the website or another device that still has it can
+  send it again, and a removal made there isn't followed here. Removing or
+  clearing while signed out only changes what this device shows. A resume
+  point moved back here (VOD restarted) stays put on this device once it's
+  past the first 30 seconds. Each account keeps its own history: switching
+  accounts never mixes them, the previous account's history and resume points
+  are set aside on the device as they were when it signed out (unsent changes
+  included) and come back when it signs in again (up to 5 accounts, more
+  while one still has unsent changes), and what you watch while signed out
+  goes to the next account that signs in.
 * ⬆️ **Update check** — the app tells you when a new version is out on the
   source, with a shortcut to Feather / SideStore / AltStore.
 * 🔔 **Live notifications** — be told when a followed channel goes live
