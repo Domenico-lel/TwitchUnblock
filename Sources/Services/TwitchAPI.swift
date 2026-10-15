@@ -111,7 +111,9 @@ private func workerVariants(_ value: Any?) -> [String: VariantInfo] {
 // MARK: – GQL
 private func twitchGQL(_ query: String) async throws -> Any {
     guard let url = URL(string: "https://gql.twitch.tv/gql") else { throw URLError(.badURL) }
-    var req = URLRequest(url: url)
+    // 10 s au plus sans réponse (au lieu de 60) : GQL répond en une seconde
+    // quand il marche, et getLive l'attend avant d'essayer les sources.
+    var req = URLRequest(url: url, timeoutInterval: 10)
     req.httpMethod = "POST"
     req.setValue(kGQLClientID, forHTTPHeaderField: "Client-ID")
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -273,7 +275,8 @@ private func storyboardHack(vodId: String) async -> QualityLinks {
         for q in qualityOrder {
             group.addTask {
                 let url = "\(root)/\(q)/index-dvr.m3u8"
-                guard var req = URL(string: url).map({ URLRequest(url: $0) }) else { return nil }
+                // 8 s au plus (au lieu de 60) : le CDN répond aussitôt.
+                guard var req = URL(string: url).map({ URLRequest(url: $0, timeoutInterval: 8) }) else { return nil }
                 req.httpMethod = "HEAD"
                 requestHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
                 let status = (try? await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode
@@ -330,7 +333,10 @@ private func workerJSON(_ path: String) async -> [String: Any]? {
         guard let url = URL(string: base + path) else { continue }
         let data: Data, code: Int
         do {
-            let (d, resp) = try await URLSession.shared.data(from: url)
+            // 20 s au plus sans réponse (au lieu de 60) : dernier recours du
+            // direct et des VODs, il essaie lui-même ses sources, mais un
+            // Worker muet faisait attendre une minute par adresse.
+            let (d, resp) = try await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 20))
             data = d
             code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         } catch {
@@ -423,7 +429,8 @@ func getM3U8(vodId: String) async -> M3U8Data {
             .init(name: "allow_spectre",    value: "true"),
             .init(name: "player_backend",   value: "mediaplayer"),
         ]
-        if let url = comps.url, let req = { var r = URLRequest(url: url); requestHeaders.forEach { r.setValue($1, forHTTPHeaderField: $0) }; return r }() as URLRequest?,
+        // 8 s au plus (au lieu de 60), comme pour un direct.
+        if let url = comps.url, let req = { var r = URLRequest(url: url, timeoutInterval: 8); requestHeaders.forEach { r.setValue($1, forHTTPHeaderField: $0) }; return r }() as URLRequest?,
            let (data, resp) = try? await URLSession.shared.data(for: req),
            (resp as? HTTPURLResponse)?.statusCode == 200,
            let body = String(data: data, encoding: .utf8) {
@@ -475,9 +482,12 @@ func apiErrorKey(_ code: String) -> String {
 /// pub sur cette chaîne (abonné, Turbo accepté), le direct passe par lui avant
 /// les proxys — qui reçoivent, eux aussi, les pauses pub de la chaîne. Jamais
 /// pour un compte qui aurait des pubs : il en recevrait de vraies, ciblées sur
-/// son adresse réelle. `integrity` : voir accountPlaybackToken.
+/// son adresse réelle. `integrity` : voir accountPlaybackToken. `onSource` :
+/// appelé avec chaque source avant de l'essayer (« as », « al », « eu »,
+/// « twitch », « worker »), pour l'écran de chargement ; hors du fil principal.
 func getLive(channelName: String, webToken: String? = nil,
-             integrity: (() async -> (token: String, deviceId: String)?)? = nil) async -> LiveData {
+             integrity: (() async -> (token: String, deviceId: String)?)? = nil,
+             onSource: ((String) -> Void)? = nil) async -> LiveData {
     let login = channelName.trimmingCharacters(in: .whitespaces).lowercased()
     logger.info("LIVE", "Lancement stream \"\(login)\"")
 
@@ -586,6 +596,7 @@ func getLive(channelName: String, webToken: String? = nil,
     logger.info("LIVE", "Ordre des sources : \(steps.joined(separator: " → ").uppercased())")
     var workerInfo: [String: Any]? = nil
     for src in steps where found.links.isEmpty {
+        onSource?(src)
         switch src {
         case "as":     found = await luminousLiveLinks(hosts: ["as.luminous.dev"], login: login, lowLatency: lowLatency)
         case "al":     found = await ttvlolLiveLinks(login: login, lowLatency: lowLatency)
@@ -727,7 +738,9 @@ private func luminousLiveLinks(hosts: [String], login: String, lowLatency: Bool)
             .init(name: "fast_bread",       value: lowLatency ? "true" : "false")
         ]
         guard let url = comps.url else { continue }
-        var req = URLRequest(url: url)
+        // 8 s au plus par miroir (au lieu de 60), comme le flux officiel : un
+        // miroir muet faisait attendre des minutes avant la source suivante.
+        var req = URLRequest(url: url, timeoutInterval: 8)
         requestHeaders.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)

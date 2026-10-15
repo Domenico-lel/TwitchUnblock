@@ -18,6 +18,12 @@ struct MainTabView: View {
     @State private var loading = false
     @State private var errorMsg: String? = nil
     @State private var statusTitle = ""
+    /// Source du direct en cours d'essai (écran de chargement) : elles sont
+    /// essayées l'une après l'autre, l'attente peut durer.
+    @State private var loadingSource: String? = nil
+    /// Une image joue, d'après le lecteur (ni en pause, ni arrêtée ; le
+    /// lecteur natif exclut aussi l'audio seul) : voir `keepScreenOn`.
+    @State private var playerPlaying = false
 
     // ── Chat state ───────────────────────────────────────────────────────
     /// Le chat est affiché en permanence sous le lecteur (comme sur Twitch) ;
@@ -204,6 +210,20 @@ struct MainTabView: View {
         return ([parts.compactMap { $0 }.joined(separator: " ")] + details).joined(separator: " · ")
     }
 
+    /// Écran gardé allumé : seulement quand une vidéo joue (ou va jouer),
+    /// lecteur affiché. Il l'était tant qu'un lecteur existait — en pause,
+    /// réduit, en erreur, en audio seul : téléphone posé, jusqu'à vider la
+    /// batterie. L'audio seul n'a rien à montrer : l'écran s'éteint comme
+    /// d'habitude, le son continue écran verrouillé.
+    private var keepScreenOn: Bool {
+        guard playerMode != nil, playerVisible, !closingPlayer, !chatOnly,
+              errorMsg == nil else { return false }
+        if loading { return true }
+        guard playerPlaying, let links = qualityLinks else { return false }
+        // Le lecteur natif écarte déjà l'audio seul (VideoPlayerView).
+        return !(store.immersivePlayer && isAudioQuality(currentQuality(links)))
+    }
+
     /// Y a-t-il un chat à afficher sous le lecteur ?
     private var chatTarget: String? {
         if let ch = currentChannelName { return ch }
@@ -294,7 +314,9 @@ struct MainTabView: View {
             // ── Mini bar ──────────────────────────────────────────────
             // `!closingPlayer` : sans lui, la mini-barre apparaîtrait le temps du
             // fondu de fermeture, le lecteur étant encore en place mais masqué.
-            if playerMode != nil && !playerVisible && qualityLinks != nil && !closingPlayer {
+            // Aussi pendant un chargement réduit (ou son erreur) : de quoi y
+            // revenir.
+            if playerMode != nil && !playerVisible && !closingPlayer {
                 miniBar.zIndex(99)
             }
 
@@ -523,11 +545,15 @@ struct MainTabView: View {
             if let remaining = note.userInfo?["remaining"] as? [MutedRange] { vodMuted = remaining }
             vodUnmuted = note.userInfo?["restored"] as? Int ?? 0
         }
+        // Notification touchée (direct, réponse à un retour) : ce qui est
+        // ouvert ici se ferme d'abord (voir afterClosingPresentations).
         .onReceive(NotificationCenter.default.publisher(for: .openLiveChannel)) { note in
-            if let login = note.userInfo?["login"] as? String, !login.isEmpty { playLive(login) }
+            guard let login = note.userInfo?["login"] as? String, !login.isEmpty else { return }
+            afterClosingPresentations { playLive(login) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openMyFeedback)) { _ in
-            showMyFeedback = true
+            guard !showMyFeedback else { return }
+            afterClosingPresentations { showMyFeedback = true }
         }
         .sheet(isPresented: $showMyFeedback) {
             NavigationStack { MyFeedbackList() }
@@ -565,6 +591,27 @@ struct MainTabView: View {
             // On s'endort : la musique d'une autre app ne doit pas repartir.
             stopPlayer(wakeOthers: false)
         }
+        .onChange(of: keepScreenOn) { ScreenAwake.set("player", $0) }
+    }
+
+    /// Feuilles et mosaïque attachées à cet écran : une notification touchée
+    /// pendant que l'une d'elles est ouverte lançait le direct dessous (sous
+    /// la mosaïque, caché, avec son son en plus des siens) ou rien du tout
+    /// (SwiftUI refuse une seconde feuille, « Mes signalements » ne s'ouvrait
+    /// pas). Tout se ferme, puis l'action part une fois la fermeture finie.
+    private func afterClosingPresentations(_ action: @escaping () -> Void) {
+        let open = showSettings || showFeedback || showMyFeedback || showPlayerMenu
+            || showDownloadSheet || showSleepSheet || channelSheet != nil || showMultiLive
+        guard open else { action(); return }
+        showSettings = false
+        showFeedback = false
+        showMyFeedback = false
+        showPlayerMenu = false
+        showDownloadSheet = false
+        showSleepSheet = false
+        channelSheet = nil
+        showMultiLive = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { action() }
     }
 
     // MARK: – Lecteur
@@ -582,12 +629,24 @@ struct MainTabView: View {
                     .onChange(of: geo.size.height) { pull.height = $0 }
 
                 if loading {
+                    // Les sources d'un direct sont essayées l'une après
+                    // l'autre : on dit laquelle, et on peut réduire le lecteur
+                    // ou le fermer sans attendre (un simple rond tournait,
+                    // par-dessus tout, sans issue).
                     VStack(spacing: TSpace.md) {
                         ProgressView().tint(.tPrimary).scaleEffect(1.3)
-                        Text(store.t("loading_vod"))
+                        Text(store.t(isLivePlaying ? "loading" : "loading_vod"))
                             .font(.tCardTitle).foregroundColor(.tMuted)
+                        if let source = loadingSource {
+                            Text(store.t("loading_source")
+                                    .replacingOccurrences(of: "{s}", with: store.t("src_\(source)")))
+                                .font(.tMeta).foregroundColor(.tMuted)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, TSpace.lg)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .top) { loadingBar }
 
                 } else if let err = errorMsg {
                     // Réessayer : une source a pu revenir, le direct a pu
@@ -743,7 +802,11 @@ struct MainTabView: View {
                     .frame(width: 28)
                     .contentShape(Rectangle())
                     .gesture(
-                        DragGesture(minimumDistance: 2)
+                        // Repère global : la poignée suit le bord du chat ;
+                        // mesuré dans son propre repère, le déplacement
+                        // retombait vers 0 à chaque image (largeur qui oscille,
+                        // ou poignée qui reste en place).
+                        DragGesture(minimumDistance: 2, coordinateSpace: .global)
                             .onChanged { value in
                                 let start = chatDragStart ?? store.chatWidthRatio
                                 if chatDragStart == nil { chatDragStart = start }
@@ -766,7 +829,12 @@ struct MainTabView: View {
     /// Le chat, quelle que soit la disposition.
     @ViewBuilder
     private func chatPane(style: ChatStyle) -> some View {
-        if let channel = currentChannelName {
+        // Bascule douce vers un direct (« Retour au direct » depuis le DVR) :
+        // le lecteur reste affiché, le chat attend l'id de la chaîne, qui
+        // arrive avec les liens. Créé sans lui, il ne le prenait jamais (il se
+        // configure une fois) : ni emotes de la chaîne, ni badges, ni points,
+        // ni épinglé, ni raid jusqu'à la réouverture.
+        if let channel = currentChannelName, currentChannelId != nil || !switchingSource {
             ChatView(
                 channelName: channel,
                 channelId: currentChannelId,
@@ -776,7 +844,8 @@ struct MainTabView: View {
                 chatOnly: $chatOnly,
                 style: style,
                 onJoinChannel: { target in   // raid → suit la chaîne raidée
-                    playLive(target)
+                    // Lecteur réduit : il le reste (on naviguait ailleurs).
+                    playLive(target, keepVisibility: true)
                 }
             )
             .id(channel)   // changement de chaîne → chat reconstruit à neuf
@@ -845,6 +914,7 @@ struct MainTabView: View {
                 },
                 onLatency: { updateLatency($0) },
                 onBehind: { updateBehind($0) },
+                onPlaying: { playerPlaying = $0 },
                 onPull: { pullPlayer($0) },
                 onPullEnd: { endPull($0, predicted: $1) },
                 onReduce: { reducePlayer() },
@@ -880,6 +950,7 @@ struct MainTabView: View {
                 onTime: { vodPlaybackTime = $0 },
                 onLatency: { updateLatency($0) },
                 onBehind: { updateBehind($0) },
+                onPlaying: { playerPlaying = $0 },
                 notice: accountNotice,
                 onChat: nil,
                 onRewind: rewindAction,
@@ -967,6 +1038,27 @@ struct MainTabView: View {
         .onChange(of: topBarDragging) { active in
             if !active, playerVisible, pull.y > 0 { pullPlayer(0) }
         }
+    }
+
+    /// Barre de l'écran de chargement : réduire (le chargement continue, la
+    /// mini-barre y ramène) ou fermer.
+    private var loadingBar: some View {
+        HStack {
+            Button { reducePlayer() } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.tPrimary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(store.t("reduce"))
+            Spacer()
+            TIconButton(icon: "xmark", size: 32) { stopPlayer() }
+                .accessibilityLabel(store.t("close"))
+        }
+        .padding(.horizontal, TSpace.md)
+        .padding(.top, TSpace.sm)
     }
 
     /// Qualité en cours pour le lecteur immersif : celle choisie, sinon la
@@ -1113,10 +1205,12 @@ struct MainTabView: View {
         return liveSourceUsed
     }
 
-    /// Recharge le flux courant (bouton ⟳ du lecteur).
+    /// Recharge le flux courant (bouton ⟳ du lecteur, « Réessayer »).
     private func reloadCurrent() {
         guard let mode = playerMode else { return }
         logger.info("LECTEUR", "Rechargement du flux demandé", nil)
+        // Rembobinage d'un direct : il garde son « Retour au direct ».
+        pendingDvrChannel = dvrSourceChannel
         startPlayback(mode)
     }
 
@@ -1193,9 +1287,19 @@ struct MainTabView: View {
     @ViewBuilder
     private var miniBar: some View {
         HStack(spacing: TSpace.md) {
-            Image(systemName: isLivePlaying ? "dot.radiowaves.left.and.right" : "play.fill")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundColor(isLivePlaying ? .tLive : .tPrimary)
+            // Chargement réduit : il tourne encore ; en échec, on le dit.
+            if loading {
+                ProgressView().tint(.tPrimary).scaleEffect(0.7)
+                    .frame(width: 16, height: 16)
+            } else if errorMsg != nil {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.tWarning)
+            } else {
+                Image(systemName: isLivePlaying ? "dot.radiowaves.left.and.right" : "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(isLivePlaying ? .tLive : .tPrimary)
+            }
 
             Text(statusTitle)
                 .font(.tCardTitle)
@@ -1227,7 +1331,7 @@ struct MainTabView: View {
     /// Multi-live en préparation : les vidéos choisies, et « Regarder ».
     /// Au-dessus du mini-lecteur quand il est là.
     private var multiBar: some View {
-        let miniShown = playerMode != nil && qualityLinks != nil
+        let miniShown = playerMode != nil
         return HStack(spacing: TSpace.sm) {
             Image(systemName: "square.grid.2x2.fill")
                 .font(.system(size: 14, weight: .bold))
@@ -1267,9 +1371,12 @@ struct MainTabView: View {
     }
 
     // MARK: – Playback
+    /// `keepVisibility` : enchaînement automatique (VOD suivante de « Tout
+    /// lire », raid suivi) — un lecteur réduit le reste, au lieu de surgir en
+    /// plein écran pendant qu'on navigue.
     private func playVod(_ id: String, _ title: String? = nil,
                          _ thumb: String? = nil, _ streamer: String? = nil,
-                         soft: Bool = false) {
+                         soft: Bool = false, keepVisibility: Bool = false) {
         // Une VOD hors de la playlist en cours met fin à l'enchaînement.
         if !vodQueue.contains(where: { $0.id == id }) { vodQueue = [] }
         // Historique des VODs vues : centralisé ici pour couvrir TOUS les points
@@ -1281,7 +1388,8 @@ struct MainTabView: View {
             thumb: thumb, streamer: streamer,
             addedAt: Date().timeIntervalSince1970 * 1000
         ))
-        startPlayback(.vod(id: id, title: title, thumb: thumb, streamer: streamer), soft: soft)
+        startPlayback(.vod(id: id, title: title, thumb: thumb, streamer: streamer),
+                      soft: soft, keepVisibility: keepVisibility)
     }
     private func playQueue(_ list: [VodData], _ streamer: String?) {
         guard let first = list.first else { return }
@@ -1289,13 +1397,14 @@ struct MainTabView: View {
         vodQueueStreamer = streamer
         playVod(first.id, first.title, first.previewThumbnailURL, streamer)
     }
-    /// Fin d'une vidéo : la suivante de la playlist, s'il y en a une.
+    /// Fin d'une vidéo : la suivante de la playlist, s'il y en a une. Pas
+    /// pendant la fermeture du lecteur (fin arrivée pendant le fondu).
     private func playNextInQueue() {
-        guard case .vod(let id, _, _, _) = playerMode,
+        guard !closingPlayer, case .vod(let id, _, _, _) = playerMode,
               let i = vodQueue.firstIndex(where: { $0.id == id }) else { return }
         guard i + 1 < vodQueue.count else { vodQueue = []; return }
         let next = vodQueue[i + 1]
-        playVod(next.id, next.title, next.previewThumbnailURL, vodQueueStreamer)
+        playVod(next.id, next.title, next.previewThumbnailURL, vodQueueStreamer, keepVisibility: true)
     }
     private func playClip(_ slug: String, _ title: String?) {
         vodQueue = []
@@ -1306,30 +1415,54 @@ struct MainTabView: View {
         vodQueue = []
         startPlayback(.recovered(rec))
     }
-    private func playLive(_ channel: String, soft: Bool = false) {
+    private func playLive(_ channel: String, soft: Bool = false, keepVisibility: Bool = false) {
+        // Ce direct est déjà ouvert (mini-barre, puis sa notification ou sa
+        // carte) : on le remontre. Tout recharger donnait un écran noir, et
+        // flux et chat relus.
+        if !soft, case .live(let current)? = playerMode,
+           current.lowercased() == channel.lowercased(), errorMsg == nil, !closingPlayer {
+            if !keepVisibility {
+                pull.y = 0
+                withAnimation { playerVisible = true }
+            }
+            return
+        }
         vodQueue = []
-        startPlayback(.live(channelName: channel), soft: soft)
+        startPlayback(.live(channelName: channel), soft: soft, keepVisibility: keepVisibility)
     }
 
     /// `soft` : on reste sur la même chaîne (direct ↔ enregistrement). Le
     /// lecteur en place continue de jouer pendant que la nouvelle source se
     /// résout, au lieu d'être démonté et remplacé par un écran d'attente.
-    private func startPlayback(_ mode: PlayerMode, soft: Bool = false) {
+    /// `keepVisibility` : voir playVod.
+    private func startPlayback(_ mode: PlayerMode, soft: Bool = false, keepVisibility: Bool = false) {
         // Referme le clavier s'il était ouvert (recherche en cours) : sinon il
         // restait affiché par-dessus le lecteur.
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
                                         to: nil, from: nil, for: nil)
-        // Empêche la mise en veille pendant la lecture (utile en audio-only où
-        // l'écran ne joue pas de vidéo et s'éteindrait sinon).
-        UIApplication.shared.isIdleTimerDisabled = true
         // Le son passe à l'app ; il est rendu aux autres apps à la fermeture
         // du lecteur (PlaybackAudio). Rien n'est relâché en changeant de
         // chaîne : le lecteur reste ouvert.
         PlaybackAudio.shared.claim("player")
+        // Même direct relu en douce (session web changée) : ses minuteries
+        // continuent, elles repartent avec lui. Sinon, celles de la lecture
+        // précédente (spectateurs relus toutes les 30 s, durée chaque seconde)
+        // et la pulsation des drops s'arrêtent ici : passer d'un direct à une
+        // VOD, ou à un direct hors ligne, les laissait tourner pour l'ancienne
+        // chaîne. Calculé avant que la chaîne en cours ne change.
+        var sameLive = false
+        if soft, case .live(let channel) = mode, channel.lowercased() == currentChannelName { sameLive = true }
+        if !sameLive {
+            stopLiveTimers()
+            liveViewerCount = 0
+            liveStartedAt   = nil
+            liveUptimeText  = ""
+        }
         playerMode    = mode
-        playerVisible = true
-        // Drops : seulement pendant un direct (relancés par startLiveTimers).
-        if case .live = mode {} else { DropsHeartbeat.shared.stop() }
+        if !keepVisibility { playerVisible = true }
+        // Une fermeture en plein fondu est remplacée par cette lecture (voir
+        // stopPlayer).
+        closingPlayer = false
         errorMsg      = nil
         chatOnly      = false
         vodPlaybackTime = 0
@@ -1337,11 +1470,13 @@ struct MainTabView: View {
         liveLatency     = 0
         liveBehind      = 0
         pull.y          = 0
+        loadingSource   = nil
 
         if soft {
             switchingSource = true
         } else {
             loading          = true
+            playerPlaying    = false
             qualityLinks     = nil
             qualityVariants  = [:]
             // Avatar, jeu et qualité retenue ne sont vidés qu'à l'ouverture
@@ -1350,6 +1485,14 @@ struct MainTabView: View {
             liveAvatar       = nil
             liveGame         = ""
             immersiveQuality = ""
+            // Titre provisoire (mini-barre d'un chargement réduit) : le vrai
+            // arrive avec les liens.
+            switch mode {
+            case .live(let channel):             statusTitle = channel
+            case .vod(let id, let title, _, _):  statusTitle = title ?? "VOD \(id)"
+            case .clip(_, let title):            statusTitle = title ?? "Clip"
+            case .recovered(let rec):            statusTitle = rec.title.isEmpty ? store.t("recover_title") : rec.title
+            }
         }
         // Un VOD lancé depuis le bouton Rembobiner garde le lien vers sa chaîne,
         // pour pouvoir revenir au direct. Un VOD normal, non.
@@ -1358,8 +1501,12 @@ struct MainTabView: View {
         pendingDvrChannel = nil
 
         if case .live(let channel) = mode {
-            currentChannelName = channel.lowercased()
-            currentChannelId   = nil   // reset — sera rempli après getLive
+            let login = channel.lowercased()
+            // Autre chaîne : son id est vidé, rempli après getLive (le chat
+            // l'attend en bascule douce, voir chatPane). Même chaîne (session
+            // web changée) : il reste, le chat aussi.
+            if currentChannelName != login { currentChannelId = nil }
+            currentChannelName = login
         } else {
             currentChannelName = nil
             currentChannelId   = nil
@@ -1457,8 +1604,14 @@ struct MainTabView: View {
                 // Abonné sans pub sur cette chaîne : le direct passe par son
                 // compte (session web), sinon jeton anonyme comme avant.
                 let web = store.accountPlaybackWebToken(for: channel)
+                // Source essayée : dite par l'écran de chargement.
                 let data = await getLive(channelName: channel, webToken: web,
-                                         integrity: web.map { dropsIntegrity(for: $0) })
+                                         integrity: web.map { dropsIntegrity(for: $0) },
+                                         onSource: { source in
+                                             DispatchQueue.main.async {
+                                                 if gen == loadGeneration { loadingSource = source }
+                                             }
+                                         })
                 // Session refusée par Twitch : le circuit habituel l'efface et
                 // affiche « session expirée ».
                 if data.webSessionExpired {
@@ -1490,7 +1643,9 @@ struct MainTabView: View {
                         statusTitle       = data.title.isEmpty ? channel : data.title
                         liveViewerCount   = data.viewerCount
                         liveStartedAt     = data.startedAt
-                        currentChannelId  = data.userId   // ← userId Twitch → emotes canal
+                        // userId Twitch → emotes de la chaîne. Même chaîne relue
+                        // sans réponse de GQL : l'id déjà connu reste.
+                        if let uid = data.userId { currentChannelId = uid }
                         liveAvatar        = data.avatar
                         liveGame          = data.game
                         liveDvrVideoId    = data.dvrVideoId
@@ -1520,10 +1675,11 @@ struct MainTabView: View {
     /// `wakeOthers` faux (minuteur de veille) : la musique qu'une autre app
     /// jouait avant la vidéo ne reprend pas toute seule.
     private func stopPlayer(wakeOthers: Bool = true) {
-        UIApplication.shared.isIdleTimerDisabled = false   // ré-autorise la veille
         // Session audio relâchée : une musique coupée par la vidéo peut reprendre.
+        // (L'écran, lui, peut de nouveau s'éteindre : voir keepScreenOn.)
         PlaybackAudio.shared.release("player", notifyOthers: wakeOthers)
         loadGeneration += 1   // un chargement encore en cours sera ignoré
+        let gen = loadGeneration
         stopLiveTimers()
         // Fin de visionnage : la progression part maintenant, plutôt que
         // toutes les quelques secondes pendant la lecture.
@@ -1538,6 +1694,10 @@ struct MainTabView: View {
         withAnimation(.easeInOut(duration: 0.28)) { playerVisible = false }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // Autre lecture lancée pendant le fondu (les onglets sont
+            // touchables dès son début) : c'est elle qui compte. Le ménage
+            // effaçait son état, alors que son chargement se poursuivait.
+            guard gen == loadGeneration else { return }
             chatOnly           = false
             currentChannelName = nil
             currentChannelId   = nil
@@ -1552,11 +1712,26 @@ struct MainTabView: View {
             pull.y             = 0
             liveAvatar         = nil
             clipVodId          = nil
+            clipOffset         = 0
+            clipSpeed          = 1
             liveGame           = ""
+            liveSourceUsed     = nil
             playerMode         = nil
             qualityLinks       = nil
             qualityVariants    = [:]
             statusTitle        = ""
+            loading            = false
+            loadingSource      = nil
+            errorMsg           = nil
+            playerPlaying      = false
+            // Rien ne doit survivre à la fermeture : une VOD de la playlist
+            // rouverte plus tard depuis l'historique enchaînait sur la suivante.
+            vodQueue           = []
+            vodQueueStreamer   = nil
+            switchingSource    = false
+            vodChapters        = []
+            vodMuted           = []
+            vodUnmuted         = 0
             closingPlayer      = false
         }
     }
@@ -1565,6 +1740,7 @@ struct MainTabView: View {
     private func startLiveTimers(channel: String) {
         stopLiveTimers()
         updateUptime()
+        let gen = loadGeneration
         uptimeTimer  = Timer.scheduledCommon(every: 1)  { _ in updateUptime() }
         refreshTimer = Timer.scheduledCommon(every: 30) { _ in
             Task {
@@ -1572,6 +1748,9 @@ struct MainTabView: View {
                 // juste le nombre de viewers et l'uptime.
                 let stats = await getStreamStats(channelName: channel)
                 await MainActor.run {
+                    // Autre lecture entre-temps : ces chiffres sont ceux
+                    // d'une chaîne qu'on ne regarde plus.
+                    guard gen == loadGeneration else { return }
                     if stats.viewerCount > 0  { liveViewerCount = stats.viewerCount }
                     if let s = stats.startedAt { liveStartedAt  = s }
                 }
@@ -1596,7 +1775,8 @@ struct MainTabView: View {
 
     private func updateUptime() {
         guard let start = liveStartedAt else { return }
-        let elapsed = Int(Date().timeIntervalSince(start))
+        // Horloge de l'appareil en retard sur Twitch : « 0:-5 » sinon.
+        let elapsed = max(0, Int(Date().timeIntervalSince(start)))
         let h = elapsed / 3600, m = (elapsed % 3600) / 60, s = elapsed % 60
         liveUptimeText = h > 0
             ? String(format: "%d:%02d:%02d", h, m, s)
@@ -1672,4 +1852,19 @@ struct CustomTabBar: View {
 struct ChannelSheetItem: Identifiable {
     let login: String
     var id: String { login }
+}
+
+/// Mise en veille de l'écran suspendue tant qu'un lecteur le demande :
+/// l'écran du lecteur (« player », voir MainTabView.keepScreenOn) ou le
+/// multi-live (« multi »). Chacun pour soi : passer de l'un à l'autre ne
+/// rend pas la veille sous celui qui s'ouvre. Fil principal seulement.
+enum ScreenAwake {
+    private static var owners = Set<String>()
+
+    static func set(_ owner: String, _ on: Bool) {
+        if on { owners.insert(owner) } else { owners.remove(owner) }
+        let wanted = !owners.isEmpty
+        guard UIApplication.shared.isIdleTimerDisabled != wanted else { return }
+        UIApplication.shared.isIdleTimerDisabled = wanted
+    }
 }

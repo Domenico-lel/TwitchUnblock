@@ -80,8 +80,12 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🛡 **Live sources, in the order you pick** — lives come from sources that
   avoid most ads (Luminous Asia, an Albania proxy based on TTV.LOL, Luminous
   Europe) or official Twitch (with ads), tried one after the other until one
-  answers. Reorder them in Settings → Player; picking a source from the
-  player's ⋯ menu (which also shows the source in use) moves it to the top.
+  answers, without waiting a minute on one that stays silent: the loading
+  screen says which one is being tried, and the player can be minimized or
+  closed while it loads.
+  Reorder them in Settings → Player; picking a source from the player's ⋯
+  menu (which also ticks the source in use) moves it to the top, or tries it
+  again.
   Channels that stream with multiple encodes (Enhanced Broadcasting) keep each
   quality's own name on every source. No source escapes the channel's own ad
   breaks: Twitch stitches them into the stream itself. When Twitch's own API
@@ -117,7 +121,9 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🖥 **Fill the screen** — crops the video to remove the black bars in
   landscape. Cuts off the top and bottom: 16:9 in a phone screen can't do both.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
-  right in the player. It stops multi-live too.
+  right in the player. It stops multi-live too. The screen only stays awake
+  while a video plays on screen: paused, minimized or in audio only, it
+  sleeps as usual (the sound goes on).
 * 📡 **AirPlay** — send the stream to an Apple TV or a compatible TV.
 * 🎧 **Spatial audio (AirPods)** — turn it off in the app, head tracking
   included (Settings → Player). iOS doesn't let apps pick "Fixed" or "Head

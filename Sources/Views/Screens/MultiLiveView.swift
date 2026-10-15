@@ -55,7 +55,7 @@ struct MultiLiveView: View {
                 save: { [store] id, t in store.setVodProgress(id, time: t) },
                 onStarted: { [store] id, meta in Self.vodStarted(id, meta, store: store) })
             session.sync(multi.entries)
-            UIApplication.shared.isIdleTimerDisabled = true
+            ScreenAwake.set("multi", true)
         }
         .onChange(of: multi.entries) { list in
             if list.isEmpty { dismiss() } else { session.sync(list) }
@@ -78,7 +78,7 @@ struct MultiLiveView: View {
             // Fin de visionnage : la progression des VODs part maintenant,
             // comme à la fermeture du lecteur.
             store.flushToCloud(force: true)
-            UIApplication.shared.isIdleTimerDisabled = false
+            ScreenAwake.set("multi", false)
         }
         .alert(store.t("multi_add_channel"), isPresented: $showAdd) {
             TextField(store.t("multi_add_ph"), text: $addName)

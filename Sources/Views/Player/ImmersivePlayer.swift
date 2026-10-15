@@ -886,6 +886,9 @@ struct ImmersivePlayer: View {
     var onProgress: (Double) -> Void = { _ in }
     var onLatency:  (Double?) -> Void = { _ in }
     var onBehind:   (Double?) -> Void = { _ in }
+    /// Lecture en cours ou non (pause, échec) : le parent n'empêche la mise
+    /// en veille de l'écran que pendant la lecture.
+    var onPlaying:  (Bool) -> Void = { _ in }
     /// Glissé vers le bas en cours (décalage en points, 0 = relâché sans
     /// réduire) : le parent fait suivre le lecteur au doigt.
     var onPull:     (CGFloat) -> Void = { _ in }
@@ -972,6 +975,7 @@ struct ImmersivePlayer: View {
          onProgress: @escaping (Double) -> Void = { _ in },
          onLatency:  @escaping (Double?) -> Void = { _ in },
          onBehind:   @escaping (Double?) -> Void = { _ in },
+         onPlaying:  @escaping (Bool) -> Void = { _ in },
          onPull:     @escaping (CGFloat) -> Void = { _ in },
          onPullEnd:  @escaping (CGFloat, CGFloat) -> Void = { _, _ in },
          onReduce:   @escaping () -> Void = {},
@@ -987,7 +991,8 @@ struct ImmersivePlayer: View {
         self.savedTime = savedTime; self.contentID = contentID
         self.info = info; self.onChannel = onChannel
         self.onProgress = onProgress; self.onLatency = onLatency
-        self.onBehind = onBehind; self.onPull = onPull; self.onPullEnd = onPullEnd
+        self.onBehind = onBehind; self.onPlaying = onPlaying
+        self.onPull = onPull; self.onPullEnd = onPullEnd
         self.sleepLabel = sleepLabel; self.chatMode = chatMode
         self.isLandscape = isLandscape; self.controlsInset = controlsInset
         self.fillScreen = fillScreen; self.canReturnToLive = canReturnToLive
@@ -1201,7 +1206,9 @@ struct ImmersivePlayer: View {
             if !isLive, model.speed != 1 { flash(speedFlash, duration: 1_500_000_000) }
             if let notice { flash(notice, duration: 2_500_000_000) }
             scheduleAutoHide()
+            onPlaying(model.isPlaying)
         }
+        .onChange(of: model.isPlaying) { onPlaying($0) }
         .onChange(of: notice) { n in
             if let n { flash(n, duration: 2_500_000_000) }
         }

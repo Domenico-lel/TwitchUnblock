@@ -33,6 +33,8 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
     var onSpeedChange: (Double) -> Void = { _ in }
     /// Pause pub du direct (bandeau du parent) : suit chaque nouvel AVPlayer.
     var adBreaks: AdBreakWatcher? = nil
+    /// Lecture en cours ou non (pause, fin, échec), à chaque changement.
+    var onPlaying: (Bool) -> Void = { _ in }
 
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
@@ -43,6 +45,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         context.coordinator.playerVC = vc
         context.coordinator.adBreaks = adBreaks
         context.coordinator.onSpeedChange = onSpeedChange
+        context.coordinator.onPlaying = onPlaying
         // Reprise : la progression enregistrée (une VOD vue jusqu'au bout
         // repart du début).
         startPlayer(in: vc, context: context, from: .init(seconds: savedTime, resume: true))
@@ -94,6 +97,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
     func updateUIViewController(_ vc: AVPlayerViewController, context: Context) {
         let coordinator = context.coordinator
         coordinator.onSpeedChange = onSpeedChange
+        coordinator.onPlaying = onPlaying
         // Comparée à l'adresse demandée, pas à celle de l'élément : après un
         // repli AirPlay (playlist du CDN), elles différaient toujours, et le
         // lecteur se recréait à chaque mise à jour — en boucle, jamais lisible.
@@ -148,6 +152,10 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         /// Vitesse retenue hors direct, et qui la reçoit quand elle change.
         var speed: Double = 1
         var onSpeedChange: (Double) -> Void = { _ in }
+        /// Lecture en cours ou non (voir NativeVideoPlayer.onPlaying), et la
+        /// dernière annoncée pour le lecteur en cours.
+        var onPlaying: (Bool) -> Void = { _ in }
+        private var lastPlaying: Bool?
         private var rateObserver: NSObjectProtocol?
         private var lastCatchUp = Date.distantPast
         private var latency = LiveLatencyController()
@@ -514,9 +522,13 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 }
             }
             // Lecture ou pause (commandes d'Apple, écran verrouillé, appel,
-            // fin) : la Live Activity la suit.
+            // fin) : la Live Activity la suit, le parent aussi (écran allumé).
+            lastPlaying = nil
             timeControlObs = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
-                DispatchQueue.main.async { self?.updateActivity() }
+                DispatchQueue.main.async {
+                    self?.updateActivity()
+                    self?.reportPlaying()
+                }
             }
             // Vitesse choisie dans le menu d'Apple, ou imposée (AirPlay) : elle
             // devient la vitesse par défaut (play() la rend après une pause) et
@@ -589,6 +601,16 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                                   isPlaying: player.timeControlStatus != .paused,
                                   position: at.isFinite ? max(0, at) : 0, duration: length,
                                   rate: isLive ? 1 : speed)
+        }
+
+        /// Lecture ou pause, une fois par changement ; à nouveau pour chaque
+        /// nouvel AVPlayer (autre qualité : peut-être l'audio seul).
+        private func reportPlaying() {
+            guard !tornDown, let player = playerRef else { return }
+            let playing = player.timeControlStatus != .paused
+            guard playing != lastPlaying else { return }
+            lastPlaying = playing
+            onPlaying(playing)
         }
 
         /// Durée d'une VOD ; pour un enregistrement en cours, la fin de ce
@@ -691,6 +713,9 @@ struct VideoPlayerView: View {
     var onLatency: (Double?) -> Void = { _ in }
     /// Distance au bord du direct remontee au parent (synchro auto du chat).
     var onBehind: (Double?) -> Void = { _ in }
+    /// Une image joue (lecture en cours, hors audio seul) : le parent empêche
+    /// alors la mise en veille de l'écran.
+    var onPlaying: (Bool) -> Void = { _ in }
     /// Annonce brève au lancement (direct servi par le compte, sans pub).
     var notice: String? = nil
     // Actions affichees a cote du bouton Source (nil = bouton masque).
@@ -853,7 +878,9 @@ struct VideoPlayerView: View {
                                 localizedName: $0 == 1 ? store.t("speed_normal") : VodSpeed.label($0, store.lang))
             },
             onSpeedChange: onSpeedChange,
-            adBreaks: adBreaks
+            adBreaks: adBreaks,
+            // Audio seul : rien à regarder, l'écran peut s'éteindre.
+            onPlaying: { playing in onPlaying(playing && !isAudioQuality(quality)) }
         )
         .aspectRatio(16/9, contentMode: .fit)
         .background(Color.black)
