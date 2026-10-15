@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.65",
+          "buildVersion": "294",
+          "date": "2026-10-15",
+          "localizedDescription": "- Polls: the developer can ask a question under the home announcement; vote without an account, change your mind until it ends, and see the results once you've voted\n- Other improvements and fixes",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-294/TwitchUnblock.ipa",
+          "size": 3607507,
+          "commit": "d0651bd7dc0fd1c985e6f2c583247a603e01e303"
+        },
+        {
           "version": "1.3.63",
           "buildVersion": "292",
           "date": "2026-10-15",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-261/TwitchUnblock.ipa",
           "size": 2648332,
           "commit": "028e8169a58b91f9fd62389dbae8740a43db3274"
-        },
-        {
-          "version": "1.2.35",
-          "buildVersion": "260",
-          "date": "2026-10-11",
-          "localizedDescription": "- Fixed a black screen on some recent VODs with muted parts (Twitch's new MP4 format); their original sound is restored too while Twitch still has it.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-260/TwitchUnblock.ipa",
-          "size": 2598048,
-          "commit": "f0ede2e4b435a6c29be078d563ab8a3619f96e27"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.63",
+      "version": "1.3.65",
       "versionDate": "2026-10-15",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-292/TwitchUnblock.ipa",
-      "size": 3571863
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-294/TwitchUnblock.ipa",
+      "size": 3607507
     }
   ],
   "news": []
