@@ -121,6 +121,32 @@ final class DropsService: ObservableObject {
     @Published var notice: (text: String, ok: Bool)? = nil
 
     private var integrity: TwitchWebGQL.Integrity?
+    /// Session web pour laquelle `integrity` a été obtenu.
+    private var integrityToken: String?
+    /// Sessions web remplacées : une lecture encore en route pour l'une
+    /// d'elles n'affiche plus rien.
+    private var endedTokens: [String] = []
+
+    /// Session web remplacée (déconnexion, expiration, autre compte, nouvelle
+    /// connexion) : ce qu'on affichait était à l'ancienne, son jeton
+    /// d'intégrité aussi.
+    func sessionChanged(from old: String?, to new: String?) {
+        if let new { endedTokens.removeAll { $0 == new } }
+        guard let old, old != new else { return }
+        endedTokens = Array((endedTokens + [old]).suffix(8))
+        campaigns = []
+        session = nil
+        available = []
+        loaded = false
+        failed = false
+        availableLoaded = false
+        availableFailed = false
+        notice = nil
+        integrity = nil
+        integrityToken = nil
+    }
+
+    private func ended(_ token: String) -> Bool { endedTokens.contains(token) }
 
     // Persisted query du site (DropsPage_ClaimDropRewards).
     private static let claimHash = "a455deea71bdc9015b78eb49f4acfbce8baa7ccbedd28e549bb025bd0f751930"
@@ -143,6 +169,7 @@ final class DropsService: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         let json = await webGQL(["query": Self.inventoryQuery], token: token)
+        guard !ended(token) else { return }
         guard let data = json?["data"] as? [String: Any] else {
             logger.warn("DROPS", "Inventaire indisponible", gqlErrors(json))
             failed = true
@@ -172,6 +199,7 @@ final class DropsService: ObservableObject {
         var claimedSome = false
         for c in campaigns where !c.needsAccountLink {
             for d in c.drops where d.canClaim {
+                guard !ended(token) else { return }
                 if await claim(d, token: token) {
                     claimedSome = true
                     notify(d, claimed: true)
@@ -213,6 +241,7 @@ final class DropsService: ObservableObject {
                 }
             }
         }
+        guard !ended(token) else { return }
         guard let user = (json?["data"] as? [String: Any])?["currentUser"] as? [String: Any],
               let list = user["dropCampaigns"] as? [[String: Any]] else {
             logger.warn("DROPS", "Campagnes ouvertes indisponibles", gqlErrors(json))
@@ -238,6 +267,7 @@ final class DropsService: ObservableObject {
           channel { displayName } currentMinutesWatched requiredMinutesWatched dropID } } }
         """
         let json = await webGQL(["query": q, "variables": ["c": channelId]], token: token)
+        guard !ended(token) else { return }
         guard let data = json?["data"] as? [String: Any],
               let s = (data["currentUser"] as? [String: Any])?["dropCurrentSession"] as? [String: Any],
               s["dropID"] is String else { session = nil; return }
@@ -250,9 +280,14 @@ final class DropsService: ObservableObject {
     /// Jeton d'intégrité valide (WebView éphémère si besoin), gardé jusqu'à
     /// une minute de son expiration.
     func validIntegrity(token: String) async -> TwitchWebGQL.Integrity? {
-        if let i = integrity, i.expiry > Date().addingTimeInterval(60) { return i }
-        integrity = await TwitchWebGQL.shared.mintIntegrity(token: token)
-        return integrity
+        if let i = integrity, integrityToken == token,
+           i.expiry > Date().addingTimeInterval(60) { return i }
+        let fresh = await TwitchWebGQL.shared.mintIntegrity(token: token)
+        // Session remplacée pendant la génération : pas gardé pour la suivante.
+        guard !ended(token) else { return fresh }
+        integrity = fresh
+        integrityToken = token
+        return fresh
     }
 
     /// Le même, en types simples : pour accountPlaybackToken (TwitchAPI.swift,
@@ -303,6 +338,8 @@ final class DropsService: ObservableObject {
             integrity = nil
             result = await sendClaim(body, token: token)
         }
+        // Session remplacée entre-temps : rien à annoncer à la suivante.
+        guard !ended(token) else { return false }
         let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
         switch result {
         case .ok:
@@ -385,6 +422,10 @@ final class DropsHeartbeat: ObservableObject {
     private var task: Task<Void, Never>? = nil
     /// Segments déjà demandés (les 256 derniers).
     private var seen: [String] = []
+    /// Chaîne, session web et mode de la pulsation en cours (sessionChanged).
+    private var runningLogin: String? = nil
+    private var runningToken: String? = nil
+    private var runningPoll = true
 
     /// `pollSegments` faux : le lecteur charge déjà le flux au nom du compte
     /// (direct par le compte) ; on ne relit pas les segments — une seconde
@@ -393,6 +434,9 @@ final class DropsHeartbeat: ObservableObject {
     func start(login: String, token: String, pollSegments: Bool = true) {
         stop()
         let login = login.lowercased()
+        runningLogin = login
+        runningToken = token
+        runningPoll = pollSegments
         status = .checking(login)
         task = Task { [weak self] in await self?.run(login: login, token: token, pollSegments: pollSegments) }
     }
@@ -403,6 +447,25 @@ final class DropsHeartbeat: ObservableObject {
         channelId = nil
         seen.removeAll()
         status = .idle
+        runningLogin = nil
+        runningToken = nil
+    }
+
+    /// Session web changée (déconnexion, expiration, autre compte, nouvelle
+    /// connexion) : la pulsation ne continue jamais avec l'ancien jeton —
+    /// minutes et réclamations seraient allées à l'ancien compte. Relancée
+    /// pour la même chaîne avec la nouvelle session, arrêtée sans session.
+    func sessionChanged(to token: String?) {
+        guard let login = runningLogin, token != runningToken else { return }
+        let poll = runningPoll
+        stop()
+        guard let token, !token.isEmpty,
+              UserDefaults.standard.object(forKey: "cfg_drops_progress") as? Bool ?? true else {
+            logger.info("DROPS", "Session web partie : progression arrêtée", login)
+            return
+        }
+        logger.info("DROPS", "Session web changée : progression reprise avec la nouvelle", login)
+        start(login: login, token: token, pollSegments: poll)
     }
 
     private enum Poll { case ok, expired, offline }
@@ -447,6 +510,8 @@ final class DropsHeartbeat: ObservableObject {
                         logger.info("DROPS", "Live terminé", login)
                         channelId = nil
                         status = .idle
+                        // Plus rien à relancer si la session web change.
+                        if !Task.isCancelled { runningLogin = nil; runningToken = nil }
                         return
                     }
                 }

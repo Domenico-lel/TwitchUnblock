@@ -573,7 +573,10 @@ struct ChatView: View {
         .sheet(isPresented: $showPointsSheet) {
             ChannelPointsSheet(service: pointsService) {
                 // L'utilisateur demande à connecter son compte pour les points.
-                webLoginClear   = pointsService.needsWebLogin && store.twitchWebToken != nil
+                // Session refusée (expirée, autre compte) : cookies effacés,
+                // sinon la page reprenait aussitôt l'ancienne session.
+                webLoginClear   = (pointsService.needsWebLogin && store.twitchWebToken != nil)
+                    || store.webSessionExpired || store.webSessionMismatch != nil
                 showPointsSheet = false
                 // Délai : éviter le conflit « fermeture + ouverture » de sheets simultanées.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {

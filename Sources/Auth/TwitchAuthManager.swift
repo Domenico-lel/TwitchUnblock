@@ -78,8 +78,14 @@ final class TwitchAuthManager: NSObject, ASWebAuthenticationPresentationContextP
                     return
                 }
 
-                logger.error("AUTH", "Token absent ou state invalide",
-                             value("error_description") ?? value("error"))
+                // Autorisation refusée sur Twitch (« Annuler ») : auth.html
+                // renvoie maintenant l'erreur à l'app, qui ferme la page.
+                if let err = value("error") {
+                    logger.warn("AUTH", "Connexion refusée sur Twitch",
+                                value("error_description") ?? err)
+                } else {
+                    logger.error("AUTH", "Token absent ou state invalide", nil)
+                }
                 continuation.resume(returning: nil)
             }
             s.presentationContextProvider = self

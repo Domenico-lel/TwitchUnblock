@@ -87,7 +87,7 @@ struct HomeView: View {
         .onChange(of: store.localFollows) { _ in Task { await loadLocalFollows() } }
         .sheet(isPresented: $showWebLogin) {
             TwitchWebLoginSheet(
-                clearSession: store.webSessionExpired,
+                clearSession: store.webSessionExpired || store.webSessionMismatch != nil,
                 expectedLogin: store.twitchLogin,
                 onComplete: { webToken, webLogin in
                     showWebLogin = false
@@ -473,7 +473,8 @@ struct HomeView: View {
                store.twitchLogin != nil, store.twitchAvatar != nil {
                 currentUserId = existingId
             } else {
-                guard let user = await getTwitchUser(token: token) else {
+                // Jeton refusé (401) : levé, donc déconnexion plus bas.
+                guard let user = try await fetchTwitchUser(token: token) else {
                     errorFollowed = store.t("err_loading")
                     loadingFollowed = false
                     return

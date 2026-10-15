@@ -898,12 +898,22 @@ func setChatColor(token: String, userId: String, color: String) async -> String?
 
 // MARK: – Helix
 func getTwitchUser(token: String) async -> TwitchUser? {
+    try? await fetchTwitchUser(token: token)
+}
+
+/// Compte du jeton. Un jeton refusé par Twitch (401 : expiré, révoqué) lève
+/// `.userAuthenticationRequired`, comme les lives suivis : l'accueil
+/// déconnecte et invite à se reconnecter, au lieu d'afficher « erreur de
+/// chargement » à chaque ouverture. nil : panne réseau, réponse inattendue.
+func fetchTwitchUser(token: String) async throws -> TwitchUser? {
     guard let url = URL(string: "https://api.twitch.tv/helix/users") else { return nil }
     var req = URLRequest(url: url)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-    guard let (data, resp) = try? await URLSession.shared.data(for: req),
-          (resp as? HTTPURLResponse)?.statusCode == 200,
+    guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return nil }
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    if status == 401 { throw URLError(.userAuthenticationRequired) }
+    guard status == 200,
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let arr  = json["data"] as? [[String: Any]], let u = arr.first else { return nil }
     logger.success("HELIX", "Connecté en tant que \"\(u["display_name"] as? String ?? "")\"")

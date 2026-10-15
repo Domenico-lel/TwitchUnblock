@@ -39,6 +39,17 @@ final class AppStore: ObservableObject {
             // Session partie (déconnexion, refus, expiration) : ses catégories
             // suivies ne protègent plus rien du masquage.
             if twitchWebToken == nil { accountFollowedCategoryIds = [] }
+            // Session changée (déconnexion, expiration, autre compte, nouvelle
+            // connexion) : la progression des drops ne continue jamais avec
+            // l'ancien jeton (minutes et réclamations pour l'ancien compte),
+            // et l'inventaire affiché était le sien.
+            if twitchWebToken != oldValue {
+                let old = oldValue, new = twitchWebToken
+                Task { @MainActor in
+                    DropsHeartbeat.shared.sessionChanged(to: new)
+                    DropsService.shared.sessionChanged(from: old, to: new)
+                }
+            }
         }
     }
 
@@ -59,12 +70,20 @@ final class AppStore: ObservableObject {
     @MainActor
     func validateWebSession() async {
         guard let token = twitchWebToken, !token.isEmpty else { return }
-        switch await webSessionIdentity(token: token) {
+        let check = await webSessionIdentity(token: token)
+        // Autre session entre-temps (nouvelle connexion) : ce verdict-là ne
+        // la concerne pas.
+        guard twitchWebToken == token else { return }
+        switch check {
         case .unknown:
             break
         case .invalid:
             twitchWebToken = nil
             webSessionExpired = true
+            // Cookies effacés aussi : sinon « Rétablir la session » reprenait
+            // aussitôt le cookie périmé, sans rien demander, et l'app se
+            // croyait reconnectée.
+            await TwitchWebSession.clear()
         case .valid(let id, let login):
             webSessionExpired = false
             if let mine = twitchUserId, !mine.isEmpty, id != mine {
@@ -88,8 +107,11 @@ final class AppStore: ObservableObject {
         webSessionMismatch = nil
         webSessionExpired = false
         twitchWebToken = token
-        // Pseudo absent du cookie : vérifié par identifiant.
-        if webLogin == nil { await validateWebSession() }
+        // Vérifiée auprès de Twitch avant d'être annoncée : un cookie périmé
+        // repris par la page de connexion est refusé tout de suite (session
+        // expirée, cookies effacés) au lieu de passer pour une reconnexion.
+        // Pseudo absent du cookie : le compte est vérifié au passage.
+        await validateWebSession()
         return twitchWebToken != nil
     }
 
@@ -711,6 +733,9 @@ final class AppStore: ObservableObject {
             twitchUserId = nil
             twitchLogin  = nil
             twitchAvatar = nil
+            // Refus propre à l'ancien compte (« session web de @x ») :
+            // revérifié pour le nouveau dès que son identifiant est connu.
+            webSessionMismatch = nil
         }
         let isNew = token != twitchToken
         twitchToken = token
@@ -726,6 +751,9 @@ final class AppStore: ObservableObject {
         twitchToken    = nil
         twitchWebToken = nil
         webSessionMismatch = nil
+        // Sans compte, plus de session web à rétablir : sinon l'accueil
+        // annonçait « session expirée » dès la reconnexion.
+        webSessionExpired = false
         Task { await TwitchWebSession.clear() }
         twitchUserId   = nil
         twitchLogin    = nil   // ← nettoyage complet

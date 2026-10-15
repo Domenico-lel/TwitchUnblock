@@ -330,11 +330,14 @@ struct SettingsView: View {
             .frame(width: 52, height: 52)
             .clipShape(Circle())
 
+            // Session web seule (connexion depuis la page Drops) : le pseudo
+            // est connu, mais pas de compte pour le chat ni les suivis.
+            let full = store.twitchToken != nil
             VStack(alignment: .leading, spacing: 2) {
                 Text(login).font(.tSection).foregroundColor(.tText).lineLimit(1)
                 HStack(spacing: 5) {
-                    Circle().fill(Color.tSuccess).frame(width: 6, height: 6)
-                    Text(store.t("connected")).font(.tMeta).foregroundColor(.tMuted)
+                    Circle().fill(full ? Color.tSuccess : Color.tWarning).frame(width: 6, height: 6)
+                    Text(store.t(full ? "connected" : "web_only")).font(.tMeta).foregroundColor(.tMuted)
                 }
             }
             Spacer(minLength: 0)
@@ -1346,10 +1349,9 @@ struct SettingsView: View {
                             .replacingOccurrences(of: "{a}", with: store.twitchLogin ?? "?"))
                         .font(.tMeta).foregroundColor(.tMuted)
                         .fixedSize(horizontal: false, vertical: true)
-                    TPrimaryButton(title: store.t("web_reconnect")) {
-                        store.webSessionMismatch = nil
-                        startWebLogin()
-                    }
+                    // Le bandeau reste tant que la bonne session n'est pas
+                    // là (adoptWebToken l'efface) : annuler ne le perd pas.
+                    TPrimaryButton(title: store.t("web_reconnect")) { startWebLogin() }
                 }
             }
         }
@@ -1365,10 +1367,7 @@ struct SettingsView: View {
                     Text(store.t("web_expired_sub"))
                         .font(.tMeta).foregroundColor(.tMuted)
                         .fixedSize(horizontal: false, vertical: true)
-                    TPrimaryButton(title: store.t("web_reconnect")) {
-                        store.webSessionExpired = false
-                        startWebLogin()
-                    }
+                    TPrimaryButton(title: store.t("web_reconnect")) { startWebLogin() }
                 }
             }
         }
@@ -1962,10 +1961,15 @@ struct SettingsView: View {
         let previous = store.twitchUserId
         guard let token = await TwitchAuthManager.shared.login(chooseAccount: true) else { return }
         let user = await getTwitchUser(token: token)
-        // Autre compte : la session web (points de chaîne) était celle de l'ancien.
-        if user == nil || user?.id != previous, store.twitchWebToken != nil {
-            store.twitchWebToken = nil
-            await TwitchWebSession.clear()
+        // Autre compte : la session web (points de chaîne) était celle de
+        // l'ancien, et ses bandeaux (expirée, autre compte) avec elle.
+        if user == nil || user?.id != previous {
+            if store.twitchWebToken != nil {
+                store.twitchWebToken = nil
+                await TwitchWebSession.clear()
+            }
+            store.webSessionExpired = false
+            store.webSessionMismatch = nil
         }
         store.adoptToken(token)
         if let user {
@@ -1977,8 +1981,10 @@ struct SettingsView: View {
     }
 
     private func startWebLogin() {
-        // Re-login forcé seulement si un token existe déjà mais est invalide.
-        webLoginClear = false
+        // Session refusée par Twitch ou d'un autre compte : cookies twitch.tv
+        // effacés d'abord, sinon la page reprenait aussitôt l'ancienne
+        // session au lieu de demander une connexion.
+        webLoginClear = store.webSessionExpired || store.webSessionMismatch != nil
         showWebLogin = true
     }
 

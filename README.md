@@ -340,10 +340,13 @@ no key to paste. The backend is already hosted and shared by every install.
   After logging out, the next sign-in asks which account to use instead of
   quietly reusing the previous one.
 * 🔐 **Web session check** — the Twitch web session has no known expiry date;
-  it's verified at launch, and you're told when it needs restoring instead of
-  channel points silently going quiet. It must also be the app's account:
-  another account is refused at sign-in (and disconnected if found later), so
-  points, drops and predictions never go to the wrong account.
+  it's verified at launch and at sign-in, and you're told when it needs
+  restoring instead of channel points silently going quiet (restoring asks
+  you to sign in again rather than reusing the dead session). It must also be
+  the app's account: another account is refused at sign-in (and disconnected
+  if found later), so points, drops and predictions never go to the wrong
+  account — when the session changes, drop progress stops or carries on with
+  the new one.
 * 📊 **Usage count** — logged in, your Twitch account (counted once across the
   app and the website); logged out, a random install ID. Plus the app version,
   the app language, iPhone or iPad, the iOS version and how many lives and
