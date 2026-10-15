@@ -40,8 +40,14 @@ struct HomeView: View {
     @State private var showHidden     = false
     @State private var topLang: TopLang = .local
     @State private var loadingFollowed = false
-    @State private var loadingTop      = false
+    /// Vrai d'emblée : l'accueil est recréé à chaque retour sur l'onglet, et
+    /// le top se charge aussitôt (loadAll) ; sinon « Aucune chaîne en live »
+    /// s'affichait le temps de la première réponse.
+    @State private var loadingTop      = true
     @State private var errorFollowed: String? = nil
+    /// Jeton refusé par Twitch (401) : l'invitation à se connecter dit
+    /// pourquoi on a été déconnecté.
+    @State private var sessionExpired = false
     @State private var section: HomeSection = .live
     @State private var showWebLogin = false
     /// Bandeau « session web » masqué jusqu'à cette date (bouton ✕).
@@ -101,8 +107,21 @@ struct HomeView: View {
             )
         }
         .onChange(of: store.twitchToken) { token in
-            if token == nil { followedStreams = []; topStreams = [] }
+            // Déconnexion (sur un 401 aussi) ou autre compte : l'erreur de
+            // l'ancien jeton ne reste pas à la place de l'invitation.
+            errorFollowed = nil
+            if token == nil { followedStreams = []; topStreams = [] } else { sessionExpired = false }
             Task { await loadAll() }
+        }
+        // Chaîne suivie ou retirée sur Twitch (page d'une chaîne, chat) : les
+        // suivis sont relus, un instant après, le temps que Helix en tienne
+        // compte. Sans cela, elle n'apparaissait qu'au prochain rafraîchissement.
+        .onReceive(NotificationCenter.default.publisher(for: .twitchFollowsChanged)) { _ in
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await loadFollowedStreams()
+                await loadLocalFollows()
+            }
         }
         // Langue du top changée dans les réglages : on recharge tout de suite.
         .onChange(of: store.topLang) { _ in
@@ -177,7 +196,7 @@ struct HomeView: View {
                 .font(.system(size: 26))
                 .foregroundColor(.tPrimary)
             VStack(alignment: .leading, spacing: 6) {
-                Text(store.t("login_prompt"))
+                Text(store.t(sessionExpired ? "session_expired" : "login_prompt"))
                     .font(.tCardTitle).foregroundColor(.tText)
                 Text(store.t("login_optional_msg"))
                     .font(.tMeta).foregroundColor(.tMuted)
@@ -319,16 +338,24 @@ struct HomeView: View {
     // MARK: – Onglet « Suivies » (en direct seulement)
     @ViewBuilder private var followedTab: some View {
         let followed = allFollowedLive
-        if loadingFollowed && followed.isEmpty && offlineChannels.isEmpty {
+        if store.twitchToken == nil && store.localFollows.isEmpty && followed.isEmpty {
+            // Rien à lire : l'invitation tout de suite, sans chargeur.
+            TEmptyState(icon: "heart",
+                        title: store.t("local_follow_empty"),
+                        message: store.t("local_follow_empty_msg"))
+        } else if (loadingFollowed || !followsLoaded) && followed.isEmpty && offlineChannels.isEmpty {
+            // Suivis (du compte ou de l'appareil) pas encore lus : sans
+            // compte, « aucune chaîne en direct » s'affichait le temps de la
+            // lecture, puis la chaîne apparaissait.
             TLoader()
         } else if let err = errorFollowed, followed.isEmpty, offlineChannels.isEmpty {
             TEmptyState(icon: "exclamationmark.triangle", title: err)
         } else if !followed.isEmpty {
             streamsBlock(followed, pinnable: true)
-        } else if store.twitchToken == nil && store.localFollows.isEmpty {
-            TEmptyState(icon: "heart",
-                        title: store.t("local_follow_empty"),
-                        message: store.t("local_follow_empty_msg"))
+        } else if followsFailed {
+            // Lecture des suivis ratée, rien d'affiché : ce n'est pas
+            // « personne en direct ».
+            TEmptyState(icon: "exclamationmark.triangle", title: store.t("err_loading"))
         } else if !offlineChannels.isEmpty {
             // Personne en live : un pas vers l'onglet des chaînes hors ligne.
             TEmptyState(icon: "moon.zzz",
@@ -496,6 +523,9 @@ struct HomeView: View {
         } catch {
             errorFollowed = store.t("err_loading")
             if (error as? URLError)?.code == .userAuthenticationRequired {
+                // Jeton refusé : déconnexion ; l'invitation à se reconnecter
+                // remplace l'erreur (onChange du jeton).
+                sessionExpired = true
                 store.logout()
             }
         }
@@ -572,6 +602,12 @@ struct HomeView: View {
         } catch {
             guard gen == topGen else { return }
             logger.warn("HELIX", "Top streams indisponible", error.localizedDescription)
+            // Helix refuse ou ne répond pas (429, panne ; un jeton refusé
+            // déconnecte par les suivis) : le top public plutôt qu'une liste
+            // vide, sans suite (« Charger plus » est réservé au top sans compte).
+            let page = await getTopStreamsPageGQL(lang: lang, after: nil)
+            guard gen == topGen else { return }
+            if let page, !page.streams.isEmpty { topStreams = page.streams }
         }
         loadingTop = false
         // Masquage fait pendant un tirage à 50 : on complète tout de suite
@@ -616,11 +652,17 @@ struct HomeView: View {
         }
     }
 
-    private func loadAll(isRefresh: Bool = false) async {
+    /// Suivis du compte, puis ceux de l'appareil (qui demandent l'identifiant
+    /// du compte) et les catégories suivies. Le top part en même temps : il
+    /// ne dépend de rien, et l'onglet Top attendait sinon tous les suivis
+    /// (jusqu'à 10 pages Helix et autant de requêtes GQL).
+    @MainActor private func loadAll(isRefresh: Bool = false) async {
+        let lang = topLang
+        async let top: Void = loadTopStreams(lang, isRefresh: isRefresh)
         await loadFollowedStreams()
         await loadLocalFollows()
         await loadAccountFollowedCategories()
-        await loadTopStreams(topLang, isRefresh: isRefresh)
+        await top
     }
 
     /// Catégories suivies sur Twitch (session web), lues dès l'accueil : le

@@ -930,20 +930,34 @@ func fetchTwitchUser(token: String) async throws -> TwitchUser? {
 actor AvatarCache {
     static let shared = AvatarCache()
     private var cache: [String: String] = [:]
+    /// Pas de photo obtenue (compte disparu, ou réseau en panne) : pas
+    /// redemandée avant 5 min, pour ne pas boucler sur un compte disparu,
+    /// mais plus retenue pour toute la session : un échec passager (métro)
+    /// laissait un rond gris jusqu'au redémarrage de l'app.
+    private var misses: [String: Date] = [:]
+    private static let missDelay: TimeInterval = 300
 
     func avatar(login: String, token: String?) async -> String? {
         let key = login.lowercased()
         guard !key.isEmpty else { return nil }
-        if let hit = cache[key] { return hit.isEmpty ? nil : hit }
+        if let hit = cache[key] { return hit }
+        if let miss = misses[key], Date().timeIntervalSince(miss) < Self.missDelay { return nil }
+        if let img = await fetch(key, token: token), !img.isEmpty {
+            cache[key] = img
+            misses[key] = nil
+            return img
+        }
+        misses[key] = Date()
+        return nil
+    }
 
+    private func fetch(_ key: String, token: String?) async -> String? {
         // Sans compte Twitch, pas de Helix : la photo vient de l'API publique
         // (GQL). Avant, la fonction renvoyait nil et le bandeau du lecteur
         // restait sur un rond gris.
         guard let token,
               let url = URL(string: "https://api.twitch.tv/helix/users?login=\(key)") else {
-            let img = await publicAvatar(login: key)
-            if let img { cache[key] = img }
-            return img
+            return await publicAvatar(login: key)
         }
         var req = URLRequest(url: url)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -955,11 +969,8 @@ actor AvatarCache {
               let arr  = json["data"] as? [[String: Any]],
               let img  = arr.first?["profile_image_url"] as? String else {
             // Jeton expiré ou refusé : on tente encore l'API publique.
-            let img = await publicAvatar(login: key)
-            cache[key] = img ?? ""   // évite de re-tenter en boucle sur un compte disparu
-            return img
+            return await publicAvatar(login: key)
         }
-        cache[key] = img
         return img
     }
 
@@ -1003,7 +1014,13 @@ func getTopStreams(token: String, lang: String? = nil, count: Int = 50) async th
     var req = URLRequest(url: url)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-    let (data, _) = try await URLSession.shared.data(for: req)
+    let (data, resp) = try await URLSession.shared.data(for: req)
+    // Erreur Helix (jeton refusé, 429, panne) : levée, et pas un top vide
+    // sans message (sa réponse n'a pas de `data`) ; l'accueil passe alors
+    // par le top public.
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    if status == 401 { throw URLError(.userAuthenticationRequired) }
+    guard status == 200 else { throw URLError(.badServerResponse) }
     let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
     let arr  = json?["data"] as? [[String: Any]] ?? []
     logger.success("HELIX", "\(arr.count) top streams chargés")

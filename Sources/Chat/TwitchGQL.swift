@@ -87,6 +87,12 @@ final class TwitchGQL {
 }
 
 // MARK: – Suivre / Ne plus suivre
+extension Notification.Name {
+    /// Chaîne suivie ou retirée sur Twitch (session web) : l'accueil relit
+    /// ses suivis, qu'il ne relisait qu'au changement de jeton.
+    static let twitchFollowsChanged = Notification.Name("TwitchFollowsChanged")
+}
+
 @MainActor
 final class FollowService: ObservableObject {
     @Published var isFollowing: Bool? = nil   // nil = inconnu / en cours
@@ -160,6 +166,7 @@ final class FollowService: ObservableObject {
             logger.success("FOLLOW", "Ne suit plus @\(who)", nil)
             // Réponse arrivée après un changement de chaîne : pas sur son état.
             if isCurrent(target) { isFollowing = false }
+            NotificationCenter.default.post(name: .twitchFollowsChanged, object: nil)
         } else { logger.warn("FOLLOW", "Unfollow échoué @\(who)", nil) }
     }
 
@@ -187,6 +194,7 @@ final class FollowService: ObservableObject {
             if let d = res?["data"] as? [String: Any], d["followUser"] != nil, res?["errors"] == nil {
                 logger.success("FOLLOW", "Suit @\(who)", nil)
                 if isCurrent(target) { isFollowing = true }
+                NotificationCenter.default.post(name: .twitchFollowsChanged, object: nil)
             } else { logger.warn("FOLLOW", "Follow échoué @\(who)", nil) }
         }
     }
