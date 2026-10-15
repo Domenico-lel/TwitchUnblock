@@ -31,7 +31,11 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🚫 **No subscription required** — watch any VOD or live stream at full quality.
 * 🎬 **Immersive player** — custom controls drawn over the picture, the way
   Twitch does it. Play/pause, scrubbing, quality, refresh, orientation. Apple's
-  native player stays available as a fallback in Settings.
+  native player stays available as a fallback in Settings. Changing quality
+  keeps your place (a live you rewound keeps its delay); a VOD you had
+  finished starts over from the beginning; when the stream drops for good, the
+  player says so with **Retry** instead of freezing (a live first reloads
+  itself twice).
 * 🐢 **Playback speed** — 0.25× to 2× on VODs and clips, from the ⋯ menu (or
   Apple's own speed menu in the native player and on Apple TV). The VOD speed
   is remembered from one VOD to the next, shown next to the timer, and synced
@@ -43,8 +47,12 @@ no key to paste. The backend is already hosted and shared by every install.
   "+30 s" instead of three separate "+10 s". On a live there's nothing to skip
   ahead to: in landscape, double-tap shows or hides the chat instead, and once
   you fall behind (pause, network drop) a red **Live** button with the delay
-  brings you back to the edge.
-* 📺 **Picture-in-Picture** — keep watching while you use other apps.
+  brings you back to the edge. Double-tapping works with the controls shown
+  too.
+* 📺 **Picture-in-Picture** — keep watching while you use other apps, or the
+  rest of the app with the player reduced. Closing the player, opening another
+  video or switching to chat only ends it, along with its chat connection and
+  lock screen activity.
 * 🎵 **Leaves your music alone** — opening the app no longer stops music
   playing in another app: the sound switches over only when a video starts,
   and goes back to that app when you close the player (not when the sleep
@@ -96,7 +104,8 @@ no key to paste. The backend is already hosted and shared by every install.
 * ⏪ **Rewind a live stream (DVR)** — when the channel archives its broadcasts,
   the progress bar covers the *whole* stream, not just the rewindable window.
   Scrub past that window and the recording takes over at that exact moment.
-  A **Back to live** button brings you back.
+  A **Back to live** button brings you back, and so does dragging to the very
+  end of the bar.
 * ⚡ **Low latency mode** — stays as close to the live edge as the connection
   allows, but never under 4 seconds behind (closer, playback stalls): the
   target follows how long Twitch takes to publish each segment, and skipping

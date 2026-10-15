@@ -245,6 +245,7 @@ let kRussianStrings: [String: String] = [
     "vod_chat": "Чат VOD",
     "rewind": "Перемотка",
     "back_to_live": "К эфиру",
+    "player_failed": "Воспроизведение остановилось (сеть или поток недоступны).",
     "recover_title": "VOD вне списка",
     "unlisted_vod": "VOD вне списка",
     "unlisted_gone": "Больше недоступно",

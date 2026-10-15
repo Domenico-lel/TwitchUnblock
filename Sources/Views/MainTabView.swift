@@ -811,6 +811,7 @@ struct MainTabView: View {
                 isLive: isLivePlaying,
                 dvrEnabled: isLivePlaying,
                 savedTime: currentVodId.map { store.getVodProgress($0) } ?? 0,
+                contentID: playerContentID,
                 info: overlayInfo,
                 onChannel: playerChannelLogin.map { l in { store.openChannelPage(l) } },
                 sleepLabel: sleepTimer.isActive ? sleepTimer.label : nil,
@@ -1137,6 +1138,19 @@ struct MainTabView: View {
         let file = VodDownloads.folder(String(rec.streamID.dropFirst("offline-".count)))
             .appendingPathComponent(VodChatArchive.fileName)
         return FileManager.default.fileExists(atPath: file.path) ? file : nil
+    }
+
+    /// Ce qui se lit, quelle que soit la qualité : le lecteur immersif y
+    /// distingue un changement de qualité (la lecture reste où elle en est)
+    /// d'un changement de source (direct ↔ enregistrement).
+    private var playerContentID: String {
+        switch playerMode {
+        case .live(let channel)?:     return "live:" + channel.lowercased()
+        case .vod(let id, _, _, _)?:  return "vod:" + id
+        case .clip(let slug, _)?:     return "clip:" + slug
+        case .recovered(let rec)?:    return "rec:" + rec.streamID
+        case nil:                     return ""
+        }
     }
 
     /// Identifiant de la VOD en cours de lecture (nil en live).
