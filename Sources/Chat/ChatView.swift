@@ -195,7 +195,8 @@ struct ChatView: View {
                 // Bandeaux fermés (×) : une seule pastille les rouvre tous.
                 if !closedKinds.isEmpty {
                     ClosedNoticesChip(kinds: closedKinds, pollEnds: pollEnds,
-                                      predictionEnds: predictionEnds) { reopenClosedNotices() }
+                                      predictionEnds: predictionEnds,
+                                      hypeEnds: hypeEnds) { reopenClosedNotices() }
                 }
             }
             // Hauteur stable même quand seul le point est affiché.
@@ -307,6 +308,8 @@ struct ChatView: View {
     private var predictionEnds: Date? {
         events.prediction.flatMap { $0.locked || $0.winnerId != nil ? nil : $0.closesAt }
     }
+    /// Fin de l'approche ou du niveau en cours (nil sur l'écran de fin).
+    private var hypeEnds: Date? { events.hype?.endsAt }
 
     /// Clés des événements présents (sondage, prédiction, hype train).
     private var liveNoticeKeys: Set<String> {
@@ -333,7 +336,8 @@ struct ChatView: View {
                 CollapsedNoticesBar(
                     kinds: activeNotices,
                     pollEnds: pollEnds,
-                    predictionEnds: predictionEnds
+                    predictionEnds: predictionEnds,
+                    hypeEnds: hypeEnds
                 ) {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         dismissedPinId = nil
@@ -351,6 +355,7 @@ struct ChatView: View {
                     closedKinds: closedKinds,
                     pollEnds: pollEnds,
                     predictionEnds: predictionEnds,
+                    hypeEnds: hypeEnds,
                     onReopenClosed: { reopenClosedNotices() },
                     onHide: {
                         withAnimation(.easeInOut(duration: 0.18)) {
@@ -620,6 +625,9 @@ struct ChatView: View {
         .onChange(of: liveNoticeKeys) { keys in
             closedNotices.formIntersection(keys)
         }
+        // Événements masqués ou réaffichés pendant le live : le relevé du
+        // hype train (toutes les 5 s pendant une approche) suit.
+        .onChange(of: store.showLiveEvents) { events.setHypeEnabled($0) }
         // ── Token OAuth mis à jour → reconnecte uniquement l'IRC ──────
         .onChange(of: store.twitchToken) { newToken in
             guard let tok = newToken else { return }
@@ -730,7 +738,8 @@ struct ChatView: View {
             if store.showWatchStreak || store.showLiveEvents {
                 events.start(login: channelName, channelId: cid,
                              token: store.twitchWebToken,
-                             viewerId: store.twitchUserId ?? "")
+                             viewerId: store.twitchUserId ?? "",
+                             hype: store.showLiveEvents)
             }
             // Raid sortant (auto-bascule vers la chaîne raidée)
             if store.enableRaids {

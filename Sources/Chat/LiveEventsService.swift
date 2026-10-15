@@ -44,13 +44,42 @@ final class LiveEventsService: ObservableObject {
         var noticeKey: String { "pred:" + (id.isEmpty ? title : id) }
     }
     struct LiveHype {
-        /// Id du train : il ne change pas d'un niveau à l'autre.
+        enum Phase { case approaching, running }
+        enum Variant { case regular, golden, treasure }
+        /// Message court qui remplace un moment le contenu de la carte.
+        enum Flash: Equatable {
+            /// Départ après l'approche : toutes les pastilles cochées (1,5 s).
+            case kickoff
+            /// Le train est parti (10 s).
+            case departed
+            /// Niveau N terminé (4 s).
+            case levelDone(Int)
+            /// Train terminé au niveau N, à P % du suivant (15 s).
+            case ended(level: Int, percent: Int)
+        }
+        /// Id du train : le même pour l'approche et le train, et d'un niveau
+        /// à l'autre.
         var id: String = ""
-        let level: Int
+        var phase: Phase = .running
+        var variant: Variant = .regular
+        var level: Int = 1
         /// Avancée du niveau en cours (0…1).
-        let percent: Double
+        var percent: Double = 0
+        /// Approche : soutiens qui manquent pour le lancer.
+        var left: Int = 1
+        /// Objectif > 5 : trois pastilles au lieu de deux, comme Twitch.
+        var bigGoal = false
+        /// Fin de l'approche ou du niveau en cours (nil sur l'écran de fin).
+        var endsAt: Date? = nil
+        var flash: Flash? = nil
+        var flashUntil: Date? = nil
         /// Clé de fermeture (×) : un train fermé le reste jusqu'à sa fin.
-        var noticeKey: String { id.isEmpty ? "hype" : "hype:" + id }
+        /// L'approche a la sienne (même id) : fermer l'annonce ne cache pas
+        /// le départ qu'on attend.
+        var noticeKey: String {
+            let base = phase == .approaching ? "hype-approach" : "hype"
+            return id.isEmpty ? base : base + ":" + id
+        }
     }
 
     /// Choix pour lesquels on a voté (vide = pas encore voté sur ce sondage).
@@ -74,31 +103,58 @@ final class LiveEventsService: ObservableObject {
     private var timer: Timer?
     private let interval: TimeInterval = 15
 
+    // Hype train : sa propre boucle (5 s pendant une approche, 15 s sinon),
+    // une relecture à l'échéance et la fin du message court en cours.
+    private var running = false
+    private var hypeEnabled = false
+    private var hypeLoop: Task<Void, Never>? = nil
+    private var hypeDeadlineTask: Task<Void, Never>? = nil
+    private var hypeFlashTask: Task<Void, Never>? = nil
+    /// Premier relevé fait : avant lui, aucune transition (comme Twitch).
+    private var hypeRead = false
+    /// Change à chaque arrêt : une réponse d'avant est ignorée.
+    private var hypeGen = 0
+
     private enum H {
         static let streak     = "7d04fbaa5bb32d193c742caa2c855dfde371a2a8cb25afed5b5c3d45f5ee9278"
         static let poll       = "e83188a3836c636393df3191665e543a03733d7c51d3ade3d85e42aa46c2bf55"
         static let prediction = "beb846598256b75bd7c1fe54a80431335996153e358ca9c7837ce7bb83d7d383"
-        static let hype       = "75ce00c56153ceba3be9f6772e1db11a9c5aed5029dc6243cfcc132460c56b23"
         static let votePoll   = "1280e27b0f3c7ae60b5714bd569771ea50635778473182e6e959e2dcfcc16e3c"
         /// MakePrediction (client web) : { eventID, outcomeID, points, transactionID }.
         static let makePrediction = "b44682ecc88358817009f20e69d75081b1e58825bb40aa53d5dbadcc17c881d8"
     }
 
-    func start(login: String, channelId: String, token: String?, viewerId: String = "") {
+    /// `hype` : suivre le hype train (événements live affichés). Le service
+    /// démarre aussi pour la seule série de visionnage : pas de relevé du
+    /// train toutes les 5 s si personne ne le voit.
+    func start(login: String, channelId: String, token: String?, viewerId: String = "",
+               hype: Bool = true) {
         stop()
         self.login = login.lowercased(); self.channelId = channelId
         self.token = token; self.viewerId = viewerId
+        running = true
         Task { await fetchAll() }
         timer = Timer.scheduledCommon(every: interval) { [weak self] _ in
             Task { await self?.fetchAll() }
         }
+        hypeEnabled = hype
+        if hype { startHypeLoop() }
     }
 
     func stop() {
         timer?.invalidate(); timer = nil
-        watchStreak = 0; poll = nil; prediction = nil; hype = nil
+        running = false; hypeEnabled = false
+        stopHype()
+        watchStreak = 0; poll = nil; prediction = nil
         votedChoiceIds = []; voting = false; resultUntil = nil
         betting = false; betError = nil; localBets = [:]
+    }
+
+    /// Réglage des événements changé pendant le live : la boucle du train suit.
+    func setHypeEnabled(_ on: Bool) {
+        guard running, on != hypeEnabled else { return }
+        hypeEnabled = on
+        if on { startHypeLoop() } else { stopHype() }
     }
 
     // MARK: Pari sur la prédiction
@@ -188,7 +244,6 @@ final class LiveEventsService: ObservableObject {
         await fetchStreak()
         await fetchPoll()
         await fetchPrediction()
-        await fetchHype()
     }
 
     // MARK: Série de visionnage
@@ -263,7 +318,12 @@ final class LiveEventsService: ObservableObject {
     private func isoDate(_ s: String) -> Date? {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f.date(from: s) ?? ISO8601DateFormatter().date(from: s)
+        if let d = f.date(from: s) ?? ISO8601DateFormatter().date(from: s) { return d }
+        // 8 ou 9 décimales (hype train) : on ne garde que les millisecondes.
+        guard let dot = s.firstIndex(of: "."),
+              let end = s[dot...].firstIndex(where: { $0 != "." && !$0.isNumber }) else { return nil }
+        let millis = String(s[s.index(after: dot)..<end].prefix(3))
+        return f.date(from: String(s[..<dot]) + "." + millis + String(s[end...]))
     }
 
     // MARK: Prédiction
@@ -379,33 +439,214 @@ final class LiveEventsService: ObservableObject {
         return nil
     }
 
-    // MARK: Hype train (structure active jamais capturée → parse défensif + log)
+    // MARK: Hype train : approche, départ, niveaux, fin
+    /// Requête en clair, SANS jeton : la lecture est publique, et un jeton
+    /// web invalide la faisait échouer (401) en figeant le bandeau. Environ
+    /// 1 Ko au lieu de 24 pour la requête persistée, avec `remainingSeconds`.
+    private static let hypeQuery = "query($l: String!) { user(login: $l) { channel { hypeTrain { "
+        + "approaching { id goal participants expiresAt eventsRemaining { events secondsRemaining } isGoldenKappaTrain isTreasureTrain } "
+        + "execution { id expiresAt endedAt isGoldenKappaTrain isTreasureTrain "
+        + "progress { goal progression total remainingSeconds level { value goal } } } } } } }"
+
+    private func startHypeLoop() {
+        stopHype()
+        hypeLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let wait = await self?.hypeTick() else { return }
+                try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+            }
+        }
+    }
+
+    /// Un relevé, puis le délai avant le suivant : 5 s pendant une approche
+    /// (5 min au plus) pour voir le départ, 15 s sinon.
+    private func hypeTick() async -> TimeInterval {
+        await fetchHype()
+        return hype?.phase == .approaching ? 5 : 15
+    }
+
+    private func stopHype() {
+        hypeLoop?.cancel(); hypeLoop = nil
+        hypeDeadlineTask?.cancel(); hypeDeadlineTask = nil
+        hypeFlashTask?.cancel(); hypeFlashTask = nil
+        hypeGen += 1
+        hypeRead = false
+        hype = nil
+    }
+
     private func fetchHype() async {
-        guard let res  = await TwitchGQL.shared.query("GetHypeTrainExecution",
-                                                      variables: ["userLogin": login], sha256: H.hype, token: token),
-              let data = res["data"]    as? [String: Any],
-              let user = data["user"]   as? [String: Any],
+        let gen = hypeGen
+        // Lecture ratée : rien ne change, rien n'est déduit.
+        guard let d    = await rawGQL(Self.hypeQuery),
+              let user = d["user"]       as? [String: Any],
               let chan = user["channel"] as? [String: Any],
-              let ht   = chan["hypeTrain"] as? [String: Any] else { return }
-        guard let exec = ht["execution"] as? [String: Any] else {
-            if hype != nil { logger.debug("EVENTS", "Hype train terminé", nil) }
-            hype = nil; return
+              let ht   = chan["hypeTrain"] as? [String: Any],
+              gen == hypeGen else { return }
+        let now = Date()
+        applyHype(readHype(ht, now: now), now: now)
+    }
+
+    /// État affiché selon les règles de Twitch : le train s'il n'est pas fini
+    /// et que son échéance est future, sinon l'approche si la sienne l'est.
+    /// Les secondes restantes passent avant les dates (8 ou 9 décimales,
+    /// heure de l'appareil décalée).
+    private func readHype(_ ht: [String: Any], now: Date) -> LiveHype? {
+        if let exec = ht["execution"] as? [String: Any], exec["endedAt"] as? String == nil {
+            let progress = exec["progress"] as? [String: Any]
+            let lvl   = progress?["level"] as? [String: Any]
+            let level = lvl?["value"] as? Int ?? 1
+            let goal  = progress?["goal"] as? Int ?? 0
+            // `total` et `level.goal` sont cumulés sur tous les niveaux, `goal`
+            // ne vaut que pour le niveau en cours : total/goal affichait 100 %
+            // dès le niveau 2. `progression` est l'avancée dans le niveau.
+            var done = progress?["progression"] as? Int
+            if done == nil, let total = progress?["total"] as? Int, let all = lvl?["goal"] as? Int {
+                done = total - (all - goal)
+            }
+            let ends = Self.number(progress?["remainingSeconds"]).map { now.addingTimeInterval($0) }
+                    ?? (exec["expiresAt"] as? String).flatMap(isoDate)
+            if ends.map({ $0 > now }) ?? true {
+                return LiveHype(id: exec["id"] as? String ?? "", phase: .running,
+                                variant: Self.hypeVariant(exec), level: level,
+                                percent: goal > 0 ? min(1, max(0, Double(done ?? 0) / Double(goal))) : 0,
+                                endsAt: ends)
+            }
         }
-        logger.debug("EVENTS", "Hype train brut", "\(exec.keys.sorted())")
-        let progress = exec["progress"] as? [String: Any]
-        let level = (progress?["level"] as? [String: Any])?["value"] as? Int
-                 ?? (exec["level"] as? [String: Any])?["value"] as? Int ?? 1
-        // `total` est cumulé sur tous les niveaux, `goal` ne vaut que pour le
-        // niveau en cours : total/goal affichait 100 % dès le niveau 2.
-        // `progression` est l'avancée dans le niveau ; total en repli s'il manque.
-        let done  = (progress?["progression"] as? Int) ?? (progress?["total"] as? Int) ?? 0
-        let goal  = (progress?["goal"] as? Int)
-                 ?? ((progress?["level"] as? [String: Any])?["goal"] as? Int) ?? 0
-        if hype?.level != level {
-            logger.success("EVENTS", "🚄 Hype train actif", "niveau \(level)")
+        if let ap = ht["approaching"] as? [String: Any] {
+            let goal = ap["goal"] as? Int ?? 0
+            let big = goal > 5
+            let steps = ap["eventsRemaining"] as? [[String: Any]] ?? []
+            let joined = (ap["participants"] as? [Any])?.count ?? 0
+            let fewest = steps.compactMap { $0["events"] as? Int }.filter { $0 > 0 }.min()
+            // Échéance : celle de la dernière pastille (2e pour un objectif > 5).
+            let step = steps.first { $0["events"] as? Int == (big ? 2 : 1) }
+                    ?? steps.first { $0["events"] as? Int == fewest }
+            let ends = Self.number(step?["secondsRemaining"]).map { now.addingTimeInterval($0) }
+                    ?? (ap["expiresAt"] as? String).flatMap(isoDate)
+            if ends.map({ $0 > now }) ?? true {
+                return LiveHype(id: ap["id"] as? String ?? "", phase: .approaching,
+                                variant: Self.hypeVariant(ap), left: fewest ?? max(1, goal - joined),
+                                bigGoal: big, endsAt: ends)
+            }
         }
-        hype = LiveHype(id: exec["id"] as? String ?? "", level: level,
-                        percent: goal > 0 ? min(1, max(0, Double(done) / Double(goal))) : 0)
+        return nil
+    }
+
+    /// Transitions, comparées au relevé précédent de la même chaîne :
+    /// départ (après l'approche ou direct), niveau terminé, fin.
+    private func applyHype(_ read: LiveHype?, now: Date) {
+        defer { scheduleHypeDeadline() }
+        let prev = hype
+        // Premier relevé : l'état tel quel, sans transition.
+        guard hypeRead else {
+            hypeRead = true
+            if let read { logger.success("EVENTS", "🚄 Hype train", Self.describe(read)) }
+            setHype(read)
+            return
+        }
+        guard var next = read else {
+            guard let prev else { return }
+            if case .ended = prev.flash { return }       // écran de fin déjà affiché
+            // Disparu à son échéance après le niveau 1 : terminé (COMPLETED).
+            // Sinon (expiré au niveau 1, fin du live…), Twitch n'affiche rien.
+            if prev.phase == .running, prev.level >= 2, let ends = prev.endsAt,
+               now >= ends.addingTimeInterval(-3) {
+                var done = prev
+                done.endsAt = nil
+                // Le même pourcentage que la barre qu'on vient de voir.
+                done.flash = .ended(level: prev.level, percent: Int(prev.percent * 100))
+                done.flashUntil = now.addingTimeInterval(15)
+                logger.success("EVENTS", "🚄 Hype train terminé", "niveau \(prev.level)")
+                setHype(done)
+            } else {
+                logger.debug("EVENTS", prev.phase == .approaching ? "Hype train : approche expirée"
+                                                                  : "Hype train terminé", nil)
+                setHype(nil)
+            }
+            return
+        }
+        if next.phase == .running {
+            if let prev, prev.phase == .running, prev.id == next.id {
+                if case .ended = prev.flash {
+                    // Relu après un faux départ de fin : il roule encore.
+                } else if let f = prev.flash, (prev.flashUntil ?? .distantPast) > now {
+                    next.flash = f
+                    next.flashUntil = prev.flashUntil
+                    if f == .kickoff { next.bigGoal = prev.bigGoal }
+                } else if next.level > prev.level {
+                    next.flash = .levelDone(prev.level)
+                    next.flashUntil = now.addingTimeInterval(4)
+                    logger.success("EVENTS", "🚄 Hype train", "niveau \(next.level)")
+                }
+            } else {
+                // Départ : la dernière pastille se coche après une approche ;
+                // sans approche vue (6 départs sur 9), carte « parti » d'emblée.
+                let fromApproach = prev?.phase == .approaching
+                next.flash = fromApproach ? .kickoff : .departed
+                next.flashUntil = now.addingTimeInterval(fromApproach ? 1.5 : 10)
+                if fromApproach, let prev { next.bigGoal = prev.bigGoal }
+                logger.success("EVENTS", "🚄 Hype train parti", Self.describe(next))
+            }
+        } else if prev?.phase != .approaching || prev?.id != next.id {
+            logger.success("EVENTS", "🚄 Hype train", Self.describe(next))
+        }
+        setHype(next)
+    }
+
+    /// Publie l'état et programme la fin du message court en cours.
+    private func setHype(_ h: LiveHype?) {
+        hype = h
+        hypeFlashTask?.cancel(); hypeFlashTask = nil
+        guard let h, h.flash != nil, let until = h.flashUntil else { return }
+        let gen = hypeGen
+        let delay = max(0, until.timeIntervalSinceNow)
+        hypeFlashTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self, gen == self.hypeGen else { return }
+            self.endHypeFlash()
+        }
+    }
+
+    private func endHypeFlash() {
+        guard var h = hype, let f = h.flash else { return }
+        switch f {
+        case .kickoff:
+            h.flash = .departed
+            h.flashUntil = Date().addingTimeInterval(10)
+            setHype(h)
+        case .ended:
+            setHype(nil)
+        case .departed, .levelDone:
+            h.flash = nil
+            h.flashUntil = nil
+            setHype(h)
+        }
+    }
+
+    /// Relecture juste après l'échéance, au lieu d'effacer à l'aveugle : un
+    /// niveau monté (+5 min) ou un départ entre deux relevés la repousse.
+    private func scheduleHypeDeadline() {
+        hypeDeadlineTask?.cancel(); hypeDeadlineTask = nil
+        guard hypeEnabled, let ends = hype?.endsAt else { return }
+        let gen = hypeGen
+        let delay = max(0, ends.timeIntervalSinceNow) + 1
+        hypeDeadlineTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self, gen == self.hypeGen else { return }
+            await self.fetchHype()
+        }
+    }
+
+    private static func hypeVariant(_ d: [String: Any]) -> LiveHype.Variant {
+        if d["isGoldenKappaTrain"] as? Bool == true { return .golden }
+        if d["isTreasureTrain"] as? Bool == true { return .treasure }
+        return .regular
+    }
+
+    private static func number(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
+
+    private static func describe(_ h: LiveHype) -> String {
+        h.phase == .approaching ? "en approche, encore \(h.left)" : "niveau \(h.level) · \(Int(h.percent * 100)) %"
     }
 }
 
@@ -433,12 +674,8 @@ struct LiveEventsBanner: View {
                 }
             }
             if let hype = events.hype, !closed.contains(hype.noticeKey) {
-                banner(icon: "flame.fill", tint: .tLive, onClose: { onClose(hype.noticeKey) }) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("🚄 Hype Train — \(store.t("hype_level")) \(hype.level)")
-                            .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
-                        ProgressView(value: hype.percent).tint(.tLive)
-                    }
+                banner(icon: "tram.fill", tint: .tLive, onClose: { onClose(hype.noticeKey) }) {
+                    HypeTrainCard(hype: hype)
                 }
             }
         }

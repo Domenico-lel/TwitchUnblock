@@ -164,7 +164,7 @@ enum ChatNoticeKind: Hashable {
         case .drops:      return "gift.fill"
         case .poll:       return "chart.bar.fill"
         case .prediction: return "sparkles"
-        case .hype:       return "flame.fill"
+        case .hype:       return "tram.fill"
         case .raid:       return "figure.run"
         }
     }
@@ -179,12 +179,13 @@ enum ChatNoticeKind: Hashable {
 }
 
 /// Icônes des bandeaux, avec le compte à rebours d'un sondage ou d'une
-/// prédiction encore ouverts : ligne repliée (paysage) et pastille des
-/// bandeaux fermés.
+/// prédiction encore ouverts, et du hype train (approche ou niveau) : ligne
+/// repliée (paysage) et pastille des bandeaux fermés.
 struct NoticeIconsRow: View {
     let kinds: [ChatNoticeKind]
     var pollEnds: Date? = nil
     var predictionEnds: Date? = nil
+    var hypeEnds: Date? = nil
     var spacing: CGFloat = 10
 
     var body: some View {
@@ -210,24 +211,27 @@ struct NoticeIconsRow: View {
         switch kind {
         case .poll:       return pollEnds
         case .prediction: return predictionEnds
+        case .hype:       return hypeEnds
         default:          return nil
         }
     }
 }
 
 /// Bandeaux repliés : une ligne d'icônes, avec le compte à rebours d'un
-/// sondage ou d'une prédiction encore ouverts. La toucher les déplie.
+/// sondage, d'une prédiction ou d'un hype train. La toucher les déplie.
 struct CollapsedNoticesBar: View {
     let kinds: [ChatNoticeKind]
     var pollEnds: Date? = nil
     var predictionEnds: Date? = nil
+    var hypeEnds: Date? = nil
     let onExpand: () -> Void
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
         Button(action: onExpand) {
             HStack(spacing: 10) {
-                NoticeIconsRow(kinds: kinds, pollEnds: pollEnds, predictionEnds: predictionEnds)
+                NoticeIconsRow(kinds: kinds, pollEnds: pollEnds, predictionEnds: predictionEnds,
+                               hypeEnds: hypeEnds)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .bold)).foregroundColor(.tMuted)
@@ -249,12 +253,14 @@ struct ClosedNoticesChip: View {
     let kinds: [ChatNoticeKind]
     var pollEnds: Date? = nil
     var predictionEnds: Date? = nil
+    var hypeEnds: Date? = nil
     let onReopen: () -> Void
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
         Button(action: onReopen) {
-            NoticeIconsRow(kinds: kinds, pollEnds: pollEnds, predictionEnds: predictionEnds, spacing: 6)
+            NoticeIconsRow(kinds: kinds, pollEnds: pollEnds, predictionEnds: predictionEnds,
+                           hypeEnds: hypeEnds, spacing: 6)
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(Color.tSurface).clipShape(Capsule())
                 .contentShape(Capsule())
@@ -275,6 +281,7 @@ struct NoticesHideStrip: View {
     var closedKinds: [ChatNoticeKind] = []
     var pollEnds: Date? = nil
     var predictionEnds: Date? = nil
+    var hypeEnds: Date? = nil
     var onReopenClosed: () -> Void = {}
     let onHide: () -> Void
     @EnvironmentObject private var store: AppStore
@@ -296,7 +303,8 @@ struct NoticesHideStrip: View {
             }
             if !closedKinds.isEmpty {
                 ClosedNoticesChip(kinds: closedKinds, pollEnds: pollEnds,
-                                  predictionEnds: predictionEnds, onReopen: onReopenClosed)
+                                  predictionEnds: predictionEnds, hypeEnds: hypeEnds,
+                                  onReopen: onReopenClosed)
             }
             Spacer(minLength: 4)
             Button(action: onHide) {

@@ -179,8 +179,12 @@ no key to paste. The backend is already hosted and shared by every install.
 * 📊 **Polls, predictions, hype train** — vote, bet channel points on a
   prediction, see the countdown, the results and the winning outcome. Once
   betting is closed, a prediction folds down to its title and your bet, and a
-  finished poll to its winning choice; tap to see the bars. The hype train bar
-  shows the progress of the current level. Each banner has a × that tucks it
+  finished poll to its winning choice; tap to see the bars. The hype train is
+  shown from the moment it is incoming, like on Twitch: its checkmarks, how many
+  more supports it needs and a countdown, then its departure, the time left on
+  each level and a bar with the progress of the current level, and a short
+  "level complete" / "Hype Train complete" message — no Twitch account needed
+  (the time left also shows in the folded icon row). Each banner has a × that tucks it
   into a single chip above the chat (in portrait, landscape and multi-live) —
   tap the chip to bring them back; a new poll or prediction still shows up.
 * 🚀 **Raids** — follow the streamer to the raided channel automatically;
