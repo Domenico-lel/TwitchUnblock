@@ -39,7 +39,14 @@ final class LiveEventsService: ObservableObject {
         /// Ton pari (session web) : issue choisie et points misés au total.
         var myOutcomeId: String? = nil
         var myPoints: Int = 0
+        /// Plus grosse mise de chaque issue (id → points), quand Twitch l'envoie.
+        var topBets: [String: Int] = [:]
         var total: Int { max(1, outcomes.reduce(0) { $0 + $1.points }) }
+        /// Cote d'une issue, comme Twitch : 1 point misé en rapporte `total / points`
+        /// (mise comprise) si elle gagne ; nil tant que personne n'a misé dessus.
+        func ratio(_ points: Int) -> Double? {
+            points > 0 ? Double(outcomes.reduce(0) { $0 + $1.points }) / Double(points) : nil
+        }
         /// Clé de fermeture (×) : la même jusqu'au résultat, une autre pour la suivante.
         var noticeKey: String { "pred:" + (id.isEmpty ? title : id) }
     }
@@ -380,6 +387,13 @@ final class LiveEventsService: ObservableObject {
         var newPred = outcomes.isEmpty ? nil
                     : LivePrediction(id: ev["id"] as? String ?? "", title: title, locked: isLocked,
                                      outcomes: outcomes, closesAt: closesAt)
+        // Plus grosse mise de chaque issue (« topPredictors » de Twitch).
+        for o in ev["outcomes"] as? [[String: Any]] ?? [] {
+            guard let id = o["id"] as? String,
+                  let best = (o["topPredictors"] as? [[String: Any]])?.compactMap({ $0["points"] as? Int }).max(),
+                  best > 0 else { continue }
+            newPred?.topBets[id] = best
+        }
         // Ton pari : celui que Twitch connaît, sinon celui envoyé d'ici à
         // l'instant (Twitch peut mettre quelques secondes à le renvoyer).
         if var np = newPred {
@@ -871,9 +885,12 @@ private struct PredictionCard: View {
                 }
             }
             if let mine = myOutcome {
+                // Gain possible si l'issue gagne : la mise × la cote (mise comprise).
+                let win = pred.winnerId == nil ? pred.ratio(mine.points).map { Int((Double(pred.myPoints) * $0).rounded(.down)) } : nil
                 Text(store.t("pred_my_bet")
                         .replacingOccurrences(of: "{n}", with: points.formatted(pred.myPoints))
-                        .replacingOccurrences(of: "{o}", with: mine.title))
+                        .replacingOccurrences(of: "{o}", with: mine.title)
+                     + (win.map { " · " + store.t("pred_potential").replacingOccurrences(of: "{n}", with: points.formatted($0)) } ?? ""))
                     .font(.system(size: 10, weight: .semibold)).foregroundColor(.tSuccess)
             }
             if open {
@@ -938,15 +955,15 @@ private struct PredictionCard: View {
     private func outcomeRow(_ o: Outcome) -> some View {
         let mine = pred.myOutcomeId == o.id && pred.myPoints > 0
         let tappable = open && (pred.myOutcomeId == nil || pred.myPoints == 0 || mine)
-        let users = o.users > 0 ? " · \(o.users) 👤" : ""
         let tint = pred.winnerId == nil || pred.winnerId == o.id ? Self.color(o.color) : Color.tMuted
+        let stats = outcomeStats(o)
         Button {
             events.betError = nil
             withAnimation(.easeInOut(duration: 0.15)) { selected = selected == o.id ? nil : o.id }
         } label: {
-            EventBar(label: o.title + users, value: o.points, total: pred.total, color: tint,
+            EventBar(label: o.title, value: o.points, total: pred.total, color: tint,
                      voted: mine, winner: pred.winnerId == o.id,
-                     selected: tappable && selected == o.id)
+                     selected: tappable && selected == o.id, stats: stats)
         }
         .buttonStyle(.plain)
         .disabled(!tappable)
@@ -1038,6 +1055,35 @@ private struct PredictionCard: View {
 
     private static func short(_ v: Int) -> String { v >= 1_000 ? "\(v / 1_000)k" : "\(v)" }
 
+    /// Sous la barre d'une issue, comme l'app Twitch : points misés, cote,
+    /// votants et plus grosse mise (quand Twitch l'envoie).
+    private func outcomeStats(_ o: Outcome) -> [(icon: String, text: String)] {
+        var stats: [(icon: String, text: String)] = [("circle.circle", Self.compact(o.points))]
+        if let r = pred.ratio(o.points) { stats.append(("trophy", "1:" + Self.ratioText(r))) }
+        stats.append(("person.2", "\(o.users)"))
+        if let top = pred.topBets[o.id] { stats.append(("crown", Self.compact(top))) }
+        return stats
+    }
+
+    /// Comme Twitch : 950, 27.4K, 1.2M (une décimale, retirée si elle vaut 0).
+    private static func compact(_ v: Int) -> String {
+        func one(_ x: Double, _ unit: String) -> String {
+            let t = (x * 10).rounded(.down) / 10
+            return (t == t.rounded() ? String(Int(t)) : String(format: "%.1f", t)) + unit
+        }
+        if v >= 1_000_000 { return one(Double(v) / 1_000_000, "M") }
+        if v >= 1_000 { return one(Double(v) / 1_000, "K") }
+        return "\(v)"
+    }
+
+    /// Cote : deux décimales au plus (1.71, 2.4, 3).
+    private static func ratioText(_ r: Double) -> String {
+        var s = String(format: "%.2f", r)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
+    }
+
     private func errorLabel(_ code: String) -> String {
         let c = code.uppercased()
         if c == "NO_SESSION" { return store.t("pred_need_login") }
@@ -1073,6 +1119,9 @@ struct EventBar: View {
     var winner = false
     /// Issue choisie pour parier : encadrée.
     var selected = false
+    /// Prédiction : chiffres sous la barre (points misés, cote, votants,
+    /// plus grosse mise), comme dans l'app Twitch.
+    var stats: [(icon: String, text: String)] = []
 
     var body: some View {
         let pct = Double(value) / Double(max(total, 1))
@@ -1098,6 +1147,19 @@ struct EventBar: View {
                 }
             }
             .frame(height: 5)
+            if !stats.isEmpty {
+                HStack(spacing: 10) {
+                    ForEach(stats.indices, id: \.self) { i in
+                        HStack(spacing: 3) {
+                            Image(systemName: stats[i].icon).font(.system(size: 9, weight: .semibold))
+                            Text(stats[i].text).font(.system(size: 10, weight: .semibold).monospacedDigit())
+                        }
+                    }
+                }
+                .foregroundColor(color)
+                .lineLimit(1)
+                .padding(.top, 2)
+            }
         }
         .contentShape(Rectangle())
         .overlay(

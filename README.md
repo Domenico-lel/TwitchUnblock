@@ -218,7 +218,10 @@ no key to paste. The backend is already hosted and shared by every install.
   link to the details, like in the Twitch app; dismissed, it stays away for
   that campaign (Settings → Chat → Customization → Channel drops).
 * 📊 **Polls, predictions, hype train** — vote, bet channel points on a
-  prediction, see the countdown, the results and the winning outcome. Once
+  prediction, see the countdown, the results and the winning outcome. Each
+  outcome shows, like the Twitch app, the points bet on it, its return ratio
+  (1:1.7), how many people bet and the biggest bet; your bet shows what it
+  would win. Once
   betting is closed, a prediction folds down to its title and your bet, and a
   finished poll to its winning choice; tap to see the bars. The hype train is
   shown from the moment it is incoming, like on Twitch: its checkmarks, how many

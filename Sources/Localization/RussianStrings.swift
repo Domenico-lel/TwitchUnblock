@@ -118,7 +118,7 @@ let kRussianStrings: [String: String] = [
     "pred_closed": "Приём прогнозов закрыт",
     "pred_one_outcome": "Вы уже сделали прогноз на другой исход",
     "pred_max": "Максимум: 250 000 баллов за прогноз",
-    "pred_min": "Минимум: 10 баллов",
+    "pred_min": "Минимум: 10 баллов", "pred_potential": "возможный выигрыш: {n} баллов",
     "hide_bots": "Скрывать ботов",
     "hide_bots_sub": "Nightbot, StreamElements, Fossabot…",
     "hide_commands": "Скрывать команды",
