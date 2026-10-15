@@ -355,6 +355,12 @@ final class LiveEventsService: ObservableObject {
             // une minute, au lieu de tout faire disparaître d'un coup.
             if let prev = prediction {
                 if prev.winnerId == nil, !prev.id.isEmpty, let winner = await resolvedWinner(eventId: prev.id) {
+                    // Ton pari gagnant : ce gain n'est pas compté dans les
+                    // points gagnés en regardant (Réglages → Points de chaîne).
+                    if prev.myOutcomeId == winner, prev.myPoints > 0,
+                       let won = prev.outcomes.first(where: { $0.id == winner }), let r = prev.ratio(won.points) {
+                        PointsTracker.shared.expectPayout(Int(Double(prev.myPoints) * r), login)
+                    }
                     var done = prev
                     done.winnerId = winner
                     done.closesAt = nil

@@ -179,7 +179,7 @@ struct SettingsView: View {
     // MARK: – Pages de réglages
     /// Les destinations du menu.
     enum Page: Hashable {
-        case account, general, player, chat, drops, labs, other, changelog
+        case account, general, player, chat, drops, points, labs, other, changelog
 
         var titleKey: String {
             switch self {
@@ -188,6 +188,7 @@ struct SettingsView: View {
             case .player:    return "sec_player"
             case .chat:      return "sec_chat"
             case .drops:     return "drops"
+            case .points:    return "points_tracker"
             case .labs:      return "debug_section"
             case .other:     return "sec_other"
             case .changelog: return "changelog"
@@ -200,6 +201,7 @@ struct SettingsView: View {
             case .player:    return "sec_player_sub"
             case .chat:      return "sec_chat_sub"
             case .drops:     return "drops_sub"
+            case .points:    return "points_tracker_sub"
             case .labs:      return "sec_labs_sub"
             case .other:     return "sec_other_sub"
             case .changelog: return "changelog_sub"
@@ -212,6 +214,7 @@ struct SettingsView: View {
             case .player:    return "play.rectangle.fill"
             case .chat:      return "bubble.left.and.bubble.right.fill"
             case .drops:     return "shippingbox.fill"
+            case .points:    return "circle.circle.fill"
             case .labs:      return "flask.fill"
             case .other:     return "info.circle.fill"
             case .changelog: return "sparkles"
@@ -226,6 +229,7 @@ struct SettingsView: View {
             case .player:    return .tOutplayer
             case .chat:      return .tSuccess
             case .drops:     return .tLive
+            case .points:    return .tPurple
             case .labs:      return .tWarning
             case .other:     return .tMuted
             case .changelog: return .tVLC
@@ -291,6 +295,8 @@ struct SettingsView: View {
                     menuRow(.chat)
                     rowSeparator
                     menuRow(.drops)
+                    rowSeparator
+                    menuRow(.points)
                     rowSeparator
                     menuRow(.labs)
                     rowSeparator
@@ -501,6 +507,8 @@ struct SettingsView: View {
                     tailleChatCard
                 case .drops:
                     DropsPanel(onLogin: { startWebLogin() })
+                case .points:
+                    PointsTrackerPanel(onLogin: { startWebLogin() })
                 case .labs:
                     debugCard
                 case .other:

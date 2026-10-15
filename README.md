@@ -240,6 +240,9 @@ no key to paste. The backend is already hosted and shared by every install.
   same dialog can hide the button (Settings → Chat → Customization → Follow
   button above the chat).
 * 🎁 **Channel points** — balance, rewards, and automatic bonus chest claiming.
+  Settings → Channel points tracks, like drops, the time watched and the points
+  earned by watching (passive points, streaks, chests; not prediction
+  winnings): right now, in total and per channel, on this device.
 * ⏱ **Auto-sync chat delay** — delays the chat by how far behind live you are,
   measured from the stream's timestamps so it doesn't drift each time the
   playlist reloads. Still off on a given stream? Nudge it by ±1 s from the ⏱
