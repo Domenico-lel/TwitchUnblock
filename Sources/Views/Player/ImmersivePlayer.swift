@@ -742,6 +742,9 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// Live Activity : mêmes infos, plus l'état de la lecture. PlayerActivity
     /// n'envoie que ce qui change à l'écran.
     private func updateActivity() {
+        // Démonté : rien à montrer (une vue réapparue après coup relançait
+        // sinon une Live Activity pour un lecteur arrêté).
+        guard !tornDown else { return }
         activityDuration = isLive ? 0 : endTime
         PlayerActivity.update(nowPlaying, isLive: isLive, isPlaying: isPlaying,
                               position: position, duration: activityDuration,
