@@ -143,6 +143,11 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     private weak var failedItem: AVPlayerItem?
     private var autoReloads = 0
     private var lastAutoReload = Date.distantPast
+    /// Pause voulue (bouton, écran verrouillé, PiP) : un direct en échec
+    /// n'est alors pas relancé seul, il serait reparti avec le son (jamais
+    /// après une pause voulue, comme PlaybackAudio) ; la carte propose
+    /// « Réessayer ».
+    private var pausedByUser = false
     /// Démonté (vue fermée) : plus rien ne relance ce lecteur ni ne publie
     /// pour lui.
     private var tornDown = false
@@ -247,7 +252,10 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     private func reloadForSpatialAudio() {
         guard let asset = player.currentItem?.asset as? AVURLAsset else { return }
         let wasPlaying = isPlaying
-        load(url: asset.url, seek: isLive ? 0 : position, behind: heldBehind)
+        // Départ encore en attente (reprise, recul d'un direct) : il suit le
+        // nouvel élément, `position` vaut encore 0.
+        load(url: asset.url, seek: isLive ? 0 : (pendingSeek ?? position),
+             resume: pendingSeek != nil && pendingIsResume, behind: pendingBehind ?? heldBehind)
         if !wasPlaying { setPlaying(false) }
     }
 
@@ -262,12 +270,15 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// téléchargée reprennent à l'endroit lu ; un direct reculé exprès garde
     /// son retard sur le bord, sinon il repart au bord comme avant. Avant,
     /// tout repartait de la progression enregistrée, qui vaut 0 hors VOD de
-    /// Twitch, et le recul d'un direct était perdu.
+    /// Twitch, et le recul d'un direct était perdu. Choisie avant que le
+    /// départ ne s'applique (élément pas encore prêt), elle garde ce départ :
+    /// `position` vaut encore 0, la VOD repartait de 0:00 et cette position
+    /// écrasait la reprise.
     func switchQuality(to url: URL) {
         if isLive {
-            load(url: url, behind: heldBehind)
+            load(url: url, behind: pendingBehind ?? heldBehind)
         } else {
-            load(url: url, seek: position)
+            load(url: url, seek: pendingSeek ?? position, resume: pendingSeek != nil && pendingIsResume)
         }
     }
 
@@ -284,9 +295,11 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         // Même modèle pour un changement de qualité ou une bascule direct ↔
         // enregistrement : la tenue du direct repart de zéro (recalage compris).
         latency.reset()
-        // Nouvelle source, lancée : plus de reprise en attente.
+        // Nouvelle source, lancée : plus de reprise en attente, ni de pause
+        // voulue (l'appelant la remet s'il le faut).
         interruptions?.settle()
         failed = false
+        pausedByUser = false
         if self.isLive { LiveDiagnostics.logAudioRoute("début du direct") }
 
         // Adresse `tuunmute://` : passages coupés rétablis (VodUnmuteLoader).
@@ -355,24 +368,35 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     /// Élément en échec. Un direct se relit seul, deux fois au plus par
     /// minute (à 2 puis 4 s) : le flux revient souvent après une coupure.
-    /// Sinon, ou pour une VOD, la vue dit que la lecture s'est arrêtée et
-    /// propose « Réessayer » (le lecteur relit alors les liens).
+    /// Sinon, ou pour une VOD, ou si on l'avait mis en pause (il repartirait
+    /// seul, avec le son), la vue dit que la lecture s'est arrêtée et propose
+    /// « Réessayer » (le lecteur relit alors les liens).
     private func itemFailed(_ item: AVPlayerItem, error: Error?) {
         guard !tornDown, player.currentItem === item, failedItem !== item else { return }
         failedItem = item
         let reason = error?.localizedDescription ?? "?"
         if Date().timeIntervalSince(lastAutoReload) > 60 { autoReloads = 0 }
-        if isLive, autoReloads < 2, let asset = item.asset as? AVURLAsset {
+        if isLive, autoReloads < 2, !pausedByUser, let asset = item.asset as? AVURLAsset {
             autoReloads += 1
             lastAutoReload = Date()
             let attempt = autoReloads
             logger.warn("LECTEUR", "Lecture du direct interrompue", "\(reason) · relance \(attempt)/2")
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(attempt) * 2) { [weak self] in
                 guard let self, !self.tornDown, self.player.currentItem === item else { return }
+                // Mis en pause entre-temps : pas de relance, la carte.
+                guard !self.pausedByUser else {
+                    self.showFailure(reason + " · en pause, pas de relance")
+                    return
+                }
                 self.load(url: asset.url)
             }
             return
         }
+        showFailure(isLive && pausedByUser ? reason + " · en pause, pas de relance" : reason)
+    }
+
+    /// La lecture s'est arrêtée : la carte « Réessayer » s'affiche.
+    private func showFailure(_ reason: String) {
         logger.warn("LECTEUR", "Lecture interrompue", reason)
         failed = true
         isPlaying = false
@@ -471,8 +495,10 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     func setPlaying(_ on: Bool) {
         if on { player.play() } else { player.pause() }
-        // Pause voulue (bouton, écran verrouillé) : rien ne la relance seul.
+        // Pause voulue (bouton, écran verrouillé) : rien ne la relance seul,
+        // ni la fin d'une interruption, ni la relance d'un direct en échec.
         if !on { interruptions?.settle() }
+        pausedByUser = !on
         isPlaying = on
         refreshNowPlaying(force: true)
         updateActivity()
@@ -581,10 +607,15 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// va au journal (PiP, AirPlay, refus… à départager sur appareil).
     private func rateChanged(_ note: Notification) {
         let rate = Double(player.rate)
-        let v = VodSpeed.nearest(rate)
-        guard !isLive, player.currentItem != nil, rate > 0, abs(v - speed) > 0.01 else { return }
         let raw = note.userInfo?[AVPlayer.rateDidChangeReasonKey]
         let reason = (raw as? AVPlayer.RateDidChangeReason)?.rawValue ?? (raw as? String) ?? "?"
+        // Pause ou reprise demandée depuis le PiP (ses boutons ne passent pas
+        // par setPlaying) : retenue comme celle du bouton.
+        if pipActive, reason == AVPlayer.RateDidChangeReason.setRateCalled.rawValue {
+            pausedByUser = rate == 0
+        }
+        let v = VodSpeed.nearest(rate)
+        guard !isLive, player.currentItem != nil, rate > 0, abs(v - speed) > 0.01 else { return }
         force(speed: v,
               notice: nearRecordingEdge ? "speed_caught_up" : "speed_unavailable",
               why: String(format: "×%.2f imposé par le lecteur · ", rate) + reason,

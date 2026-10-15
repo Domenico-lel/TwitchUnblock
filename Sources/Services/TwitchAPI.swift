@@ -1111,9 +1111,18 @@ func getUserAvatarGQL(login: String) async -> String? {
 /// reparties). Une page suivante en panne n'annule pas les précédentes ; la
 /// première lève l'erreur, comme avant.
 func getFollowedStreams(token: String, userId: String) async throws -> [TwitchStream] {
+    try await getFollowedStreamsPaged(token: token, userId: userId).streams
+}
+
+/// La même liste, et si elle est complète : faux quand une page suivante n'a
+/// pas répondu, ou au-delà de 300. L'accueil et la TV s'en passent ;
+/// LiveNotifier, lui, prenait les lives absents d'une liste partielle pour
+/// finis, et les notifiait tous de nouveau au contrôle suivant.
+func getFollowedStreamsPaged(token: String, userId: String) async throws -> (streams: [TwitchStream], complete: Bool) {
     var streams: [TwitchStream] = []
     var seen = Set<String>()
     var cursor: String? = nil
+    var complete = true
     for page in 0..<3 {
         var address = "https://api.twitch.tv/helix/streams/followed?user_id=\(userId)&first=100"
         if let cursor {
@@ -1130,10 +1139,11 @@ func getFollowedStreams(token: String, userId: String) async throws -> [TwitchSt
             status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         } catch {
             if page == 0 { throw error }
+            complete = false
             break
         }
         guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            guard page == 0 else { break }
+            guard page == 0 else { complete = false; break }
             // 401 distingué : l'accueil s'en sert pour déconnecter un jeton
             // expiré (le test sur le texte de l'erreur ne correspondait jamais).
             if status == 401 { throw URLError(.userAuthenticationRequired) }
@@ -1147,9 +1157,11 @@ func getFollowedStreams(token: String, userId: String) async throws -> [TwitchSt
         }
         cursor = (json["pagination"] as? [String: Any])?["cursor"] as? String
         guard let next = cursor, !next.isEmpty, !arr.isEmpty else { break }
+        // 300 atteints, et il en reste.
+        if page == 2 { complete = false }
     }
-    logger.success("HELIX", "\(streams.count) streams suivis en direct")
-    return streams
+    logger.success("HELIX", "\(streams.count) streams suivis en direct" + (complete ? "" : " (liste partielle)"))
+    return (streams, complete)
 }
 
 /// `count` : 50 d'habitude, 100 (le plafond de Helix) quand des chaînes ou

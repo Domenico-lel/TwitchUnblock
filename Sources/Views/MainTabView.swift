@@ -96,6 +96,15 @@ struct MainTabView: View {
     /// « Chargement de la VOD », alors qu'on ne change ni de chaîne ni de
     /// contexte — juste de source.
     @State private var switchingSource = false
+    /// Contenu des liens donnés au lecteur (« live:… », « vod:… »), et s'ils
+    /// sont ceux d'un direct. Pendant une bascule, `playerMode` désigne déjà
+    /// la nouvelle source alors que le lecteur lit encore l'ancienne : une
+    /// qualité choisie à ce moment passait pour un changement de source, et
+    /// l'arrivée des nouveaux liens pour un simple changement de qualité
+    /// (l'enregistrement s'ouvrait à la position du direct, pas à l'instant
+    /// visé). Posés en même temps que `qualityLinks`.
+    @State private var linksContentID = ""
+    @State private var linksAreLive = false
     /// Incrémenté à chaque ouverture et fermeture du lecteur : la réponse
     /// d'un chargement dépassé (chaîne A arrivée après la chaîne B, lecteur
     /// déjà fermé) est ignorée au lieu d'écraser l'état ou de relancer les
@@ -880,10 +889,10 @@ struct MainTabView: View {
         if store.immersivePlayer {
             ImmersivePlayer(
                 url: URL(string: links[currentQuality(links)] ?? "") ?? URL(string: "about:blank")!,
-                isLive: isLivePlaying,
-                dvrEnabled: isLivePlaying,
+                isLive: linksAreLive,
+                dvrEnabled: linksAreLive,
                 savedTime: currentVodId.map { store.getVodProgress($0) } ?? 0,
-                contentID: playerContentID,
+                contentID: linksContentID,
                 info: overlayInfo,
                 onChannel: playerChannelLogin.map { l in { store.openChannelPage(l) } },
                 sleepLabel: sleepTimer.isActive ? sleepTimer.label : nil,
@@ -938,9 +947,11 @@ struct MainTabView: View {
         } else {
             VideoPlayerView(
                 qualityLinks: links,
-                vodId: currentVodId,
-                isLive: isLivePlaying,
-                contentID: playerContentID,
+                // Pas de VOD tant que le lecteur lit encore le direct (bascule) :
+                // sa position partait comme reprise de l'enregistrement.
+                vodId: linksAreLive ? nil : currentVodId,
+                isLive: linksAreLive,
+                contentID: linksContentID,
                 variants: qualityVariants,
                 compact: false,  // garde qualité / rembobiner ; le bouton Chat, lui,
                                  // n'a plus lieu d'être (le chat est toujours affiché)
@@ -1478,6 +1489,8 @@ struct MainTabView: View {
             loading          = true
             playerPlaying    = false
             qualityLinks     = nil
+            linksContentID   = ""
+            linksAreLive     = false
             qualityVariants  = [:]
             // Avatar, jeu et qualité retenue ne sont vidés qu'à l'ouverture
             // d'une autre chaîne : en bascule, ils sont toujours les bons, et
@@ -1529,6 +1542,8 @@ struct MainTabView: View {
                         return
                     }
                     qualityLinks    = clip.links
+                    linksContentID  = playerContentID
+                    linksAreLive    = false
                     qualityVariants = [:]   // noms avec la hauteur (« 720p60 »)
                     statusTitle     = clip.title.isEmpty ? (title ?? "Clip") : clip.title
                     clipVodId       = clip.vodId
@@ -1575,6 +1590,8 @@ struct MainTabView: View {
                         vodChapters     = markers.chapters
                         vodMuted        = markers.muted
                         qualityLinks    = links
+                        linksContentID  = playerContentID
+                        linksAreLive    = false
                         qualityVariants = data.variants
                         statusTitle     = title ?? "VOD \(id)"
                         loading         = false
@@ -1594,6 +1611,8 @@ struct MainTabView: View {
                 await MainActor.run {
                     guard gen == loadGeneration else { return }
                     qualityLinks    = rec.links
+                    linksContentID  = playerContentID
+                    linksAreLive    = false
                     qualityVariants = [:]
                     statusTitle     = rec.title.isEmpty ? store.t("recover_title") : rec.title
                     loading         = false
@@ -1639,6 +1658,8 @@ struct MainTabView: View {
                     await MainActor.run {
                         guard gen == loadGeneration else { return }
                         qualityLinks      = playable
+                        linksContentID    = playerContentID
+                        linksAreLive      = true
                         qualityVariants   = data.variants
                         statusTitle       = data.title.isEmpty ? channel : data.title
                         liveViewerCount   = data.viewerCount
@@ -1718,6 +1739,8 @@ struct MainTabView: View {
             liveSourceUsed     = nil
             playerMode         = nil
             qualityLinks       = nil
+            linksContentID     = ""
+            linksAreLive       = false
             qualityVariants    = [:]
             statusTitle        = ""
             loading            = false

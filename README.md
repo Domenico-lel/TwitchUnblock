@@ -35,7 +35,7 @@ no key to paste. The backend is already hosted and shared by every install.
   keeps your place, in Apple's player too (a live you rewound keeps its delay);
   a VOD you had finished starts over from the beginning; when the stream drops for good, the
   player says so with **Retry** instead of freezing (a live first reloads
-  itself twice).
+  itself twice, unless you had paused it).
 * 🐢 **Playback speed** — 0.25× to 2× on VODs and clips, from the ⋯ menu (or
   Apple's own speed menu in the native player and on Apple TV). The VOD speed
   is remembered from one VOD to the next, shown next to the timer, and synced

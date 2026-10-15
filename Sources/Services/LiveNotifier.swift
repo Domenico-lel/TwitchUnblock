@@ -106,10 +106,15 @@ enum LiveNotifier {
         // Suivis du compte Twitch (si connecté) + suivis sur cet appareil.
         var streams: [TwitchStream] = []
         var reached = false
+        // Liste partielle (une page suivante n'a pas répondu) : un live qui
+        // n'y est pas n'est pas fini pour autant. Le retirer des connus le
+        // faisait notifier de nouveau au contrôle suivant, en rafale.
+        var partial = false
         if let token = Keychain.loadToken("twitch_token"),
            let userId = ud.string(forKey: "twitch_user_id"), !userId.isEmpty {
-            guard let followed = try? await getFollowedStreams(token: token, userId: userId) else { return false }
-            streams = followed
+            guard let followed = try? await getFollowedStreamsPaged(token: token, userId: userId) else { return false }
+            streams = followed.streams
+            partial = !followed.complete
             reached = true
         }
         let local = ud.stringArray(forKey: "local_follows") ?? []
@@ -136,7 +141,7 @@ enum LiveNotifier {
                 try? await UNUserNotificationCenter.current().add(req)
             }
         }
-        ud.set(Array(now), forKey: knownKey)
+        ud.set(Array(partial ? known.union(now) : now), forKey: knownKey)
         return true
     }
 }
