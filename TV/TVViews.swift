@@ -8,12 +8,20 @@ import SwiftUI
 /// Ce que le lecteur doit lire.
 enum TVPlayback: Identifiable, Hashable {
     case live(login: String, name: String)
-    case vod(id: String, title: String)
+    case vod(id: String, title: String, channel: String)
 
     var id: String {
         switch self {
         case .live(let login, _): return "live-\(login)"
-        case .vod(let id, _):     return "vod-\(id)"
+        case .vod(let id, _, _):  return "vod-\(id)"
+        }
+    }
+
+    /// Chaîne regardée (login) : le chat garde sa place propre à chacune.
+    var channel: String {
+        switch self {
+        case .live(let login, _):   return login.lowercased()
+        case .vod(_, _, let login): return login.lowercased()
         }
     }
 }
@@ -330,7 +338,7 @@ struct TVChannelView: View {
                     LazyVGrid(columns: columns, spacing: 56) {
                         ForEach(videos) { v in
                             Button {
-                                play(.vod(id: v.id, title: v.title))
+                                play(.vod(id: v.id, title: v.title, channel: login))
                             } label: {
                                 TVVodCard(video: v)
                             }
@@ -375,6 +383,9 @@ struct TVAccountTab: View {
                         Spacer(minLength: 0)
                         Button(session.t("tv_logout")) { session.logout() }
                     }
+                    // Toute la largeur : en remontant depuis « Langue », le
+                    // focus trouve ce bouton puis la barre des onglets.
+                    .focusSection()
                 } else if let code {
                     loginPanel(code)
                 } else {
@@ -385,6 +396,8 @@ struct TVAccountTab: View {
                             Text(session.t("tv_login_expired")).foregroundColor(Color.tWarning)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .focusSection()
                 }
 
                 VStack(alignment: .leading, spacing: 32) {
@@ -402,6 +415,22 @@ struct TVAccountTab: View {
                                          : pref == "audio" ? session.t("tv_audio") : "\(pref)p")
                                 },
                                 selection: $session.qualityPref)
+                    TVChoiceRow(title: session.t("tv_chat_side"),
+                                options: TVChatLayout.Side.allCases.map { ($0.rawValue, session.t("tv_chat_\($0.rawValue)")) },
+                                selection: Binding(get: { session.chatLayout.side.rawValue },
+                                                   set: { session.chatLayout.side = TVChatLayout.Side(rawValue: $0) ?? .right }))
+                    TVChoiceRow(title: session.t("tv_chat_height"),
+                                options: TVChatLayout.Height.allCases.map { ($0.rawValue, session.t("tv_chat_\($0.rawValue)")) },
+                                selection: Binding(get: { session.chatLayout.height.rawValue },
+                                                   set: { session.chatLayout.height = TVChatLayout.Height(rawValue: $0) ?? .full }))
+                    Text(session.t("tv_chat_layout_hint")).foregroundColor(.secondary)
+                    if !session.channelChatLayouts.isEmpty {
+                        Button("\(session.t("tv_chat_forget")) (\(session.channelChatLayouts.count))") {
+                            session.forgetChannelChatLayouts()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .focusSection()
+                    }
                 }
 
                 hiddenSection
@@ -443,7 +472,10 @@ struct TVAccountTab: View {
                     }
                     .padding(.vertical, 20)
                 }
+                .focusSection()
                 Button(session.t("unhide_all")) { session.hidden.unhideAll() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .focusSection()
             }
         }
     }
@@ -492,6 +524,7 @@ struct TVChoiceRow: View {
     let title: String
     let options: [(String, String)]
     @Binding var selection: String
+    @FocusState private var focused: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -507,10 +540,28 @@ struct TVChoiceRow: View {
                                 Text(options[i].1)
                             }
                         }
+                        .focused($focused, equals: options[i].0)
                     }
                 }
                 .padding(.vertical, 20)
             }
+        }
+        // Une rangée = une étape : haut et bas passent à la rangée voisine sans
+        // en sauter ni filer sur le côté, et arrivent sur l'option cochée.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
+        .tvDefaultFocus($focused, selection)
+    }
+}
+
+extension View {
+    /// tvOS 17 : arriver dans la zone à la télécommande met le focus sur
+    /// `value` ; tvOS 16 : sur l'élément le plus proche, comme avant.
+    @ViewBuilder func tvDefaultFocus<V: Hashable>(_ binding: FocusState<V?>.Binding, _ value: V) -> some View {
+        if #available(tvOS 17.0, *) {
+            defaultFocus(binding, value, priority: .userInitiated)
+        } else {
+            self
         }
     }
 }

@@ -28,6 +28,16 @@ final class TVSession: ObservableObject {
     @Published var tvChat: Bool {
         didSet { UserDefaults.standard.set(tvChat, forKey: "tv_chat") }
     }
+    /// Place du chat par défaut (Compte, ou « Garder pour toutes les chaînes »
+    /// dans le lecteur).
+    @Published var chatLayout: TVChatLayout {
+        didSet { UserDefaults.standard.set(chatLayout.raw, forKey: "tv_chat_layout") }
+    }
+    /// Place choisie dans le lecteur pour une chaîne (login → place) : elle
+    /// prime sur celle par défaut, et disparaît quand elle lui redevient égale.
+    @Published private(set) var channelChatLayouts: [String: String] {
+        didSet { UserDefaults.standard.set(channelChatLayouts, forKey: "tv_chat_layouts") }
+    }
     /// Qualité préférée (`kQualityPrefs`), même règle que l'iPhone : si elle
     /// manque, la plus proche en dessous. Choisir une qualité dans le lecteur
     /// la remplace.
@@ -55,6 +65,8 @@ final class TVSession: ObservableObject {
         let source = ud.string(forKey: "liveSource") ?? "auto"
         liveSource = kLiveSourceChoices.contains(source) ? source : "auto"
         tvChat = ud.object(forKey: "tv_chat") as? Bool ?? true
+        chatLayout = TVChatLayout(raw: ud.string(forKey: "tv_chat_layout") ?? "") ?? TVChatLayout()
+        channelChatLayouts = ud.dictionary(forKey: "tv_chat_layouts") as? [String: String] ?? [:]
         // Avant : le nom exact de la dernière qualité choisie (« 720p60 »),
         // qui ne servait que s'il existait sur la chaîne suivante.
         if let pref = ud.string(forKey: "tv_quality_pref"), kQualityPrefs.contains(pref) {
@@ -68,6 +80,38 @@ final class TVSession: ObservableObject {
     }
 
     func t(_ key: String) -> String { tvTranslate(key, lang) }
+
+    // MARK: Place du chat
+    /// Place du chat pour une chaîne : la sienne si on l'a déplacé en la
+    /// regardant, sinon celle par défaut.
+    func chatLayout(for channel: String) -> TVChatLayout {
+        channelChatLayouts[channel].flatMap(TVChatLayout.init(raw:)) ?? chatLayout
+    }
+
+    /// Place choisie dans le lecteur : retenue pour cette chaîne seulement.
+    func setChatLayout(_ layout: TVChatLayout, for channel: String) {
+        guard !channel.isEmpty else { return }
+        var all = channelChatLayouts
+        if layout == chatLayout {
+            all.removeValue(forKey: channel)
+        } else {
+            all[channel] = layout.raw
+            // tvOS limite le stockage local : 200 chaînes suffisent.
+            if all.count > 200, let any = all.keys.first(where: { $0 != channel }) { all.removeValue(forKey: any) }
+        }
+        if all != channelChatLayouts { channelChatLayouts = all }
+    }
+
+    /// « Garder pour toutes les chaînes » : la place de cette chaîne devient
+    /// celle par défaut.
+    func makeDefaultChatLayout(from channel: String) {
+        let layout = chatLayout(for: channel)
+        channelChatLayouts.removeValue(forKey: channel)
+        chatLayout = layout
+    }
+
+    /// Compte : toutes les chaînes reprennent la place par défaut.
+    func forgetChannelChatLayouts() { channelChatLayouts = [:] }
 
     // MARK: Session
     /// Au lancement : jeton vérifié, renouvelé s'il a expiré, compte chargé.

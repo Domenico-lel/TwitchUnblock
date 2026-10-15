@@ -543,13 +543,49 @@ struct TVIRCLine {
 // MARK: – Affichage
 /// Chat sur le côté droit de l'image : les messages les plus récents en
 /// bas, les plus anciens s'effacent en haut. Ne prend jamais le focus.
+/// Place du chat sur l'image : à gauche ou à droite, sur toute la hauteur ou
+/// sur sa moitié haute ou basse (un des quatre coins).
+struct TVChatLayout: Equatable {
+    enum Side: String, CaseIterable { case left, right }
+    enum Height: String, CaseIterable { case full, top, bottom }
+
+    var side: Side
+    var height: Height
+
+    init(side: Side = .right, height: Height = .full) {
+        self.side = side
+        self.height = height
+    }
+
+    /// « right-full », « left-bottom »… (forme enregistrée dans les réglages).
+    init?(raw: String) {
+        let parts = raw.split(separator: "-").map(String.init)
+        guard parts.count == 2, let side = Side(rawValue: parts[0]),
+              let height = Height(rawValue: parts[1]) else { return nil }
+        self.init(side: side, height: height)
+    }
+
+    var raw: String { "\(side.rawValue)-\(height.rawValue)" }
+
+    fileprivate var alignment: Alignment {
+        switch (side, height) {
+        case (.left, .full):    return .leading
+        case (.left, .top):     return .topLeading
+        case (.left, .bottom):  return .bottomLeading
+        case (.right, .full):   return .trailing
+        case (.right, .top):    return .topTrailing
+        case (.right, .bottom): return .bottomTrailing
+        }
+    }
+}
+
 struct TVChatOverlay: View {
     @ObservedObject var model: TVChatModel
     let waitingText: String
+    var layout = TVChatLayout()
 
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
+        GeometryReader { geo in
             VStack(alignment: .leading, spacing: 12) {
                 Spacer(minLength: 0)
                 if model.lines.isEmpty && model.waiting {
@@ -564,14 +600,18 @@ struct TVChatOverlay: View {
             .frame(width: 500, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.horizontal, 30)
-            .padding(.vertical, 50)
+            .padding(.vertical, layout.height == .full ? 50 : 30)
             .background(Color.black.opacity(0.5))
             .mask(LinearGradient(stops: [.init(color: .clear, location: 0),
                                          .init(color: .black, location: 0.3),
                                          .init(color: .black, location: 1)],
                                  startPoint: .top, endPoint: .bottom))
             .clipped()
+            // Moitié haute ou basse : le chat tient dans un coin de l'image.
+            .frame(height: layout.height == .full ? geo.size.height : geo.size.height / 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: layout.alignment)
         }
+        .animation(.easeInOut(duration: 0.25), value: layout)
         .allowsHitTesting(false)
     }
 }

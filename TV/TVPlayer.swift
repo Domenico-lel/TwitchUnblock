@@ -22,7 +22,8 @@ struct TVPlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let player = model.player {
-                TVPlayerController(player: player, model: model, session: session, chat: chat)
+                TVPlayerController(player: player, model: model, session: session, chat: chat,
+                                   channel: item.channel)
                     .ignoresSafeArea()
             } else if let error = model.error {
                 VStack(spacing: 40) {
@@ -37,7 +38,7 @@ struct TVPlayerScreen: View {
         .task {
             switch item {
             case .live(let login, _): chat.start(login)
-            case .vod(let id, _):     chat.startVod(id)
+            case .vod(let id, _, _):  chat.startVod(id)
             }
             await model.load(item, session: session)
         }
@@ -92,7 +93,7 @@ final class TVPlayerModel: ObservableObject {
             // lecteur tient le bord du direct au lieu de rester ~20 s derrière.
             links = LivePlaylistLoader.wrap(raw)
             variants = data.variants
-        case .vod(let id, let videoTitle):
+        case .vod(let id, let videoTitle, _):
             isLive = false
             title = videoTitle
             subtitle = ""
@@ -213,6 +214,8 @@ struct TVPlayerController: UIViewControllerRepresentable {
     @ObservedObject var model: TVPlayerModel
     @ObservedObject var session: TVSession
     let chat: TVChatModel
+    /// Chaîne regardée : le chat y garde la place choisie dans le menu Chat.
+    let channel: String
 
     final class Coordinator {
         var chatHost: UIHostingController<TVChatOverlay>?
@@ -229,8 +232,7 @@ struct TVPlayerController: UIViewControllerRepresentable {
         vc.transportBarCustomMenuItems = menus()
         // Chat dans le calque du lecteur : sur l'image, sous les commandes,
         // sans jamais prendre le focus.
-        let host = UIHostingController(rootView: TVChatOverlay(
-            model: chat, waitingText: session.t(model.isLive ? "tv_chat_waiting" : "tv_chat_loading")))
+        let host = UIHostingController(rootView: overlay())
         host.view.backgroundColor = .clear
         host.view.isUserInteractionEnabled = false
         if let overlay = vc.contentOverlayView {
@@ -251,8 +253,16 @@ struct TVPlayerController: UIViewControllerRepresentable {
         showChat(context)
     }
 
+    /// Chat posé sur l'image, à la place retenue pour cette chaîne.
+    private func overlay() -> TVChatOverlay {
+        TVChatOverlay(model: chat, waitingText: session.t(model.isLive ? "tv_chat_waiting" : "tv_chat_loading"),
+                      layout: session.chatLayout(for: channel))
+    }
+
     private func showChat(_ context: Context) {
-        context.coordinator.chatHost?.view.isHidden = !session.tvChat
+        guard let host = context.coordinator.chatHost else { return }
+        host.view.isHidden = !session.tvChat
+        host.rootView = overlay()
     }
 
     /// Menus de la barre de lecture : Qualité, et Source pour un direct.
@@ -281,14 +291,57 @@ struct TVPlayerController: UIViewControllerRepresentable {
                                 image: UIImage(systemName: "antenna.radiowaves.left.and.right"),
                                 children: sources))
         }
-        // Chat affiché ou masqué (gardé pour les prochaines lectures).
-        items.append(UIAction(title: session.t("tv_chat"),
-                              image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
-                                                                        : "bubble.left.and.bubble.right"),
-                              state: session.tvChat ? .on : .off) { _ in
-            Task { @MainActor in session.tvChat.toggle() }
-        })
+        items.append(chatMenu())
         return items
+    }
+
+    /// Menu Chat : affiché ou masqué (gardé pour les prochaines lectures), et
+    /// sa place sur l'image — côté, hauteur — retenue pour cette chaîne.
+    private func chatMenu() -> UIMenu {
+        let session = self.session
+        let channel = self.channel
+        let layout = session.chatLayout(for: channel)
+        /// Place changée : chat affiché s'il était masqué, pour la voir.
+        func place(_ change: @escaping (inout TVChatLayout) -> Void) {
+            Task { @MainActor in
+                var next = session.chatLayout(for: channel)
+                change(&next)
+                session.setChatLayout(next, for: channel)
+                if !session.tvChat { session.tvChat = true }
+            }
+        }
+        let sides: [UIMenuElement] = TVChatLayout.Side.allCases.map { side in
+            UIAction(title: session.t("tv_chat_\(side.rawValue)"), state: layout.side == side ? .on : .off) { _ in
+                place { $0.side = side }
+            }
+        }
+        let heights: [UIMenuElement] = TVChatLayout.Height.allCases.map { height in
+            UIAction(title: session.t("tv_chat_\(height.rawValue)"), state: layout.height == height ? .on : .off) { _ in
+                place { $0.height = height }
+            }
+        }
+        var children: [UIMenuElement] = [
+            UIAction(title: session.t("tv_chat_show"), state: session.tvChat ? .on : .off) { _ in
+                Task { @MainActor in session.tvChat.toggle() }
+            },
+            UIMenu(title: session.t("tv_chat_side"), options: .displayInline, children: sides),
+            UIMenu(title: session.t("tv_chat_height"), options: .displayInline, children: heights),
+        ]
+        // Place propre à cette chaîne : la garder partout, ou revenir à celle par défaut.
+        if layout != session.chatLayout {
+            children.append(UIMenu(title: "", options: .displayInline, children: [
+                UIAction(title: session.t("tv_chat_all")) { _ in
+                    Task { @MainActor in session.makeDefaultChatLayout(from: channel) }
+                },
+                UIAction(title: session.t("tv_chat_reset")) { _ in
+                    Task { @MainActor in session.setChatLayout(session.chatLayout, for: channel) }
+                },
+            ]))
+        }
+        return UIMenu(title: session.t("tv_chat"),
+                      image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
+                                                                : "bubble.left.and.bubble.right"),
+                      children: children)
     }
 
     /// Libellé commun avec l'iPhone ; l'audio seul garde le texte de la TV.

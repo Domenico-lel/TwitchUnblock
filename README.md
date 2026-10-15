@@ -440,9 +440,13 @@ unsigned `tv-test-N` pre-release:
 * Followed channels (sign in with a code or a QR code on twitch.tv/activate),
   top streams, categories, search, a channel's VODs.
 * tvOS's native player, with Quality, **Chat** and, for lives, Source in its
-  bar: the chat (read-only, no account needed) sits on the right of the
-  picture — live, or a VOD's chat replayed in sync — with Twitch, BTTV, FFZ
-  and 7TV emotes.
+  bar: the chat (read-only, no account needed) sits on the picture — live, or
+  a VOD's chat replayed in sync — with Twitch, BTTV, FFZ and 7TV emotes. The
+  Chat menu shows or hides it and places it on the left or the right, full
+  height or in the top or bottom half (any of the four corners); that place is
+  remembered for the channel being watched, Account sets the default one.
+* Account's settings move one row at a time with the remote, land on the
+  ticked option, and always lead back up to the tab bar.
 * A preferred quality (Account → Settings), same rule as the iPhone: the
   closest one below when the channel doesn't have it; picking a quality in the
   player's bar replaces it.
