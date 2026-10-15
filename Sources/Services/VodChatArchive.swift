@@ -133,6 +133,7 @@ enum VodChatArchive {
                     case .mention(let m): tokens.append(.init(k: "m", v: m))
                     case .link(let l):    tokens.append(.init(k: "l", v: l))
                     case .emote(let e):   tokens.append(.init(k: "e", v: e.name, u: e.url, id: e.id, s: e.source.rawValue))
+                    case .gif(_, let alt): tokens.append(.init(k: "t", v: alt))
                     }
                 }
             }

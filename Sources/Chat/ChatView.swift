@@ -1300,6 +1300,12 @@ struct WrappingHStack: View {
                         .foregroundColor(.tOutplayer).underline()
                         .lineLimit(1).truncationMode(.middle)
                         .onTapGesture { openLink(l) }
+                case .gif(let url, let alt):
+                    // GIF du clavier GIF de Twitch : sur sa propre ligne,
+                    // comme dans l'app Twitch (son texte, s'il ne charge pas).
+                    CachedEmoteImage(url: url, name: alt, height: min(140, availableWidth * 0.45),
+                                     maxWidth: availableWidth)
+                        .frame(width: availableWidth, alignment: .leading)
                 }
             }
         }

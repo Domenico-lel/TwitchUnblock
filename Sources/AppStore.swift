@@ -636,6 +636,7 @@ final class AppStore: ObservableObject {
             case .text(let s), .link(let s): return s
             case .mention(let s): return "@" + s
             case .emote(let e): return e.name
+            case .gif(_, let alt): return alt
             }
         }.joined(separator: " ")
         if chatHideCommands && text.hasPrefix("!") { return true }

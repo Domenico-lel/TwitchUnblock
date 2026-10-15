@@ -524,8 +524,13 @@ final class ChatService: NSObject, ObservableObject {
             twitchEmotesByRange[range] = emote
         }
 
-        let tokens = await tokenize(text: text, twitchRanges: twitchEmotesByRange, channelId: channelId,
-                                    userId: irc.userId)
+        // GIF du clavier GIF de Twitch : son texte (« [… GIF by …] ») laisse
+        // la place à l'image.
+        var gifsByRange: [Range<String.Index>: String] = [:]
+        for g in IRCParser.parseGifRanges(raw: irc.gifsRaw, text: text) { gifsByRange[g.range] = g.url }
+
+        let tokens = await tokenize(text: text, twitchRanges: twitchEmotesByRange, gifs: gifsByRange,
+                                    channelId: channelId, userId: irc.userId)
 
         // Le rejeu n'a pas de tag `login` fiable : on retombe sur le préfixe IRC.
         let login = irc.tags["login"] ?? irc.prefixNick ?? ""
@@ -754,12 +759,13 @@ final class ChatService: NSObject, ObservableObject {
     private func tokenize(
         text: String,
         twitchRanges: [Range<String.Index>: TwitchEmote],
+        gifs: [Range<String.Index>: String] = [:],
         channelId: String?,
         userId: String? = nil
     ) async -> [MessageToken] {
         var tokens: [MessageToken] = []
         var currentIndex = text.startIndex
-        let sortedRanges = twitchRanges.keys.sorted { $0.lowerBound < $1.lowerBound }
+        let sortedRanges = (Array(twitchRanges.keys) + Array(gifs.keys)).sorted { $0.lowerBound < $1.lowerBound }
 
         for range in sortedRanges {
             guard range.lowerBound >= currentIndex else { continue }
@@ -767,7 +773,11 @@ final class ChatService: NSObject, ObservableObject {
                 tokens += await tokenizeText(String(text[currentIndex..<range.lowerBound]),
                                              channelId: channelId, userId: userId)
             }
-            if let emote = twitchRanges[range] { tokens.append(.emote(emote)) }
+            if let url = gifs[range] {
+                tokens.append(.gif(url: url, alt: String(text[range])))
+            } else if let emote = twitchRanges[range] {
+                tokens.append(.emote(emote))
+            }
             currentIndex = range.upperBound
         }
         if currentIndex < text.endIndex {

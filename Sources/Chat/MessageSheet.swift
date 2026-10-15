@@ -220,6 +220,7 @@ struct MessageSheet: View {
             case .emote(let e):   return e.name
             case .mention(let m): return "@\(m)"
             case .link(let l):    return l
+            case .gif(let u, _):  return u
             }
         }.joined(separator: " ")
     }

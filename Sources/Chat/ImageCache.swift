@@ -88,23 +88,41 @@ final class ImageCache {
         return img
     }
 
+    /// Côté le plus long au-delà duquel une image est réduite au décodage :
+    /// les emotes (128 px au plus) n'y sont pas touchées ; un GIF de GIPHY
+    /// (480 px et plus, des dizaines d'images) prenait sinon des dizaines de Mo.
+    private static let maxSide = 256
+
     // MARK: Décodage (gère GIF / WebP animé / APNG via ImageIO)
     private static func decode(_ data: Data, maxFrames: Int) -> CachedImage? {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let count = CGImageSourceGetCount(src)
+        let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
+        let side = max((props?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 0,
+                       (props?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 0)
+        let big = side > maxSide
+        let thumb: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                      kCGImageSourceCreateThumbnailWithTransform: true,
+                                      kCGImageSourceThumbnailMaxPixelSize: maxSide]
+        func frame(_ i: Int) -> CGImage? {
+            big ? CGImageSourceCreateThumbnailAtIndex(src, i, thumb as CFDictionary)
+                : CGImageSourceCreateImageAtIndex(src, i, nil)
+        }
 
         if count <= 1 {
-            guard let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+            guard let cg = frame(0) else { return nil }
             return CachedImage(frames: [UIImage(cgImage: cg)], duration: 0, bytes: max(1, data.count))
         }
 
-        // Animée : on sous-échantillonne si l'emote a trop de frames.
-        let step = max(1, Int(ceil(Double(count) / Double(maxFrames))))
+        // Animée : on sous-échantillonne si l'emote a trop de frames (moins
+        // pour une grande image, réduite elle aussi).
+        let cap = big ? min(maxFrames, 48) : maxFrames
+        let step = max(1, Int(ceil(Double(count) / Double(cap))))
         var frames: [UIImage] = []
         var total: TimeInterval = 0
         var i = 0
         while i < count {
-            if let cg = CGImageSourceCreateImageAtIndex(src, i, nil) {
+            if let cg = frame(i) {
                 frames.append(UIImage(cgImage: cg))
                 total += delay(src, i) * Double(step)   // la frame gardée couvre `step` frames
             }

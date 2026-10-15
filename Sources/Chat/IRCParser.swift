@@ -76,4 +76,31 @@ struct IRCParser {
         }
         return result.sorted { $0.1.lowerBound < $1.1.lowerBound }
     }
+
+    /// Tag `gifs` (clavier GIF de Twitch) : « début-fin|id|adresse » séparés
+    /// par des virgules, positions en points de code comme les emotes.
+    /// L'adresse est gardée telle quelle (règle de Twitch), GIPHY seulement.
+    static func parseGifRanges(raw: String, text: String) -> [(url: String, range: Range<String.Index>)] {
+        let value = ircUnescape(raw)
+        guard !value.isEmpty,
+              let re = try? NSRegularExpression(pattern: #"(\d+)-(\d+)\|[^|]*\|(https://[^,]+?)(?=,\d+-\d+\||$)"#)
+        else { return [] }
+        let scalars = text.unicodeScalars
+        let count = scalars.count
+        var out: [(url: String, range: Range<String.Index>)] = []
+        for m in re.matches(in: value, range: NSRange(value.startIndex..., in: value)) {
+            guard let r1 = Range(m.range(at: 1), in: value), let r2 = Range(m.range(at: 2), in: value),
+                  let r3 = Range(m.range(at: 3), in: value),
+                  let a = Int(value[r1]), let b = Int(value[r2]), a <= b, b < count else { continue }
+            let url = String(value[r3])
+            guard let host = URL(string: url)?.host?.lowercased(),
+                  host == "giphy.com" || host.hasSuffix(".giphy.com") else { continue }
+            let s = scalars.index(scalars.startIndex, offsetBy: a)
+            let e = scalars.index(s, offsetBy: b - a + 1)
+            if let si = s.samePosition(in: text), let ei = e.samePosition(in: text), si < ei {
+                out.append((url: url, range: si..<ei))
+            }
+        }
+        return out
+    }
 }
