@@ -19,6 +19,8 @@ struct TwitchUnblockApp: App {
                 .task { await UpdateChecker.shared.checkIfDue(atLaunch: true) }
                 // Annonce du développeur en cours ?
                 .task { await AnnouncementService.shared.refresh(force: true) }
+                // Sondage en cours ?
+                .task { await PollService.shared.refresh(force: true) }
                 // Réponses aux retours envoyés depuis l'app (pastille, bandeau),
                 // puis relues toutes les minutes tant que l'app est ouverte.
                 .task {
@@ -62,6 +64,7 @@ struct TwitchUnblockApp: App {
                         // au prochain réveil pour un live déjà découvert ici.
                         Task { await LiveNotifier.check(notify: false) }
                         Task { await AnnouncementService.shared.refresh() }
+                        Task { await PollService.shared.refresh() }
                         Task { await FeedbackStore.shared.refresh() }
                         FeedbackStore.shared.startForegroundChecks()
                         // ntfy : chaînes suivies changées (ou une fois par jour).

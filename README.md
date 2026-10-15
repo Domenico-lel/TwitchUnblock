@@ -367,7 +367,7 @@ no key to paste. The backend is already hosted and shared by every install.
   TwitchUnblock Worker). iOS only allows `http://` on your local network: a
   Docker Worker on a server needs HTTPS in front of it (Caddy, Cloudflare
   Tunnel). **Send everything through this Worker** also moves
-  history backups, feedback, announcements, ntfy notifications and the usage
+  history backups, feedback, announcements and polls, ntfy notifications and the usage
   count there (your Twitch token is then sent to it — only for a Worker you
   host yourself).
 * 🔒 **Chat restrictions said upfront** — above the message box, the room's

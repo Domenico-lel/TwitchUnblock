@@ -54,6 +54,7 @@ struct HomeView: View {
     /// Bandeau « session web » masqué jusqu'à cette date (bouton ✕).
     @AppStorage("web_banner_hidden_until") private var webBannerHiddenUntil: Double = 0
     @ObservedObject private var announcements = AnnouncementService.shared
+    @ObservedObject private var polls = PollService.shared
 
     enum TopLang: Hashable { case local, all }
 
@@ -297,6 +298,12 @@ struct HomeView: View {
                     AnnouncementBanner(announcement: a) { announcements.dismiss(a) }
                         .padding(.horizontal, TSpace.lg)
                         .padding(.top, TSpace.md)
+                }
+                // ── Sondage du développeur (si un est en cours) ─────
+                if let p = polls.poll {
+                    PollCard(poll: p)
+                        .padding(.horizontal, TSpace.lg)
+                        .padding(.top, announcements.current == nil ? TSpace.md : 0)
                 }
 
                 // ── Pas de compte : invitation compacte ──────────────
