@@ -375,8 +375,9 @@ struct MainTabView: View {
             MultiLiveView(onWatch: { entry, at in
                 showMultiLive = false
                 if let id = entry.vodId {
-                    // La VOD reprend où en était sa tuile ; playVod tient l'historique.
-                    store.setVodProgress(id, time: at)
+                    // La VOD reprend où en était sa tuile (sinon à la progression
+                    // enregistrée) ; playVod tient l'historique.
+                    if let at { store.setVodProgress(id, time: at) }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         playVod(id, entry.title, entry.thumb,
                                 entry.login.isEmpty ? (entry.name.isEmpty ? nil : entry.name) : entry.login)

@@ -355,6 +355,9 @@ final class MultiTileModel: ObservableObject {
         jump(to: bounded(target, in: item))
         canSave = true
         lastSave = Date()
+        // Mise en pause pendant le départ : la lecture ne démarrera pas, la
+        // roue de chargement ne doit pas rester.
+        if userPaused, phase == .loading { phase = .playing }
     }
 
     /// Dans la fenêtre cherchable (une VOD en cours n'a pas de durée finie).
@@ -427,8 +430,22 @@ final class MultiTileModel: ObservableObject {
         } else {
             userPaused = true
             player.pause()
+            // Départ déjà appliqué : l'image est là, plus de roue.
+            if phase == .loading, pendingSeek == nil,
+               player.currentItem?.status == .readyToPlay { phase = .playing }
             saveProgress()
         }
+    }
+
+    /// « Ouvrir en grand » : la position à donner au lecteur, nil tant que le
+    /// départ n'est pas appliqué (la progression enregistrée reste alors). Une
+    /// VOD finie repart du début. La mosaïque se ferme : la tuile n'enregistre
+    /// plus rien, son arrêt écraserait ce choix.
+    func handOff() -> Double? {
+        guard isVod, canSave else { return nil }
+        let at = phase == .ended ? 0 : currentSeconds
+        canSave = false
+        return at
     }
 
     func seek(by delta: Double) {

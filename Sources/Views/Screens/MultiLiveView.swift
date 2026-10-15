@@ -8,8 +8,9 @@ import SwiftUI
 
 struct MultiLiveView: View {
     /// Ouvrir une vidéo dans le lecteur (avec le chat) : la mosaïque se ferme.
-    /// Une VOD y reprend à la position de sa tuile.
-    let onWatch: (MultiLiveEntry, Double) -> Void
+    /// Une VOD y reprend à la position de sa tuile (nil : tuile pas encore
+    /// partie ou en échec, la progression enregistrée reste).
+    let onWatch: (MultiLiveEntry, Double?) -> Void
 
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -179,7 +180,7 @@ struct MultiLiveView: View {
                           audible: session.audible == entry.id,
                           onTap: { session.audible = entry.id },
                           onRemove: { multi.remove(id: entry.id) },
-                          onWatch: { onWatch(entry, model.position) })
+                          onWatch: { onWatch(entry, model.handOff()) })
         } else {
             Color.black
         }
@@ -195,7 +196,10 @@ private struct MultiLiveChatPane: View {
         if let vodId = model.vodId {
             // VOD : son chat rejoué, à la position de la tuile.
             VodChatView(videoId: vodId, playbackTime: model.position,
-                        style: store.chatStyle(chrome: true, translucent: false))
+                        style: store.chatStyle(chrome: true, translucent: false),
+                        // Comme le chat d'un direct : pas de page de chaîne
+                        // ouverte sous la mosaïque.
+                        opensChannelPages: false)
                 .id("vod-\(vodId)")
         } else {
             ChatView(channelName: model.login, channelId: model.channelId,
