@@ -380,8 +380,10 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         guard let item = player.currentItem, item.status != .failed,
               player.timeControlStatus == .paused else { return nil }
         guard isLive else {
-            // VOD finie : rien à reprendre.
-            if endTime > 0, position >= endTime - 1 { return nil }
+            // VOD finie : rien à reprendre. Un enregistrement encore en cours
+            // (rembobinage d'un direct) n'a pas de fin : il repart.
+            let length = item.duration.seconds
+            if length.isFinite, length > 0, position >= length - 1 { return nil }
             setPlaying(true)
             return String(format: "à %.0f s", position)
         }

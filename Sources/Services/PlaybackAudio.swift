@@ -119,9 +119,11 @@ final class PlaybackAudio {
 /// l'interruption et rend ce qu'il a fait (journal), nil s'il n'y avait rien
 /// à reprendre (élément en échec, fin de VOD, lecture déjà repartie).
 final class PlaybackInterruptions {
-    /// Au-delà, un direct est relu plutôt que recalé : app suspendue pendant
-    /// un long appel, son bord a pu avancer sans elle.
-    static let longInterruption: TimeInterval = 30
+    /// Au-delà, un direct est relu plutôt que recalé : l'app, suspendue
+    /// quelques secondes après la coupure du son, ne relit plus la playlist,
+    /// et le bord qu'elle connaît a vieilli d'autant. En deçà (Siri), le saut
+    /// au bord suffit et repart aussitôt.
+    static let longInterruption: TimeInterval = 15
 
     private struct WeakPlayer { weak var player: AVPlayer? }
 
