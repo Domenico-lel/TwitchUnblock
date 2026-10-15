@@ -46,7 +46,6 @@ targets:
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGN_ENTITLEMENTS: ""
         DEVELOPMENT_TEAM: ""
-        UILaunchStoryboardName: "LaunchScreen"
         # ActivityKit n'existe qu'à partir d'iOS 16.1 : lien faible, sinon
         # l'app ne se lancerait plus du tout sur iOS 16.0.
         OTHER_LDFLAGS: "$(inherited) -weak_framework ActivityKit"

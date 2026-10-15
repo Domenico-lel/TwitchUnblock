@@ -104,7 +104,11 @@
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <false/>
 
-    <!-- ── Launch screen ─────────────────────────────────────── -->
+    <!-- ── Apparence : toujours sombre (écran de lancement compris) ── -->
+    <key>UIUserInterfaceStyle</key>
+    <string>Dark</string>
+
+    <!-- ── Launch screen (fond système : noir en apparence sombre) ── -->
     <key>UILaunchScreen</key>
     <dict/>
 </dict>
