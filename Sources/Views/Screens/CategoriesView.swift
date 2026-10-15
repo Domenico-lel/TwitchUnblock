@@ -87,6 +87,31 @@ enum ListCursor: Equatable {
     return (fresh, c, false)
 }
 
+// MARK: – État vide ou d'erreur qu'on peut recharger
+/// Message centré qu'on peut tirer pour recharger : hors d'un ScrollView, une
+/// erreur ou une liste vide ne se rechargeait plus (seule l'apparition de
+/// l'onglet relançait, et seulement si la liste était vide). Tâche détachée,
+/// comme à l'accueil : le rechargement remplace cette vue (chargeur), ce qui
+/// annulerait la tâche de `.refreshable` et sa requête.
+private struct PullToReload<Content: View>: View {
+    let reload: () async -> Void
+    let content: Content
+
+    init(reload: @escaping () async -> Void, @ViewBuilder content: () -> Content) {
+        self.reload = reload
+        self.content = content()
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView {
+                content.frame(maxWidth: .infinity, minHeight: geo.size.height)
+            }
+            .refreshable { await Task { await reload() }.value }
+        }
+    }
+}
+
 // MARK: – Grille des catégories
 struct CategoriesView: View {
     let onPlayStream: (String) -> Void
@@ -102,6 +127,12 @@ struct CategoriesView: View {
     @State private var errorMsg: String? = nil
     @State private var search       = ""
     @State private var searchTask: Task<Void, Never>? = nil
+    /// Recherche en route (indicateur dans le champ).
+    @State private var searching    = false
+    /// Numéro du dernier chargement de la grille (top, recherche, frappe) :
+    /// une réponse plus ancienne ne remplace pas la grille, et seul le plus
+    /// récent conclut (chargeur, indicateur, erreur).
+    @State private var gridGen      = 0
     @State private var selected: TwitchCategory? = nil
     /// 0 = catégories suivies, 1 = toutes.
     @AppStorage("cat_tab") private var tab = 1
@@ -127,17 +158,25 @@ struct CategoriesView: View {
         Group {
             if let cat = selected {
                 CategoryStreamsView(category: cat,
+                                    followedOnTwitch: twitchFollowed.contains { $0.id == cat.id }
+                                        || store.accountFollowedCategoryIds.contains(cat.id),
                                     onBack: { selected = nil },
-                                    onPlayStream: onPlayStream)
+                                    onPlayStream: onPlayStream,
+                                    onTwitchUnfollowed: { twitchFollowed.removeAll { $0.id == cat.id } })
             } else {
                 browser
             }
         }
         .onAppear {
-            if categories.isEmpty { Task { await loadTop() } }
+            // Grille vide (première ouverture, retour d'une catégorie après
+            // une recherche sans résultat) : ce qui était demandé.
+            if categories.isEmpty { Task { await reload() } }
             Task { await loadFollowed() }
         }
         .onChange(of: store.followedCategories.map(\.id)) { _ in Task { await loadFollowed() } }
+        // Session web partie ou changée : les catégories suivies sur Twitch
+        // ne sont plus celles de ce compte (elles restaient affichées).
+        .onChange(of: store.twitchWebToken) { _ in Task { await loadFollowed() } }
         .sheet(isPresented: $showHidden) {
             HiddenContentSheet().environmentObject(store)
         }
@@ -147,12 +186,20 @@ struct CategoriesView: View {
     @MainActor private func loadFollowed() async {
         if let web = store.twitchWebToken {
             if twitchFollowed.isEmpty { loadingFollowed = true }
-            if let list = await getFollowedCategoriesGQL(webToken: web) {
-                twitchFollowed = list
-                // Suivies sur Twitch : jamais masquées (règle d'AppStore),
-                // tant que la session web qui les a lues est toujours là.
-                if store.twitchWebToken == web { store.accountFollowedCategoryIds = Set(list.map(\.id)) }
+            let list = await getFollowedCategoriesGQL(webToken: web)
+            // Session déconnectée ou changée pendant la lecture : cette liste
+            // n'est plus la sienne (la lecture suivante conclut).
+            if store.twitchWebToken == web {
+                if let list {
+                    twitchFollowed = list
+                    // Suivies sur Twitch : jamais masquées (règle d'AppStore).
+                    store.accountFollowedCategoryIds = Set(list.map(\.id))
+                }
+                loadingFollowed = false
             }
+        } else {
+            // Plus de session web : rien n'est suivi sur Twitch ici.
+            twitchFollowed = []
             loadingFollowed = false
         }
         let missing = store.followedCategories.map(\.id)
@@ -167,10 +214,10 @@ struct CategoriesView: View {
         if loadingFollowed && list.isEmpty {
             Spacer(); TLoader(); Spacer()
         } else if list.isEmpty {
-            Spacer()
-            TEmptyState(icon: "heart", title: store.t("cat_followed_empty"),
-                        message: store.t(store.twitchWebToken == nil ? "cat_followed_empty_msg_local" : "cat_followed_empty_msg"))
-            Spacer()
+            PullToReload(reload: { await loadFollowed() }) {
+                TEmptyState(icon: "heart", title: store.t("cat_followed_empty"),
+                            message: store.t(store.twitchWebToken == nil ? "cat_followed_empty_msg_local" : "cat_followed_empty_msg"))
+            }
         } else {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: TSpace.md) {
@@ -210,23 +257,28 @@ struct CategoriesView: View {
 
     @ViewBuilder private var allBrowser: some View {
         VStack(spacing: 0) {
-            TSearchField(text: $search, placeholder: store.t("cat_search_ph"))
+            TSearchField(text: $search, placeholder: store.t("cat_search_ph"), busy: searching)
                 .padding(.horizontal, TSpace.lg)
                 .padding(.top, TSpace.md)
                 .onChange(of: search) { runSearch($0) }
 
-            if loading {
+            // Recherche en route sur une grille vide : pas « Aucun résultat »
+            // avant la réponse.
+            if loading || (searching && categories.isEmpty && errorMsg == nil) {
                 Spacer()
                 TLoader()
                 Spacer()
             } else if let err = errorMsg {
-                Spacer()
-                TEmptyState(icon: "exclamationmark.triangle", title: err)
-                Spacer()
+                // « Réessayer », ou tirer : ce qui était demandé (la recherche
+                // en cours, sinon le top).
+                PullToReload(reload: { await reload() }) {
+                    TEmptyState(icon: "exclamationmark.triangle", title: err,
+                                actionTitle: store.t("retry")) { Task { await reload() } }
+                }
             } else if categories.isEmpty {
-                Spacer()
-                TEmptyState(icon: "magnifyingglass", title: store.t("no_result"))
-                Spacer()
+                PullToReload(reload: { await reload() }) {
+                    TEmptyState(icon: "magnifyingglass", title: store.t("no_result"))
+                }
             } else {
                 // Sans recherche, les catégories masquées sont écartées ; une
                 // recherche les montre toutes, les masquées atténuées.
@@ -264,7 +316,10 @@ struct CategoriesView: View {
 
                     Spacer(minLength: 40)
                 }
-                .refreshable { await loadTop() }
+                // Pendant une recherche, c'est elle qui se relance (le top
+                // s'affichait sous « minecraft »). Tâche détachée : voir
+                // PullToReload.
+                .refreshable { await Task { await reload() }.value }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -272,13 +327,26 @@ struct CategoriesView: View {
     }
 
     // MARK: – Chargements
+    /// Recharge ce qui est affiché : la recherche en cours, sinon le top.
+    @MainActor private func reload() async {
+        searchTask?.cancel()
+        let q = search.trimmingCharacters(in: .whitespaces)
+        if q.isEmpty { await loadTop() } else { await performSearch(q) }
+    }
+
     @MainActor private func loadTop() async {
+        gridGen += 1
+        let gen = gridGen
+        searching = false
         if categories.isEmpty { loading = true }
         errorMsg = nil
         guard let token = store.twitchToken else {
             // Sans compte : GQL public, audience comprise, par pages de 100 ;
             // la suite passe par le Client-ID d'Android (loadMore).
-            if let page = await getTopCategoriesPageGQL(after: nil) {
+            let page = await getTopCategoriesPageGQL(after: nil)
+            // Une recherche est partie entre-temps : c'est elle qui conclut.
+            guard gen == gridGen else { return }
+            if let page {
                 categories = page.categories
                 cursor = page.next.map { ListCursor.gql($0) }
                 locked = false
@@ -290,12 +358,15 @@ struct CategoriesView: View {
         }
         do {
             let page = try await getTopCategories(token: token)
+            guard gen == gridGen else { return }
             categories = page.categories
             cursor     = page.cursor.map { ListCursor.helix($0) }
             locked     = false
         } catch is CancellationError {
-            loading = false; return
+            if gen == gridGen { loading = false }
+            return
         } catch {
+            guard gen == gridGen else { return }
             errorMsg = store.t("err_loading")
         }
         loading = false
@@ -319,6 +390,7 @@ struct CategoriesView: View {
     /// en renvoie entre deux pages).
     @MainActor private func loadMore() async {
         guard let c = cursor, !loadingMore else { return }
+        let gen = gridGen
         loadingMore = true
         defer { loadingMore = false }
         let result = await loadMorePages(
@@ -331,8 +403,9 @@ struct CategoriesView: View {
                 guard let p = try? await getTopCategories(token: token, cursor: after) else { return nil }
                 return (p.categories, p.cursor)
             })
-        // Recherche lancée entre-temps : elle a remplacé la grille.
-        guard search.isEmpty else { return }
+        // Recherche ou rechargement entre-temps : la grille n'est plus celle
+        // de ce curseur.
+        guard gen == gridGen, search.isEmpty else { return }
         categories += result.fresh
         cursor = result.cursor
         locked = result.locked
@@ -342,41 +415,65 @@ struct CategoriesView: View {
     /// Recherche différée de 350 ms : évite un appel par frappe.
     private func runSearch(_ text: String) {
         searchTask?.cancel()
+        // Ce qui est en route (top, recherche précédente) est dépassé.
+        gridGen += 1
         let q = text.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
+            searching = false
             searchTask = Task { await loadTop() }
             return
         }
+        searching = true
         searchTask = Task {
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }
-            // GQL d'abord, avec ou sans compte : le classement de Twitch
-            // (« valorant » donne VALORANT en tête) et des jaquettes nettes.
-            // Helix classait mal et renvoyait des vignettes de 52×72 : il ne
-            // sert plus que de secours, si GQL ne répond pas.
-            var result = await searchCategoriesGQL(query: q)
-            if result == nil, let token = store.twitchToken {
-                result = try? await searchCategories(token: token, query: q)
-            }
-            guard let found = result.map({ rankCategories($0, for: q) }), !Task.isCancelled else { return }
-            await MainActor.run {
-                categories = found
-                cursor     = nil
-                errorMsg   = nil
-            }
-            // La recherche passe par Helix elle aussi : mêmes cartes, donc
-            // même complément d'audience.
-            guard !Task.isCancelled else { return }
-            await loadViewers()
+            await performSearch(q)
         }
+    }
+
+    /// Recherche de catégories, sans délai (frappe après 350 ms, « Réessayer »,
+    /// tirer pour rafraîchir). GQL d'abord, avec ou sans compte : le
+    /// classement de Twitch (« valorant » donne VALORANT en tête) et des
+    /// jaquettes nettes. Helix classait mal et renvoyait des vignettes de
+    /// 52×72 : il ne sert plus que de secours, si GQL ne répond pas.
+    @MainActor private func performSearch(_ q: String) async {
+        gridGen += 1
+        let gen = gridGen
+        searching = true
+        errorMsg = nil
+        var result = await searchCategoriesGQL(query: q)
+        if result == nil, gen == gridGen, let token = store.twitchToken {
+            result = try? await searchCategories(token: token, query: q)
+        }
+        // Frappe ou rechargement plus récent : c'est lui qui conclut.
+        guard gen == gridGen else { return }
+        searching = false
+        loading = false
+        guard let list = result else {
+            // Échec : on le dit, au lieu de laisser le top (ou l'ancienne
+            // recherche) sous ce qu'on vient de taper.
+            errorMsg = store.t("err_loading")
+            return
+        }
+        categories = rankCategories(list, for: q)
+        cursor     = nil
+        // La recherche passe par Helix elle aussi : mêmes cartes, donc
+        // même complément d'audience.
+        await loadViewers()
     }
 }
 
 // MARK: – Lives d'une catégorie
 struct CategoryStreamsView: View {
     let category: TwitchCategory
+    /// Suivie sur le compte Twitch (session web) : le cœur est plein, et le
+    /// toucher la retire de Twitch (après confirmation) au lieu d'en faire un
+    /// doublon sur l'appareil qu'on ne pouvait plus enlever des suivies.
+    var followedOnTwitch = false
     let onBack: () -> Void
     let onPlayStream: (String) -> Void
+    /// Retirée de Twitch ici : la liste des suivies l'enlève tout de suite.
+    var onTwitchUnfollowed: () -> Void = {}
 
     @EnvironmentObject private var store: AppStore
 
@@ -389,6 +486,12 @@ struct CategoryStreamsView: View {
     @State private var errorMsg: String? = nil
     @State private var sort: StreamSort = .viewersDesc
     @State private var showHidden = false
+    /// Suivi Twitch retiré depuis cette page.
+    @State private var leftOnTwitch = false
+    @State private var confirmTwitchUnfollow = false
+    @State private var unfollowBusy = false
+    /// Twitch a refusé de la retirer (ou la session web manque).
+    @State private var unfollowFailed = false
 
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
@@ -416,28 +519,22 @@ struct CategoryStreamsView: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 hideButton
-                // Suivre la catégorie (gardé sur cet appareil).
-                let on = store.isCategoryFollowed(category.id)
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.easeInOut(duration: 0.15)) { store.toggleCategoryFollow(category) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: on ? "heart.fill" : "heart")
-                        Text(store.t(on ? "following" : "follow")).font(.system(size: 13, weight: .bold))
-                    }
-                    .foregroundColor(on ? .tDanger : .tPrimary)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background((on ? Color.tDanger : Color.tPrimary).opacity(0.14))
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
+                followButton
             }
             .padding(.horizontal, TSpace.lg)
             .padding(.top, TSpace.md)
             .padding(.bottom, TSpace.sm)
 
             hiddenStrip
+
+            if unfollowFailed {
+                Text(store.t("follow_failed"))
+                    .font(.tMeta).foregroundColor(.tDanger)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, TSpace.lg)
+                    .padding(.bottom, TSpace.sm)
+            }
 
             // ── Langue et tri ───────────────────────────────────────
             ScrollView(.horizontal, showsIndicators: false) {
@@ -456,14 +553,15 @@ struct CategoryStreamsView: View {
                 TLoader()
                 Spacer()
             } else if let err = errorMsg {
-                Spacer()
-                TEmptyState(icon: "exclamationmark.triangle", title: err)
-                Spacer()
+                PullToReload(reload: { await load() }) {
+                    TEmptyState(icon: "exclamationmark.triangle", title: err,
+                                actionTitle: store.t("retry")) { Task { await load() } }
+                }
             } else if streams.isEmpty {
-                Spacer()
-                TEmptyState(icon: "antenna.radiowaves.left.and.right",
-                            title: store.t("no_live"))
-                Spacer()
+                PullToReload(reload: { await load() }) {
+                    TEmptyState(icon: "antenna.radiowaves.left.and.right",
+                                title: store.t("no_live"))
+                }
             } else {
                 let shown = sorted
                 ScrollView {
@@ -500,7 +598,8 @@ struct CategoryStreamsView: View {
 
                     Spacer(minLength: 40)
                 }
-                .refreshable { await load() }
+                // Tâche détachée : voir PullToReload.
+                .refreshable { await Task { await load() }.value }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -521,6 +620,60 @@ struct CategoryStreamsView: View {
     /// masquée).
     private var isHiddenHere: Bool {
         !store.followsCategory(category.id) && store.hidden.hides(category: category.id)
+    }
+
+    /// Suivre la catégorie (gardé sur cet appareil). Suivie sur Twitch : le
+    /// cœur est plein, et le toucher la retire de Twitch, après confirmation.
+    @ViewBuilder private var followButton: some View {
+        let onTwitch = followedOnTwitch && !leftOnTwitch
+        let on = onTwitch || store.isCategoryFollowed(category.id)
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            if onTwitch {
+                confirmTwitchUnfollow = true
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.15)) { store.toggleCategoryFollow(category) }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: on ? "heart.fill" : "heart")
+                Text(store.t(on ? "following" : "follow")).font(.system(size: 13, weight: .bold))
+            }
+            .foregroundColor(on ? .tDanger : .tPrimary)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background((on ? Color.tDanger : Color.tPrimary).opacity(0.14))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(unfollowBusy)
+        .opacity(unfollowBusy ? 0.5 : 1)
+        .confirmationDialog(
+            store.t("unfollow_confirm").replacingOccurrences(of: "{c}", with: category.name),
+            isPresented: $confirmTwitchUnfollow, titleVisibility: .visible
+        ) {
+            Button(store.t("unfollow"), role: .destructive) {
+                Task { await unfollowOnTwitch() }
+            }
+            Button(store.t("cancel"), role: .cancel) {}
+        }
+    }
+
+    /// Retire la catégorie des suivis du compte Twitch ; suivie aussi sur
+    /// l'appareil, elle en est retirée aussi : le cœur se vide pour de bon.
+    @MainActor private func unfollowOnTwitch() async {
+        guard !unfollowBusy else { return }
+        guard let web = store.twitchWebToken else { unfollowFailed = true; return }
+        unfollowBusy = true
+        defer { unfollowBusy = false }
+        unfollowFailed = false
+        guard await unfollowCategoryOnTwitch(gameId: category.id, token: web) else {
+            unfollowFailed = true
+            return
+        }
+        leftOnTwitch = true
+        store.accountFollowedCategoryIds.remove(category.id)
+        if store.isCategoryFollowed(category.id) { store.toggleCategoryFollow(category) }
+        onTwitchUnfollowed()
     }
 
     /// Masquer la catégorie (œil barré) ; rien si elle est suivie, ni si elle
@@ -605,12 +758,18 @@ struct CategoryStreamsView: View {
     }
 
     @MainActor private func load() async {
+        // Langue du départ : une réponse arrivée après un changement de
+        // langue (Français puis aussitôt English) n'est plus la bonne, c'est
+        // la demande de la nouvelle langue qui conclut.
+        let lang = store.categoryLang
         if streams.isEmpty { loading = true }
         errorMsg = nil
         guard let token = store.twitchToken else {
             // Sans compte : les lives les plus regardés (GQL public) par pages
             // de 100 ; la suite passe par le Client-ID d'Android (loadMore).
-            if let page = await getStreamsByCategoryPageGQL(gameId: category.id, lang: store.categoryLang, after: nil) {
+            let page = await getStreamsByCategoryPageGQL(gameId: category.id, lang: lang, after: nil)
+            guard lang == store.categoryLang else { return }
+            if let page {
                 streams = page.streams
                 cursor = page.next.map { ListCursor.gql($0) }
                 locked = false
@@ -621,13 +780,16 @@ struct CategoryStreamsView: View {
             return
         }
         do {
-            let page = try await getStreamsByCategory(token: token, gameId: category.id, lang: store.categoryLang)
+            let page = try await getStreamsByCategory(token: token, gameId: category.id, lang: lang)
+            guard lang == store.categoryLang else { return }
             streams = page.streams
             cursor  = page.cursor.map { ListCursor.helix($0) }
             locked  = false
         } catch is CancellationError {
-            loading = false; return
+            if lang == store.categoryLang { loading = false }
+            return
         } catch {
+            guard lang == store.categoryLang else { return }
             errorMsg = store.t("err_loading")
         }
         loading = false

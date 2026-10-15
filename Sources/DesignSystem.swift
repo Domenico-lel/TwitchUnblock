@@ -245,14 +245,23 @@ struct TSearchField: View {
     let placeholder: String
     var submitLabel: SubmitLabel = .search
     var onSubmit: () -> Void = {}
+    /// Recherche en cours : un indicateur à la place de la loupe.
+    var busy = false
 
     @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: TSpace.sm) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(focused ? .tPrimary : .tMuted)
+            if busy {
+                ProgressView()
+                    .tint(.tPrimary)
+                    .scaleEffect(0.75)
+                    .frame(width: 15, height: 15)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(focused ? .tPrimary : .tMuted)
+            }
 
             TextField(placeholder, text: $text)
                 .font(.tBody)

@@ -229,3 +229,21 @@ final class FollowService: ObservableObject {
         }
     }
 }
+
+// MARK: – Catégorie suivie sur Twitch
+/// Ne plus suivre une catégorie sur le compte Twitch (session web), comme le
+/// cœur de twitch.tv (même requête enregistrée). Vrai si Twitch l'a fait.
+@MainActor
+func unfollowCategoryOnTwitch(gameId: String, token: String) async -> Bool {
+    let res = await TwitchGQL.shared.mutation("FollowGameButton_UnfollowGame",
+                variables: ["input": ["gameID": gameId]],
+                sha256: "811e02e396ebba0664f21ff002f2eff3c6f57e8af9aedb4f4dfa77cefd0db43d",
+                token: token)
+    let payload = (res?["data"] as? [String: Any])?["unfollowGame"] as? [String: Any]
+    guard let payload, (payload["error"] as? [String: Any]) == nil, res?["errors"] == nil else {
+        logger.warn("FOLLOW", "Catégorie pas retirée des suivis Twitch", gameId)
+        return false
+    }
+    logger.success("FOLLOW", "Catégorie retirée des suivis Twitch", gameId)
+    return true
+}

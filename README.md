@@ -272,7 +272,9 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🎮 **Categories** — browse by game, then the live channels in it, filtered
   by language if you like (all, or a single one — kept for every category).
   Search puts the exact match first ("valorant" → VALORANT), with sharp box
-  art.
+  art. A category you follow on Twitch shows as followed on its page, and
+  unfollowing it there removes it from your Twitch account (web session).
+  Errors and empty lists have **Retry** / pull to refresh.
 * 🏷 **Stream tags** — language, DropsEnabled… under each live stream, like on
   Twitch.
 * 🔍 **Search** — by streamer name, channel link, VOD link or ID (a `?t=`
