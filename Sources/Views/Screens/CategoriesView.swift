@@ -479,6 +479,10 @@ struct CategoryStreamsView: View {
 
     @State private var streams: [TwitchStream] = []
     @State private var cursor: ListCursor? = nil
+    /// Hausse à chaque remplacement de la liste (premier chargement, tirer
+    /// pour rafraîchir, langue) : une page « suite » partie avant ne s'ajoute
+    /// plus à la nouvelle liste — doublons dans la grille, et curseur d'avant.
+    @State private var listGen = 0
     /// Twitch refuse la suite sans compte : un message remplace le bouton.
     @State private var locked      = false
     @State private var loading     = false
@@ -770,6 +774,7 @@ struct CategoryStreamsView: View {
             let page = await getStreamsByCategoryPageGQL(gameId: category.id, lang: lang, after: nil)
             guard lang == store.categoryLang else { return }
             if let page {
+                listGen += 1
                 streams = page.streams
                 cursor = page.next.map { ListCursor.gql($0) }
                 locked = false
@@ -782,6 +787,7 @@ struct CategoryStreamsView: View {
         do {
             let page = try await getStreamsByCategory(token: token, gameId: category.id, lang: lang)
             guard lang == store.categoryLang else { return }
+            listGen += 1
             streams = page.streams
             cursor  = page.cursor.map { ListCursor.helix($0) }
             locked  = false
@@ -801,6 +807,7 @@ struct CategoryStreamsView: View {
         guard let c = cursor, !loadingMore else { return }
         let lang = store.categoryLang
         let gameId = category.id
+        let gen = listGen
         loadingMore = true
         defer { loadingMore = false }
         let result = await loadMorePages(
@@ -814,8 +821,9 @@ struct CategoryStreamsView: View {
                 else { return nil }
                 return (p.streams, p.cursor)
             })
-        // Langue changée entre-temps : la liste a été rechargée.
-        guard lang == store.categoryLang else { return }
+        // Langue changée, ou liste rechargée entre-temps (tirer pour
+        // rafraîchir) : cette page suivait l'ancienne liste.
+        guard gen == listGen, lang == store.categoryLang else { return }
         streams += result.fresh
         cursor = result.cursor
         locked = result.locked

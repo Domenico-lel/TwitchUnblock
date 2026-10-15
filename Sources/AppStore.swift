@@ -67,6 +67,12 @@ final class AppStore: ObservableObject {
     /// partis sur un autre compte que les suivis et le chat.
     @Published var webSessionMismatch: String? = nil
 
+    /// Jeton OAuth refusé par Twitch (401) : l'invitation de l'accueil dit
+    /// pourquoi on a été déconnecté. Gardé ici et pas dans l'accueil, recréé
+    /// à chaque changement d'onglet : la raison s'effaçait au premier
+    /// aller-retour. Oublié à la connexion suivante (adoptToken).
+    @Published var oauthExpired = false
+
     /// Vérifie la session web : effacée si Twitch la refuse, ou si elle est à
     /// un autre compte que celui de l'app. Une panne réseau ne l'efface pas :
     /// couper la session sur un wifi capricieux serait pire que de la laisser
@@ -793,6 +799,7 @@ final class AppStore: ObservableObject {
     /// compte, le nouveau jeton partait avec l'ancien id — sauvegarde et chat
     /// visaient le mauvais compte.
     func adoptToken(_ token: String) {
+        oauthExpired = false
         let isNew = token != twitchToken
         if isNew {
             // Ce qui restait à envoyer part sur le compte d'avant, avec son

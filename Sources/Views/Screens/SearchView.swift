@@ -434,7 +434,7 @@ struct SearchView: View {
                 thumbnailURL: live.thumbnail,
                 viewerCount: live.viewerCount,
                 offlineSince: offlineSinceText,
-                onWatchLive: live.error == nil ? { onPlayLive(channelName) } : nil
+                onWatchLive: live.error == nil ? { leaveRecovery(); onPlayLive(channelName) } : nil
             )
             .padding(.horizontal, TSpace.lg)
 
@@ -569,6 +569,7 @@ struct SearchView: View {
                                     let progress = vod.lengthSeconds > 0
                                         ? saved / Double(vod.lengthSeconds) : 0
                                     VodCardView(vod: vod, progress: progress) {
+                                        leaveRecovery()
                                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                                     }
                                     .contextMenu { multiMenu(vod) }
@@ -630,6 +631,7 @@ struct SearchView: View {
                     let saved = store.getVodProgress(vod.id)
                     let progress = vod.lengthSeconds > 0 ? saved / Double(vod.lengthSeconds) : 0
                     VodCardView(vod: vod, progress: progress) {
+                        leaveRecovery()
                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                     }
                     .contextMenu { multiMenu(vod) }
@@ -679,6 +681,7 @@ struct SearchView: View {
                             }
                             Spacer(minLength: 0)
                             Button {
+                                leaveRecovery()
                                 onPlayQueue(list.videos, channelName)
                             } label: {
                                 Label(store.t("play_all"), systemImage: "play.fill")
@@ -697,6 +700,7 @@ struct SearchView: View {
                                     let saved = store.getVodProgress(vod.id)
                                     let progress = vod.lengthSeconds > 0 ? saved / Double(vod.lengthSeconds) : 0
                                     VodCardView(vod: vod, progress: progress) {
+                                        leaveRecovery()
                                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                                     }
                                     .contextMenu { multiMenu(vod) }
@@ -744,7 +748,7 @@ struct SearchView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: TSpace.md) {
                     ForEach(clips) { clip in
-                        ClipCardView(clip: clip) { onPlayClip(clip.id, clip.title) }
+                        ClipCardView(clip: clip) { leaveRecovery(); onPlayClip(clip.id, clip.title) }
                     }
                 }
                 .padding(.horizontal, TSpace.lg)
@@ -875,6 +879,16 @@ struct SearchView: View {
         }
     }
 
+    /// Autre lecture lancée d'ici (direct, VOD, playlist, clip) : la
+    /// reconstruction en cours est abandonnée. Dans l'onglet Recherche, la
+    /// page reste sous le lecteur et rien ne l'annulait : en aboutissant, elle
+    /// ouvrait la VOD retrouvée à la place de ce qu'on venait de lancer.
+    private func leaveRecovery() {
+        recoverTask?.cancel()
+        recoverTask = nil
+        resolvingID = nil
+    }
+
     // MARK: – Actions
     /// « Réessayer » sous l'erreur : la page de la même chaîne, redemandée.
     private var retryAction: (() -> Void)? {
@@ -890,6 +904,7 @@ struct SearchView: View {
         // cherchait une chaîne « slug » et « twitch.tv/x/clip/… » ouvrait x.
         if let slug = clipSlugFromInput(raw) {
             suggestions = []
+            leaveRecovery()
             onPlayClip(slug, nil)
             return
         }

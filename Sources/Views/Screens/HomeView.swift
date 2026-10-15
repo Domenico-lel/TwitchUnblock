@@ -45,9 +45,6 @@ struct HomeView: View {
     /// s'affichait le temps de la première réponse.
     @State private var loadingTop      = true
     @State private var errorFollowed: String? = nil
-    /// Jeton refusé par Twitch (401) : l'invitation à se connecter dit
-    /// pourquoi on a été déconnecté.
-    @State private var sessionExpired = false
     @State private var section: HomeSection = .live
     @State private var showWebLogin = false
     /// Bandeau « session web » masqué jusqu'à cette date (bouton ✕).
@@ -110,7 +107,7 @@ struct HomeView: View {
             // Déconnexion (sur un 401 aussi) ou autre compte : l'erreur de
             // l'ancien jeton ne reste pas à la place de l'invitation.
             errorFollowed = nil
-            if token == nil { followedStreams = []; topStreams = [] } else { sessionExpired = false }
+            if token == nil { followedStreams = []; topStreams = [] }
             Task { await loadAll() }
         }
         // Chaîne suivie ou retirée sur Twitch (page d'une chaîne, chat) : les
@@ -196,7 +193,9 @@ struct HomeView: View {
                 .font(.system(size: 26))
                 .foregroundColor(.tPrimary)
             VStack(alignment: .leading, spacing: 6) {
-                Text(store.t(sessionExpired ? "session_expired" : "login_prompt"))
+                // Jeton refusé par Twitch (401) : on dit pourquoi on a été
+                // déconnecté, même après un passage par un autre onglet.
+                Text(store.t(store.oauthExpired ? "session_expired" : "login_prompt"))
                     .font(.tCardTitle).foregroundColor(.tText)
                 Text(store.t("login_optional_msg"))
                     .font(.tMeta).foregroundColor(.tMuted)
@@ -528,7 +527,7 @@ struct HomeView: View {
             if (error as? URLError)?.code == .userAuthenticationRequired {
                 // Jeton refusé : déconnexion ; l'invitation à se reconnecter
                 // remplace l'erreur (onChange du jeton).
-                sessionExpired = true
+                store.oauthExpired = true
                 store.logout()
             }
         }
