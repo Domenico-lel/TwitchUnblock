@@ -58,30 +58,71 @@ struct TVFollowingTab: View {
     let play: (TVPlayback) -> Void
     @EnvironmentObject private var session: TVSession
     @State private var streams: [TwitchStream] = []
+    /// Chaînes suivies hors ligne, dernier live le plus récent d'abord : leur
+    /// page s'ouvre pour voir leurs vidéos.
+    @State private var offline: [ChannelBrief] = []
     @State private var loading = false
     @State private var failed = false
+    private let offlineColumns = Array(repeating: GridItem(.flexible(), spacing: 40), count: 6)
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 if session.token == nil {
                     TVMessage(text: session.t("tv_need_login"))
-                } else if streams.isEmpty {
-                    TVMessage(text: loading ? session.t("loading")
-                              : (failed ? session.t("tv_error") : session.t("tv_no_live")))
                 } else {
-                    TVStreamGrid(streams: streams, play: play)
+                    if streams.isEmpty {
+                        TVMessage(text: loading ? session.t("loading")
+                                  : (failed ? session.t("tv_error") : session.t("tv_no_live")))
+                    } else {
+                        TVStreamGrid(streams: streams, play: play)
+                    }
+                    if !offline.isEmpty { offlineSection }
                 }
+            }
+            .navigationDestination(for: String.self) { login in
+                TVChannelView(login: login, play: play)
             }
         }
         // Relancé quand le compte arrive (connexion, ou lancement).
         .task(id: session.user?.id) { await load() }
     }
 
+    private var offlineSection: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text(session.t("tv_offline_channels")).font(.title3.bold())
+            LazyVGrid(columns: offlineColumns, spacing: 48) {
+                ForEach(offline) { c in
+                    NavigationLink(value: c.login) {
+                        VStack(spacing: 12) {
+                            TVAvatar(url: c.avatar, size: 120)
+                            Text(c.name).font(.callout.bold()).lineLimit(1)
+                            if let end = c.lastEnd {
+                                Text(lastLive(end)).font(.caption2).foregroundColor(.secondary).lineLimit(1)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .tvCard()
+                }
+            }
+        }
+        .padding(.horizontal, 64)
+        .padding(.vertical, 32)
+    }
+
+    /// « il y a 2 j » : fin du dernier live, dans la langue de l'app.
+    private func lastLive(_ date: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.locale = Locale(identifier: session.lang.rawValue)
+        f.unitsStyle = .short
+        return f.localizedString(for: date, relativeTo: Date())
+    }
+
     private func load() async {
-        guard let uid = session.user?.id, let token = session.token else { streams = []; return }
+        guard let uid = session.user?.id, let token = session.token else { streams = []; offline = []; return }
         loading = true
-        defer { loading = false }
         if let list = try? await getFollowedStreams(token: token, userId: uid) {
             streams = list
             failed = false
@@ -93,6 +134,21 @@ struct TVFollowingTab: View {
         } else {
             failed = true
         }
+        loading = false
+        // Ensuite : les lives s'affichent sans attendre la liste hors ligne.
+        await loadOffline(userId: uid)
+    }
+
+    /// Tous les suivis (Helix, les 200 plus récents) sauf ceux en live, avec
+    /// avatar et fin du dernier live (GQL public). Échec : la liste reste.
+    private func loadOffline(userId: String) async {
+        guard let token = session.token,
+              let logins = await getFollowedLogins(token: token, userId: userId) else { return }
+        let live = Set(streams.map { $0.userLogin.lowercased() })
+        let rest = Array(logins.map { $0.lowercased() }.filter { !live.contains($0) }.prefix(200))
+        guard let infos = await getChannelsGQL(logins: rest) else { return }
+        offline = infos.filter { $0.stream == nil }
+            .sorted { ($0.lastEnd ?? .distantPast) > ($1.lastEnd ?? .distantPast) }
     }
 }
 
