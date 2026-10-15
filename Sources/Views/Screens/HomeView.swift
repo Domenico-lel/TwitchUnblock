@@ -47,6 +47,10 @@ struct HomeView: View {
     @State private var errorFollowed: String? = nil
     @State private var section: HomeSection = .live
     @State private var showWebLogin = false
+    @Environment(\.scenePhase) private var scenePhase
+    /// Dernier chargement des lives : relus au retour dans l'app et toutes
+    /// les 3 min à l'écran (l'app laissée ouverte gardait la liste d'avant).
+    @State private var lastLoad = Date.distantPast
     /// Bandeau « session web » masqué jusqu'à cette date (bouton ✕).
     @AppStorage("web_banner_hidden_until") private var webBannerHiddenUntil: Double = 0
     @ObservedObject private var announcements = AnnouncementService.shared
@@ -88,6 +92,23 @@ struct HomeView: View {
         }
         // Chaîne suivie ou retirée sur cet appareil : liste à jour.
         .onChange(of: store.localFollows) { _ in Task { await loadLocalFollows() } }
+        // App reprise après un moment : lives relus (ceux qui ont commencé ou
+        // fini entre-temps), sans avoir à tirer la liste ni relancer l'app.
+        .onChange(of: scenePhase) { phase in
+            if phase == .active, Date().timeIntervalSince(lastLoad) > 60 {
+                Task { await loadAll(isRefresh: true) }
+            }
+        }
+        // À l'écran, app au premier plan : relus toutes les 3 min.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 180_000_000_000)
+                guard !Task.isCancelled,
+                      await MainActor.run(body: { UIApplication.shared.applicationState == .active }),
+                      Date().timeIntervalSince(lastLoad) >= 170 else { continue }
+                await loadAll(isRefresh: true)
+            }
+        }
         .sheet(isPresented: $showWebLogin) {
             TwitchWebLoginSheet(
                 clearSession: store.webSessionExpired || store.webSessionMismatch != nil,
@@ -659,6 +680,7 @@ struct HomeView: View {
     /// ne dépend de rien, et l'onglet Top attendait sinon tous les suivis
     /// (jusqu'à 10 pages Helix et autant de requêtes GQL).
     @MainActor private func loadAll(isRefresh: Bool = false) async {
+        lastLoad = Date()
         let lang = topLang
         async let top: Void = loadTopStreams(lang, isRefresh: isRefresh)
         await loadFollowedStreams()
