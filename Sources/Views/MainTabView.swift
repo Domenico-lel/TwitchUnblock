@@ -544,7 +544,8 @@ struct MainTabView: View {
         .onChange(of: sleepTimer.fireCount) { _ in
             guard playerMode != nil else { return }
             logger.info("SLEEP", "Arrêt du lecteur par le minuteur de veille", nil)
-            stopPlayer()
+            // On s'endort : la musique d'une autre app ne doit pas repartir.
+            stopPlayer(wakeOthers: false)
         }
     }
 
@@ -1280,6 +1281,10 @@ struct MainTabView: View {
         // Empêche la mise en veille pendant la lecture (utile en audio-only où
         // l'écran ne joue pas de vidéo et s'éteindrait sinon).
         UIApplication.shared.isIdleTimerDisabled = true
+        // Le son passe à l'app ; il est rendu aux autres apps à la fermeture
+        // du lecteur (PlaybackAudio). Rien n'est relâché en changeant de
+        // chaîne : le lecteur reste ouvert.
+        PlaybackAudio.shared.claim("player")
         playerMode    = mode
         playerVisible = true
         // Drops : seulement pendant un direct (relancés par startLiveTimers).
@@ -1469,8 +1474,12 @@ struct MainTabView: View {
         }
     }
 
-    private func stopPlayer() {
+    /// `wakeOthers` faux (minuteur de veille) : la musique qu'une autre app
+    /// jouait avant la vidéo ne reprend pas toute seule.
+    private func stopPlayer(wakeOthers: Bool = true) {
         UIApplication.shared.isIdleTimerDisabled = false   // ré-autorise la veille
+        // Session audio relâchée : une musique coupée par la vidéo peut reprendre.
+        PlaybackAudio.shared.release("player", notifyOthers: wakeOthers)
         loadGeneration += 1   // un chargement encore en cours sera ignoré
         stopLiveTimers()
         // Fin de visionnage : la progression part maintenant, plutôt que

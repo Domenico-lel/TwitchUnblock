@@ -45,6 +45,10 @@ no key to paste. The backend is already hosted and shared by every install.
   you fall behind (pause, network drop) a red **Live** button with the delay
   brings you back to the edge.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps.
+* 🎵 **Leaves your music alone** — opening the app no longer stops music
+  playing in another app: the sound switches over only when a video starts,
+  and goes back to that app when you close the player (not when the sleep
+  timer stops it).
 * ⚙️ **Quality selector and preferred quality** — every resolution the channel
   broadcasts, Source included, sorted by height then frame rate. Pick a
   preferred quality once (Settings → Player: Source, 1080p, 720p, 480p, 360p,

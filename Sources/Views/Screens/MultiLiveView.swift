@@ -43,6 +43,8 @@ struct MultiLiveView: View {
         }
         .background(Color.black.ignoresSafeArea())
         .onAppear {
+            // Le son passe à l'app, rendu aux autres apps à la fermeture.
+            PlaybackAudio.shared.claim("multi")
             // Abonné sans pub : chaque direct passe par le compte (AppStore).
             session.accountToken = { [store] in store.accountPlaybackWebToken(for: $0) }
             // VODs : reprise et progression comme dans le lecteur ; au premier
@@ -60,6 +62,7 @@ struct MultiLiveView: View {
         .onChange(of: scenePhase) { session.sceneChanged($0) }
         .onDisappear {
             session.stopAll()
+            PlaybackAudio.shared.release("multi")
             // Fin de visionnage : la progression des VODs part maintenant,
             // comme à la fermeture du lecteur.
             store.flushToCloud(force: true)

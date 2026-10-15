@@ -8,7 +8,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        configureAudioSession()
+        // Catégorie seulement : la session n'est activée qu'à l'ouverture d'un
+        // lecteur (PlaybackAudio). Activée ici, elle coupait la musique des
+        // autres apps dès le lancement, même sans rien lire.
+        PlaybackAudio.configure()
         // Notifications de live : tâche d'arrière-plan et réception des touches.
         LiveNotifier.register()
         UNUserNotificationCenter.current().delegate = self
@@ -63,18 +66,5 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // iOS la laisserait affichée des heures.
         PlayerActivity.end()
         PlayerActivity.endOthers(wait: true)
-    }
-
-    private func configureAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playback,
-                mode: .moviePlayback,
-                options: [.allowAirPlay, .allowBluetoothA2DP]
-            )
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("⚠️ AVAudioSession error: \(error)")
-        }
     }
 }
