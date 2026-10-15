@@ -598,17 +598,20 @@ struct TVChatOverlay: View {
                 }
             }
             .frame(width: 500, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.horizontal, 30)
             .padding(.vertical, layout.height == .full ? 50 : 30)
+            // Hauteur fixe (tout l'écran, ou sa moitié dans un coin), messages
+            // calés en bas : les plus anciens sortent par le haut, en fondu.
+            // Posée avant le fond et le rognage : après eux (issue #6), le
+            // cadre souple grandissait avec les messages et le chat d'un coin
+            // finissait par couvrir tout l'écran.
+            .frame(height: layout.height == .full ? geo.size.height : geo.size.height / 2, alignment: .bottom)
             .background(Color.black.opacity(0.5))
             .mask(LinearGradient(stops: [.init(color: .clear, location: 0),
                                          .init(color: .black, location: 0.3),
                                          .init(color: .black, location: 1)],
                                  startPoint: .top, endPoint: .bottom))
             .clipped()
-            // Moitié haute ou basse : le chat tient dans un coin de l'image.
-            .frame(height: layout.height == .full ? geo.size.height : geo.size.height / 2)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: layout.alignment)
         }
         .animation(.easeInOut(duration: 0.25), value: layout)
