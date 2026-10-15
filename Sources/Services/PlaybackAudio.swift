@@ -1,5 +1,8 @@
 import AVFoundation
 import UIKit
+#if os(iOS)
+import CallKit
+#endif
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Session audio de la lecture.
@@ -24,11 +27,16 @@ final class PlaybackAudio {
     /// sur le fil principal.
     private let queue = DispatchQueue(label: "tu.audio.session")
     // Tenus sur `queue` seulement.
-    /// Lecteurs ouverts : « player » (écran du lecteur), « multi » (multi-live).
+    /// Détenteurs : « player » (écran du lecteur), « multi » (multi-live), et
+    /// le PiP du lecteur immersif tant qu'il dure : fermer le lecteur ne doit
+    /// pas relâcher la session sous un PiP qui joue.
     private var owners = Set<String>()
     /// Dernière demande : une relâche prévue n'a lieu que si aucun lecteur ne
     /// s'est ouvert entre-temps.
     private var generation = 0
+    /// Minuteur de veille : la relâche ne réveillera pas les autres apps, même
+    /// si un PiP la fait attendre. Oublié à l'ouverture suivante.
+    private var quiet = false
 
     private init() {}
 
@@ -47,6 +55,7 @@ final class PlaybackAudio {
         queue.async { [self] in
             owners.insert(owner)
             generation += 1
+            quiet = false
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
             } catch {
@@ -64,17 +73,21 @@ final class PlaybackAudio {
     /// app.
     func release(_ owner: String, notifyOthers: Bool = true) {
         queue.async { [self] in
-            guard owners.remove(owner) != nil, owners.isEmpty else { return }
+            guard owners.remove(owner) != nil else { return }
+            if !notifyOthers { quiet = true }
+            guard owners.isEmpty else { return }
             generation += 1
             let wanted = generation
+            let notify = !quiet
+            quiet = false
             queue.asyncAfter(deadline: .now() + 1.5) { [self] in
-                deactivate(notifyOthers: notifyOthers, generation: wanted, attempt: 0)
+                deactivate(notifyOthers: notify, generation: wanted)
             }
         }
     }
 
     /// Active la session ; `done(true)` sur le fil principal si iOS la donne
-    /// (refusée tant qu'un appel dure, par exemple).
+    /// (refusée pendant un appel téléphonique, par exemple).
     func activate(_ done: @escaping (Bool) -> Void) {
         queue.async {
             let granted = (try? AVAudioSession.sharedInstance().setActive(true)) != nil
@@ -82,22 +95,23 @@ final class PlaybackAudio {
         }
     }
 
-    /// Sur `queue`. Refusé tant qu'un son joue encore (PiP d'un lecteur déjà
-    /// fermé) : nouvel essai toutes les 10 s, pendant 10 min au plus, tant
-    /// qu'aucun lecteur ne reprend la session.
-    private func deactivate(notifyOthers: Bool, generation wanted: Int, attempt: Int) {
+    /// Sur `queue`. Un son qui joue encore n'empêche rien : iOS l'arrête, rend
+    /// la session inactive quand même et répond `isBusy` (doc d'Apple). Rien
+    /// à réessayer — un nouvel essai couperait de nouveau un son relancé
+    /// entre-temps. D'où le PiP, détenteur à part entière tant qu'il dure.
+    private func deactivate(notifyOthers: Bool, generation wanted: Int) {
         guard wanted == generation, owners.isEmpty else { return }
+        let detail = notifyOthers ? "les autres apps peuvent reprendre leur son"
+                                  : "sans réveiller les autres apps (minuteur de veille)"
         do {
             try AVAudioSession.sharedInstance().setActive(
                 false, options: notifyOthers ? .notifyOthersOnDeactivation : [])
-            logger.info("LECTEUR", "Session audio relâchée",
-                        notifyOthers ? "les autres apps peuvent reprendre leur son"
-                                     : "sans réveiller les autres apps (minuteur de veille)")
+            logger.info("LECTEUR", "Session audio relâchée", detail)
         } catch {
-            if attempt == 0 { logger.debug("LECTEUR", "Session audio gardée", error.localizedDescription) }
-            guard attempt < 60 else { return }
-            queue.asyncAfter(deadline: .now() + 10) { [self] in
-                deactivate(notifyOthers: notifyOthers, generation: wanted, attempt: attempt + 1)
+            if (error as NSError).code == AVAudioSession.ErrorCode.isBusy.rawValue {
+                logger.warn("LECTEUR", "Session audio relâchée alors qu'un son jouait encore (arrêté par iOS)", detail)
+            } else {
+                logger.warn("LECTEUR", "Session audio : relâche refusée", error.localizedDescription)
             }
         }
     }
@@ -110,10 +124,11 @@ final class PlaybackAudio {
 ///   • Fin avec `shouldResume` (fin d'appel, Siri, alarme) : tout de suite,
 ///     même en arrière-plan.
 ///   • Pas de fin, ou fin sans `shouldResume` (une app de musique mise en
-///     pause ne rend pas la main) : au retour dans l'app, si aucune autre app
-///     ne joue de son et qu'iOS rend la session. On ne coupe jamais le son
-///     d'une autre app sans un geste : sinon la lecture reste en pause, le
-///     bouton lecture suffit.
+///     pause ne rend pas la main) : au retour dans l'app, si aucun appel ne
+///     dure, qu'aucune autre app ne joue de son et qu'iOS rend la session. On
+///     ne coupe jamais le son d'une autre app sans un geste : sinon la lecture
+///     reste en pause, le bouton lecture suffit (« Lecture » sur une tuile du
+///     multi-live).
 ///   • Casque débranché : pause sans reprise (comportement d'Apple).
 /// Tout se passe sur le fil principal. `resume` reçoit la durée de
 /// l'interruption et rend ce qu'il a fait (journal), nil s'il n'y avait rien
@@ -139,6 +154,11 @@ final class PlaybackInterruptions {
     /// La lecture tournait au début de l'interruption : reprise due.
     private(set) var isPending = false
     private var activeCheck: DispatchWorkItem?
+    #if os(iOS)
+    /// Appels en cours : téléphone, FaceTime, apps d'appel passant par CallKit.
+    /// Créé avec le lecteur, pour être à jour quand on le consulte.
+    private let callObserver = CXCallObserver()
+    #endif
 
     init(name: String, resume: @escaping (TimeInterval) -> String?) {
         self.name = name
@@ -260,16 +280,33 @@ final class PlaybackInterruptions {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: check)
     }
 
+    /// Un appel dure encore. iOS peut rendre la session `.playback` pendant un
+    /// appel tenu par une autre app (FaceTime, WhatsApp… : de quoi lancer
+    /// SharePlay) : la vidéo repartirait en plein appel. Pas de CallKit sur
+    /// l'Apple TV.
+    private var inCall: Bool {
+        #if os(iOS)
+        return callObserver.calls.contains { !$0.hasEnded }
+        #else
+        return false
+        #endif
+    }
+
     private func resumeIfQuiet() {
         activeCheck = nil
         guard isPending else { return }
+        if inCall {
+            logger.info("LECTEUR", "Retour dans l'app après une interruption (\(name))",
+                        "appel en cours : reprise à la fin de l'interruption")
+            return
+        }
         if AVAudioSession.sharedInstance().isOtherAudioPlaying {
             logger.info("LECTEUR", "Retour dans l'app après une interruption (\(name))",
                         "une autre app joue du son : lecture laissée en pause")
             return
         }
-        // Session rendue par iOS ? Refusée tant qu'un appel dure : la fin de
-        // l'interruption relancera alors la lecture.
+        // Session rendue par iOS ? Refusée tant qu'un appel téléphonique
+        // dure : la fin de l'interruption relancera alors la lecture.
         PlaybackAudio.shared.activate { [weak self] granted in
             guard let self, self.isPending else { return }
             guard granted else {

@@ -125,6 +125,12 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// démarre au début.
     private var pendingSeek: Double?
     private var pip: AVPictureInPictureController?
+    /// PiP en cours : il tient la session audio tant qu'il dure. Fermer le
+    /// lecteur la relâcherait sous lui, et iOS couperait son son. Rendue à la
+    /// fin du PiP, au démontage, ou avec le modèle (le délégué ne reçoit pas
+    /// toujours la fin, B9.1).
+    private let pipOwner = "pip " + UUID().uuidString
+    private var pipHoldsSession = false
     private var lastCatchUp = Date.distantPast
     private var latency = LiveLatencyController()
     private var sync = LiveSyncEstimator()
@@ -372,10 +378,11 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
 
     // MARK: Interruptions
     /// Fin d'une interruption du son (appel, Siri, autre app) : la lecture
-    /// repart (voir PlaybackInterruptions). VOD, clip, VOD téléchargée, recul
-    /// voulu dans un direct : à l'endroit exact. Direct suivi au bord : au
-    /// bord, comme le bouton « Direct » — par un saut, jamais par la vitesse —
-    /// et relu après une longue coupure. Rend ce qui a été fait (journal).
+    /// repart (voir PlaybackInterruptions). VOD, clip, VOD téléchargée,
+    /// enregistrement d'un direct : à l'endroit exact. Direct : au bord, comme
+    /// le bouton « Direct » — par un saut, jamais par la vitesse — et relu
+    /// après une longue coupure ; reculé exprès, à l'endroit tant que le
+    /// direct garde ce moment. Rend ce qui a été fait (journal).
     private func resumeAfterInterruption(since: TimeInterval) -> String? {
         guard let item = player.currentItem, item.status != .failed,
               player.timeControlStatus == .paused else { return nil }
@@ -387,21 +394,27 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
             setPlaying(true)
             return String(format: "à %.0f s", position)
         }
+        // Recul voulu (barre, −10 s) : testé d'abord, quelle que soit la durée
+        // de la coupure. La fenêtre du direct ne garde que ses 30 dernières
+        // secondes : après un appel, le moment en est presque toujours sorti,
+        // et on revient au bord comme un direct suivi.
+        let held = latency.holdingBehind
+        if held, LiveLatencyController.stillInWindow(item, after: since) {
+            setPlaying(true)
+            return "direct, à l'endroit (recul voulu)"
+        }
+        let lost = held ? " (recul voulu sorti de la fenêtre du direct)" : ""
         if since >= PlaybackInterruptions.longInterruption, let asset = item.asset as? AVURLAsset {
             // App suspendue pendant un long appel : le bord a pu partir sans
             // nous. Nouvel élément, pris au bord (recalage compris).
             load(url: asset.url, seek: 0)
-            return "direct relu au bord"
-        }
-        if latency.holdingBehind {
-            setPlaying(true)
-            return "direct, à l'endroit (recul voulu)"
+            return "direct relu au bord" + lost
         }
         goLive()
         // goLive ne relance que si `isPlaying` est déjà faux : la pause
         // d'iOS peut ne pas encore avoir été vue.
         setPlaying(true)
-        return "direct, au bord"
+        return "direct, au bord" + lost
     }
 
     // MARK: Vitesse (VODs)
@@ -482,6 +495,13 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         else { pip.startPictureInPicture() }
     }
 
+    /// Session audio prise par le PiP (début) ou rendue (fin, démontage).
+    private func holdSessionForPiP(_ on: Bool) {
+        guard on != pipHoldsSession else { return }
+        pipHoldsSession = on
+        if on { PlaybackAudio.shared.claim(pipOwner) } else { PlaybackAudio.shared.release(pipOwner) }
+    }
+
     func teardown() {
         if let o = timeObs { player.removeTimeObserver(o); timeObs = nil }
         statusObs = nil
@@ -493,6 +513,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         player.replaceCurrentItem(with: nil)
         adBreaks.detach()
         pip = nil
+        holdSessionForPiP(false)
         if let o = spatialObs { NotificationCenter.default.removeObserver(o); spatialObs = nil }
         if let o = rateObs { NotificationCenter.default.removeObserver(o); rateObs = nil }
         clearNowPlaying()
@@ -503,6 +524,9 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         if let o = spatialObs { NotificationCenter.default.removeObserver(o) }
         if let o = rateObs { NotificationCenter.default.removeObserver(o) }
         for (command, target) in remoteTargets { command.removeTarget(target) }
+        // Libéré pendant un PiP (lecteur fermé sans démontage) : la session
+        // n'est plus tenue par personne d'ici.
+        if pipHoldsSession { PlaybackAudio.shared.release(pipOwner) }
     }
 
     // MARK: Écran verrouillé / centre de contrôle
@@ -613,10 +637,12 @@ extension ImmersivePlayerModel: AVPictureInPictureControllerDelegate {
     func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) {
         pipActive = true
         PlayerFullscreen.isActive = true   // garde l'IRC et les points actifs
+        holdSessionForPiP(true)
     }
     func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) {
         pipActive = false
         PlayerFullscreen.isActive = false
+        holdSessionForPiP(false)
     }
 }
 

@@ -217,10 +217,11 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         }
 
         /// Fin d'une interruption du son : la lecture repart. VOD, clip, VOD
-        /// téléchargée, recul voulu (mode faible latence) : à l'endroit ;
-        /// direct : au bord, comme « Direct » dans le lecteur immersif (un
-        /// saut, jamais la vitesse), relu après une longue coupure. Rend ce
-        /// qui a été fait (journal).
+        /// téléchargée, enregistrement d'un direct : à l'endroit ; direct : au
+        /// bord, comme « Direct » dans le lecteur immersif (un saut, jamais la
+        /// vitesse), relu après une longue coupure ; reculé exprès (mode
+        /// faible latence), à l'endroit tant que le direct garde ce moment.
+        /// Rend ce qui a été fait (journal).
         private func resumeAfterInterruption(since: TimeInterval) -> String? {
             guard let player = playerRef, let item = player.currentItem, item.status != .failed,
                   player.timeControlStatus == .paused else { return nil }
@@ -231,6 +232,16 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 player.play()
                 return String(format: "à %.0f s", at)
             }
+            // Recul voulu, testé d'abord : connu en mode faible latence
+            // seulement (timeJumped). Sans lui, le lecteur se tient déjà à
+            // ~18 s du bord d'une fenêtre de 30 s : un recul n'y laisse que
+            // quelques secondes, aucune coupure ne le garderait.
+            let held = lowLatency && latency.holdingBehind
+            if held, LiveLatencyController.stillInWindow(item, after: since) {
+                player.play()
+                return "direct, à l'endroit (recul voulu)"
+            }
+            let lost = held ? " (recul voulu sorti de la fenêtre du direct)" : ""
             if since >= PlaybackInterruptions.longInterruption, let asset = item.asset as? AVURLAsset {
                 // App suspendue pendant un long appel : le bord a pu partir
                 // sans nous. Nouvel élément, pris au bord.
@@ -239,11 +250,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 player.replaceCurrentItem(with: VodUnmuteLoader.playerItem(url: asset.url))
                 if let meta = metadataShown { applyMetadata(meta, isLive: true, to: player) }
                 player.play()
-                return "direct relu au bord"
-            }
-            if lowLatency, latency.holdingBehind {
-                player.play()
-                return "direct, à l'endroit (recul voulu)"
+                return "direct relu au bord" + lost
             }
             if let edge = item.seekableTimeRanges.last?.timeRangeValue.end, edge.isNumeric {
                 // Même recul que la tenue du direct ; tolérance avant
@@ -253,7 +260,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                 latency.hold(false)
             }
             player.play()
-            return "direct, au bord"
+            return "direct, au bord" + lost
         }
 
         /// Réglage « Audio spatial » changé : l'élément est recréé au même

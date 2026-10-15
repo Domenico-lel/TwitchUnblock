@@ -182,6 +182,7 @@ struct MultiLiveView: View {
             MultiLiveTile(entry: entry, model: model,
                           audible: session.audible == entry.id,
                           onTap: { session.audible = entry.id },
+                          onResume: { session.resumeStopped() },
                           onRemove: { multi.remove(id: entry.id) },
                           onWatch: { onWatch(entry, model.handOff()) })
         } else {
@@ -224,10 +225,16 @@ struct MultiLiveTile: View {
     @ObservedObject var model: MultiTileModel
     let audible: Bool
     let onTap: () -> Void
+    /// « Lecture » sur une tuile arrêtée par iOS (voir `heldBySystem`).
+    let onResume: () -> Void
     let onRemove: () -> Void
     let onWatch: () -> Void
 
     @EnvironmentObject private var store: AppStore
+    /// iOS met aussi les tuiles en pause en arrière-plan, et la mosaïque les
+    /// relance au retour : « Lecture » n'apparaît qu'une fois l'app active,
+    /// pas le temps du retour.
+    @Environment(\.scenePhase) private var scenePhase
     /// Position glissée sur la barre d'une VOD, cherchée au lâcher.
     @State private var scrub: Double? = nil
     @State private var scrubbing = false
@@ -288,6 +295,13 @@ struct MultiLiveTile: View {
                     .background(Circle().fill(Color.black.opacity(0.55)))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityLabel(store.t("multi_pause"))
+            } else if model.heldBySystem && scenePhase == .active {
+                // Arrêtée par iOS (appel, son d'une autre app qu'on ne coupe
+                // pas seul) : un direct n'a pas d'autre commande pour repartir.
+                stateButton("multi_play", icon: "play.fill", action: onResume)
+                    .padding(TSpace.md)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.55))
             }
         }
     }
@@ -357,7 +371,8 @@ struct MultiLiveTile: View {
     private var vodControls: some View {
         let shown = scrub ?? model.position
         let end = max(1, model.duration)
-        let paused = model.userPaused || model.phase == .ended
+        // Arrêtée par iOS : « lecture », pas « pause » (toucher la relance).
+        let paused = model.userPaused || model.phase == .ended || model.heldBySystem
         return HStack(spacing: 0) {
             controlButton("gobackward.10", label: "multi_back10") { model.seek(by: -10) }
             controlButton(model.phase == .ended ? "arrow.counterclockwise" : paused ? "play.fill" : "pause.fill",

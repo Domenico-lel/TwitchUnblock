@@ -77,6 +77,27 @@ struct LiveLatencyController {
     /// tenir le plancher du retard affiché.
     func minBehind(for item: AVPlayerItem) -> Double { max(Self.target(for: item), floorBehind) }
 
+    /// Après une coupure de `since` secondes (appel, Siri), le moment lu est-il
+    /// encore dans la fenêtre du direct (les 30 dernières secondes chez
+    /// Twitch), avec 6 s de marge pour repartir ? Son âge se lit à l'heure de
+    /// l'image (EXT-X-PROGRAM-DATE-TIME) : la fenêtre connue a pu vieillir
+    /// pendant la coupure (app suspendue, playlist plus relue), sa longueur
+    /// non. Sans heure, ou avec une horloge en retard (âge inférieur à la
+    /// distance au bord, impossible) : distance au bord connu plus la durée
+    /// de la coupure, comptée deux fois au pire.
+    static func stillInWindow(_ item: AVPlayerItem, after since: TimeInterval) -> Bool {
+        guard let range = item.seekableTimeRanges.last?.timeRangeValue,
+              range.duration.seconds.isFinite, range.duration.seconds > 0 else { return false }
+        let behind = (range.end - item.currentTime()).seconds
+        guard behind.isFinite else { return false }
+        var age = max(0, behind) + since
+        if let date = item.currentDate() {
+            let measured = Date().timeIntervalSince(date)
+            if measured >= behind { age = measured }
+        }
+        return range.duration.seconds - age >= 6
+    }
+
     /// `behind` : secondes entre la position et le bord jouable (fin de la
     /// plage cherchable). `total` : retard affiché (heure − horodatage du
     /// segment lu), nil sans horodatage. `settled` : le flux a eu le temps de

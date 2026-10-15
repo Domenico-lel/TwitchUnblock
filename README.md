@@ -51,12 +51,16 @@ no key to paste. The backend is already hosted and shared by every install.
   timer stops it).
 * 📞 **Picks up after a call** — a call, Siri, an alarm or another app's
   sound pauses the video; once it's over, playback resumes on its own: VODs,
-  clips and downloads where they left off, live streams back at the live
-  edge (where you were, if you had rewound). When another app's audio stops
-  without telling iOS, the video resumes as soon as you come back to the
-  app, provided nothing else is playing. A video you paused stays paused, and
-  unplugging headphones pauses without resuming. Multi-live and Apple TV
-  too.
+  clips, downloads and a live's recording (DVR) where they left off, live
+  streams back at the live edge. A live you had rewound in the app's player
+  picks up where you were only while the stream still holds that moment: it
+  keeps just its last 30 seconds, so after a short interruption like Siri,
+  not a call. When another app's audio stops without telling iOS, the video
+  resumes as soon as you come back to the app, provided nothing else is
+  playing and you're not on a call; otherwise it waits for you to press play
+  (in multi-live, a **Play** button on each tile that stopped). A video you
+  paused stays paused, and unplugging headphones pauses without resuming.
+  Multi-live and Apple TV too, their live streams always back at the edge.
 * ⚙️ **Quality selector and preferred quality** — every resolution the channel
   broadcasts, Source included, sorted by height then frame rate. Pick a
   preferred quality once (Settings → Player: Source, 1080p, 720p, 480p, 360p,

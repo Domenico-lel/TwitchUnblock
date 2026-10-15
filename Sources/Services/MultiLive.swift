@@ -178,6 +178,17 @@ final class MultiTileModel: ObservableObject {
     @Published private(set) var duration: Double = 0
     /// VOD mise en pause à la main : rien ne la relance seul.
     @Published private(set) var userPaused = false
+    /// Lecteur à l'arrêt, d'après AVPlayer : redessine la tuile (voir
+    /// `heldBySystem`).
+    @Published private var playerPaused = false
+
+    /// Arrêtée sans qu'on l'ait voulu — appel, Siri, son d'une autre app
+    /// qu'on ne coupe pas sans un geste, fin du flux : la tuile montre
+    /// « Lecture », seule commande d'un direct. L'état réel du lecteur est
+    /// relu : une relance (play) l'efface sans attendre l'observateur.
+    var heldBySystem: Bool {
+        phase == .playing && !userPaused && playerPaused && player.timeControlStatus == .paused
+    }
 
     private var task: Task<Void, Never>?
     private var observers: [NSKeyValueObservation] = []
@@ -323,10 +334,17 @@ final class MultiTileModel: ObservableObject {
                 }
             },
             player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
-                guard player.timeControlStatus == .playing, let self else { return }
-                Task { @MainActor in self.playing() }
+                let nowPlaying = player.timeControlStatus == .playing
+                Task { @MainActor in self?.statusChanged(playing: nowPlaying) }
             },
         ]
+    }
+
+    /// Lecture partie, ou lecteur arrêté (voir `heldBySystem`).
+    private func statusChanged(playing nowPlaying: Bool) {
+        if nowPlaying { playing() }
+        let paused = player.timeControlStatus == .paused
+        if paused != playerPaused { playerPaused = paused }
     }
 
     /// VOD : position et durée chaque seconde, fin de la vidéo (pour cet
@@ -476,8 +494,9 @@ final class MultiTileModel: ObservableObject {
         saveProgress()
     }
 
-    /// Retour au premier plan : iOS a mis les lecteurs en pause. Une VOD
-    /// reprend (sauf pause voulue ou fin), un direct est relancé au bord.
+    /// Retour au premier plan, fin d'une interruption ou « Lecture » : iOS a
+    /// mis le lecteur en pause. Une VOD reprend (sauf pause voulue ou fin), un
+    /// direct est relancé au bord.
     func resumeIfStopped() {
         guard phase == .playing, player.timeControlStatus == .paused else { return }
         if isVod {
@@ -560,10 +579,20 @@ final class MultiLiveSession: ObservableObject {
         tiles = [:]
     }
 
+    /// « Lecture » sur une tuile arrêtée par iOS : un geste, qui peut couper
+    /// le son d'une autre app. Toutes les tuiles arrêtées ainsi repartent,
+    /// comme au retour dans l'app (VODs à l'endroit sauf pause voulue,
+    /// directs relus au bord), et plus rien n'attend la fin de l'interruption.
+    func resumeStopped() {
+        interruptions?.settle()
+        tiles.values.forEach { $0.resumeIfStopped() }
+    }
+
     /// Avant l'arrière-plan, les positions (la sauvegarde part en
     /// `.background`) ; au retour, ce qu'iOS a mis en pause repart — sauf
     /// après une interruption par le son d'une autre app : la reprise attend
-    /// alors qu'il s'arrête (PlaybackInterruptions), pour ne pas le couper.
+    /// alors qu'il s'arrête (PlaybackInterruptions), pour ne pas le couper ;
+    /// d'ici là, chaque tuile arrêtée montre « Lecture ».
     func sceneChanged(_ phase: ScenePhase) {
         switch phase {
         case .inactive, .background:
