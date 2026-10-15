@@ -187,6 +187,9 @@ struct VodMeta {
     let thumb: String
     var lengthSeconds: Int = 0
     var viewCount: Int = 0
+    /// Login de la chaîne (vide si Twitch ne l'a pas donné) : `streamer` est
+    /// le nom affiché.
+    var login: String = ""
 }
 
 // MARK: – App Models

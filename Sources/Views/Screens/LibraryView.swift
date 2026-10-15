@@ -132,6 +132,12 @@ struct LibraryView: View {
             .onTapGesture {
                 onPlayVod(item.term, item.display, item.thumb, item.streamer)
             }
+            // Appui long : le multi-live. `streamer` peut être un nom affiché :
+            // la chaîne est complétée au démarrage de la tuile.
+            .contextMenu {
+                MultiVodMenuButton(vodId: item.term, title: item.display, thumb: item.thumb,
+                                   name: item.streamer ?? "", login: "")
+            }
 
             TIconButton(icon: "trash", tint: .tDanger) {
                 withAnimation(.easeInOut(duration: 0.2)) {

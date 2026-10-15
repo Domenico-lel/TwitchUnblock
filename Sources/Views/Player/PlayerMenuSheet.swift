@@ -28,7 +28,8 @@ struct PlayerMenuSheet: View {
     var onSelectSource: ((String) -> Void)? = nil
     /// VOD : télécharger un passage pour le regarder hors ligne.
     var onDownload: (() -> Void)? = nil
-    /// Direct : l'ajouter au multi-live (ou l'en retirer).
+    /// Direct ou VOD (pas le rembobinage) : l'ajouter au multi-live (ou
+    /// l'en retirer). Mêmes libellés pour les deux.
     var onMultiLive: (() -> Void)? = nil
     var multiLiveOn = false
     var multiLiveFull = false

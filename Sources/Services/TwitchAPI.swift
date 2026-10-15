@@ -1165,17 +1165,19 @@ func searchUsersGQL(_ query: String) async -> [AutocompleteSuggestion] {
 }
 
 func getVodMetaGQL(_ vodId: String) async -> VodMeta? {
-    let q = "query { video(id: \"\(gqlStr(vodId))\") { title lengthSeconds viewCount owner { displayName } previewThumbnailURL(height: 180, width: 320) } }"
+    let q = "query { video(id: \"\(gqlStr(vodId))\") { title lengthSeconds viewCount owner { login displayName } previewThumbnailURL(height: 180, width: 320) } }"
     guard let json = try? await twitchGQL(q) as? [String: Any],
           let data = json["data"] as? [String: Any],
           let v    = data["video"] as? [String: Any],
           let title = v["title"] as? String else { return nil }
+    let owner = v["owner"] as? [String: Any]
     return VodMeta(
         title: title,
-        streamer: (v["owner"] as? [String: Any])?["displayName"] as? String ?? "Inconnu",
+        streamer: owner?["displayName"] as? String ?? "Inconnu",
         thumb: v["previewThumbnailURL"] as? String ?? "",
         lengthSeconds: v["lengthSeconds"] as? Int ?? 0,
-        viewCount: v["viewCount"] as? Int ?? 0
+        viewCount: v["viewCount"] as? Int ?? 0,
+        login: owner?["login"] as? String ?? ""
     )
 }
 
@@ -1184,6 +1186,35 @@ func extractVodId(_ input: String) -> String? {
     let pattern = #"\d{8,}"#
     guard let range = input.range(of: pattern, options: .regularExpression) else { return nil }
     return String(input[range])
+}
+
+/// La saisie désigne-t-elle une VOD (lien …/videos/…, ou identifiant : un
+/// nombre de 8 chiffres ou plus) ? Recherche et multi-live.
+func isVodInput(_ input: String) -> Bool {
+    let t = input.trimmingCharacters(in: .whitespaces)
+    guard !t.isEmpty else { return false }
+    if t.lowercased().contains("/videos/") { return true }
+    return t.allSatisfy(\.isNumber) && t.count >= 8
+}
+
+/// Chaîne désignée par une saisie : le premier mot en minuscules, sans
+/// « @ », ou la chaîne d'un lien Twitch collé (« twitch.tv/xqc »,
+/// « https://www.twitch.tv/xqc/clips »). Pas forcément un nom valide :
+/// voir `isValidLogin`.
+func loginFromInput(_ input: String) -> String {
+    var login = input.trimmingCharacters(in: .whitespaces)
+        .components(separatedBy: " ").first?.lowercased() ?? ""
+    if let r = login.range(of: #"twitch\.tv/([a-z0-9_]{1,25})"#, options: .regularExpression) {
+        let path = login[r].replacingOccurrences(of: "twitch.tv/", with: "")
+        if !["videos", "directory"].contains(path) { login = path }
+    }
+    if login.hasPrefix("@") { login.removeFirst() }
+    return login
+}
+
+/// Nom de chaîne Twitch possible : 1 à 25 caractères parmi a-z, 0-9 et « _ ».
+func isValidLogin(_ login: String) -> Bool {
+    login.range(of: #"^[a-z0-9_]{1,25}$"#, options: .regularExpression) != nil
 }
 
 func formatViewers(_ count: Int) -> String {

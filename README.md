@@ -118,15 +118,20 @@ no key to paste. The backend is already hosted and shared by every install.
   Twitch still has it (a day or two after the stream). The chat can be kept
   too and is replayed offline, emotes included. Export a download as a single
   file (Files, AirDrop, VLC). Pause, resume and delete from the list.
-* 🧩 **Multi-live** — up to four lives side by side, on iPad as on iPhone:
-  long-press a live card (or use the player's ⋯ menu) to add it — a “+” then
-  shows on every card — and tap **Watch** in the bar at the bottom. Tap a
-  stream to hear it, open any of them with its chat, add a channel by name.
+* 🧩 **Multi-live** — up to four videos side by side, lives and VODs mixed,
+  on iPad as on iPhone: long-press a live or VOD card (a channel's VODs and
+  highlights, My VODs), or use the player's ⋯ menu, to add it — a “+” then
+  shows on every live card — and tap **Watch** in the bar at the bottom. Tap
+  a video to hear it, open any of them in the player (a VOD resumes where its
+  tile was), add a channel by name or link, or a VOD by link or ID. A VOD
+  tile resumes where you left off; the one you hear has play/pause, ±10 s
+  and a seek bar, the others a thin progress line, and “Watch again” at the
+  end. Its progress is saved and synced, and it joins your VOD history.
   Side by side in landscape, stacked in portrait. On iPad (or a large iPhone
-  in landscape), the chat of the stream you hear shows on the right — a
-  button in the mosaic and Settings → Player turn it on or off. Each tile
-  plays 1080p alone, 720p with two, 480p beyond — or your preferred quality
-  when it is lower.
+  in landscape), the chat of the video you hear shows on the right (the
+  replayed chat for a VOD) — a button in the mosaic and Settings → Player
+  turn it on or off. Each tile plays 1080p alone, 720p with two, 480p
+  beyond — or your preferred quality when it is lower.
 
 ### Chat
 

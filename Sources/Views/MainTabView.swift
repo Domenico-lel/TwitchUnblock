@@ -370,11 +370,20 @@ struct MainTabView: View {
             )
             .presentationDetents([.medium])
         }
-        // Multi-live : jusqu'à quatre directs côte à côte.
+        // Multi-live : jusqu'à quatre vidéos côte à côte, directs et VODs.
         .fullScreenCover(isPresented: $showMultiLive) {
-            MultiLiveView(onWatch: { login in
+            MultiLiveView(onWatch: { entry, at in
                 showMultiLive = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { playLive(login) }
+                if let id = entry.vodId {
+                    // La VOD reprend où en était sa tuile ; playVod tient l'historique.
+                    store.setVodProgress(id, time: at)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        playVod(id, entry.title, entry.thumb,
+                                entry.login.isEmpty ? (entry.name.isEmpty ? nil : entry.name) : entry.login)
+                    }
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { playLive(entry.login) }
+                }
             })
             // Avis internes : une feuille cache le bandeau de la racine.
             .inAppNoticeHost()
@@ -1019,20 +1028,39 @@ struct MainTabView: View {
         }
     }
 
-    /// Direct en cours : l'ajouter au multi-live, ou l'en retirer.
+    /// Direct ou VOD en cours : l'ajouter au multi-live, ou l'en retirer.
+    /// Pas le rembobinage d'un direct (DVR).
     private var multiLiveAction: (() -> Void)? {
-        guard case .live(let ch)? = playerMode, dvrSourceChannel == nil else { return nil }
-        return {
-            showPlayerMenu = false
-            if multi.toggle(ch, name: ch) {
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+        guard dvrSourceChannel == nil else { return nil }
+        switch playerMode {
+        case .live(let ch)?:
+            return {
+                showPlayerMenu = false
+                if multi.toggle(ch, name: ch) {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
             }
+        case .vod(let id, let title, let thumb, let streamer)?:
+            return {
+                showPlayerMenu = false
+                // La tuile reprendra ici. `streamer` peut être un nom affiché :
+                // la chaîne est complétée au démarrage de la tuile.
+                store.setVodProgress(id, time: vodPlaybackTime)
+                if multi.toggleVod(id: id, name: streamer ?? "", title: title, thumb: thumb) {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }
+            }
+        default:
+            return nil
         }
     }
 
     private var menuMultiLiveOn: Bool {
-        guard case .live(let ch)? = playerMode else { return false }
-        return multi.contains(ch)
+        switch playerMode {
+        case .live(let ch)?:              return multi.contains(ch)
+        case .vod(let id, _, _, _)?:      return multi.containsVod(id)
+        default:                          return false
+        }
     }
 
     private var downloadAction: (() -> Void)? {
@@ -1153,7 +1181,7 @@ struct MainTabView: View {
         .padding(.bottom, 92)
     }
 
-    /// Multi-live en préparation : les directs choisis, et « Regarder ».
+    /// Multi-live en préparation : les vidéos choisies, et « Regarder ».
     /// Au-dessus du mini-lecteur quand il est là.
     private var multiBar: some View {
         let miniShown = playerMode != nil && qualityLinks != nil
@@ -1164,7 +1192,7 @@ struct MainTabView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text("\(store.t("multi_title")) · \(multi.entries.count)/\(MultiLive.max)")
                     .font(.tCardTitle).foregroundColor(.tText)
-                Text(multi.entries.map(\.name).joined(separator: ", "))
+                Text(multi.entries.map(\.label).joined(separator: ", "))
                     .font(.tMeta).foregroundColor(.tMuted).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

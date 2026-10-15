@@ -89,13 +89,8 @@ struct SearchView: View {
                            GridItem(.flexible(), alignment: .top)]
 
     /// Le texte saisi désigne-t-il une VOD (lien twitch.tv/videos/… ou ID) ?
-    private var queryIsVod: Bool {
-        let t = query.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return false }
-        // Un identifiant de VOD est un nombre long ; un lien contient /videos/.
-        if t.lowercased().contains("/videos/") { return true }
-        return t.allSatisfy(\.isNumber) && t.count >= 8
-    }
+    /// Même règle que le « + » du multi-live (TwitchAPI).
+    private var queryIsVod: Bool { isVodInput(query) }
 
     private var channelName: String {
         searchedName.isEmpty ? "" : searchedName
@@ -542,6 +537,7 @@ struct SearchView: View {
                                     VodCardView(vod: vod, progress: progress) {
                                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                                     }
+                                    .contextMenu { multiMenu(vod) }
                                     .onAppear {
                                         // Défilement infini : charge la suite quand la
                                         // dernière VOD apparaît.
@@ -593,10 +589,17 @@ struct SearchView: View {
                     VodCardView(vod: vod, progress: progress) {
                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                     }
+                    .contextMenu { multiMenu(vod) }
                 }
             }
             .padding(.horizontal, TSpace.lg)
         }
+    }
+
+    /// Appui long sur une VOD (ou un temps fort) de la chaîne : le multi-live.
+    private func multiMenu(_ vod: VodData) -> some View {
+        MultiVodMenuButton(vodId: vod.id, title: vod.title, thumb: vod.previewThumbnailURL,
+                           name: channelName, login: channelName)
     }
 
     @MainActor private func loadHighlights() async {
@@ -653,6 +656,7 @@ struct SearchView: View {
                                     VodCardView(vod: vod, progress: progress) {
                                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                                     }
+                                    .contextMenu { multiMenu(vod) }
                                     .frame(width: 200)
                                 }
                             }
@@ -845,14 +849,9 @@ struct SearchView: View {
     }
 
     @MainActor private func searchChannel(_ name: String) async {
-        var login = name.trimmingCharacters(in: .whitespaces)
-            .components(separatedBy: " ").first?.lowercased() ?? ""
         // Lien Twitch collé (« twitch.tv/xqc », « https://www.twitch.tv/xqc/clips ») :
-        // on en garde la chaîne.
-        if let r = login.range(of: #"twitch\.tv/([a-z0-9_]{1,25})"#, options: .regularExpression) {
-            let path = login[r].replacingOccurrences(of: "twitch.tv/", with: "")
-            if !["videos", "directory"].contains(path) { login = path }
-        }
+        // on en garde la chaîne ; « @xqc » donne xqc (TwitchAPI).
+        let login = loginFromInput(name)
         guard !login.isEmpty else { return }
 
         loading = true; errorMsg = nil; liveData = nil; vods = []
