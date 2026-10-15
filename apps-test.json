@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.2",
+          "buildVersion": "299",
+          "date": "2026-10-15",
+          "localizedDescription": "- A speaker button in the player mutes the stream, and on iPhone, leaving the player after rotating it with its button brings the app back to portrait\n- Chat: GIFs sent with Twitch's GIF keyboard now show in the chat, like in the Twitch app",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-299/TwitchUnblock.ipa",
+          "size": 3614249,
+          "commit": "25ca9d63ecb8d1b945ceaf581d7cd73a2a37625c"
+        },
+        {
           "version": "1.3.65",
           "buildVersion": "294",
           "date": "2026-10-15",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-262/TwitchUnblock.ipa",
           "size": 2655098,
           "commit": "5875746a6e1c2e7e8ed04539ad7f832ddf970c86"
-        },
-        {
-          "version": "1.2.36",
-          "buildVersion": "261",
-          "date": "2026-10-11",
-          "localizedDescription": "- Downloads keep going in the background, even with the app closed; the chat can be kept and replayed offline (emotes included); a finished download can be exported as a single file (Files, AirDrop, VLC).",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-261/TwitchUnblock.ipa",
-          "size": 2648332,
-          "commit": "028e8169a58b91f9fd62389dbae8740a43db3274"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.65",
+      "version": "1.4.2",
       "versionDate": "2026-10-15",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-294/TwitchUnblock.ipa",
-      "size": 3607507
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-299/TwitchUnblock.ipa",
+      "size": 3614249
     }
   ],
   "news": []
