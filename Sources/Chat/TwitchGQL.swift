@@ -97,6 +97,9 @@ extension Notification.Name {
 final class FollowService: ObservableObject {
     @Published var isFollowing: Bool? = nil   // nil = inconnu / en cours
     @Published var busy = false
+    /// Dernier refus de Twitch pour la chaîne affichée (nil : aucun) : son
+    /// code (« TOO_MANY_FOLLOWS »…), vide quand Twitch n'en donne pas.
+    @Published var lastError: String? = nil
     /// Sans session web : suivi gardé sur cet appareil (AppStore.localFollows).
     private(set) var localStore: AppStore? = nil
 
@@ -104,6 +107,7 @@ final class FollowService: ObservableObject {
     func loadLocal(login: String, store: AppStore) {
         self.login = login.lowercased()
         localStore = store
+        lastError = nil
         isFollowing = store.isLocallyFollowed(login)
     }
 
@@ -118,6 +122,7 @@ final class FollowService: ObservableObject {
     /// tant que son statut n'est pas lu.
     func reset() {
         isFollowing = nil
+        lastError = nil
         login = ""; channelId = ""
         localStore = nil
     }
@@ -127,6 +132,7 @@ final class FollowService: ObservableObject {
         self.login = wanted; self.channelId = channelId
         localStore = nil
         isFollowing = nil
+        lastError = nil
         guard let token = token, !login.isEmpty else { return }
         guard let res  = await TwitchGQL.shared.query("FollowButton_User",
                             variables: ["login": wanted], sha256: Self.hashStatus, token: token),
@@ -158,21 +164,40 @@ final class FollowService: ObservableObject {
 
     private func sendUnfollow(token: String) async {
         let target = channelId, who = login
+        lastError = nil
         let res = await TwitchGQL.shared.mutation("FollowButton_UnfollowUser",
                     variables: ["input": ["targetID": target]],
                     sha256: Self.hashUnfollow, token: token)
-        if let d = res?["data"] as? [String: Any], let u = d["unfollowUser"], !(u is NSNull),
-           res?["errors"] == nil {
-            logger.success("FOLLOW", "Ne suit plus @\(who)", nil)
-            // Réponse arrivée après un changement de chaîne : pas sur son état.
-            if isCurrent(target) { isFollowing = false }
-            NotificationCenter.default.post(name: .twitchFollowsChanged, object: nil)
-        } else { logger.warn("FOLLOW", "Unfollow échoué @\(who)", nil) }
+        if let code = Self.refusal(res, "unfollowUser", needsFollow: false) {
+            logger.warn("FOLLOW", "Unfollow échoué @\(who)", code.isEmpty ? nil : code)
+            if isCurrent(target) { lastError = code }
+            return
+        }
+        logger.success("FOLLOW", "Ne suit plus @\(who)", nil)
+        // Réponse arrivée après un changement de chaîne : pas sur son état.
+        if isCurrent(target) { isFollowing = false }
+        NotificationCenter.default.post(name: .twitchFollowsChanged, object: nil)
     }
 
     /// La chaîne visée par une mutation est-elle toujours celle affichée ?
     private func isCurrent(_ target: String) -> Bool {
         channelId == target && localStore == nil
+    }
+
+    /// Refus d'une mutation de suivi (nil : réussie). Réussie seulement si
+    /// `field` (followUser, unfollowUser) est un objet sans `error` (limite
+    /// de suivis, chaîne qui bloque…), sans `follow` nul pour un suivi, et
+    /// sans erreur GQL : sa seule présence, NSNull compris, passait pour un
+    /// succès (cœur plein alors que rien n'était suivi). Le code du refus,
+    /// vide si Twitch n'en donne pas.
+    private static func refusal(_ res: [String: Any]?, _ field: String, needsFollow: Bool) -> String? {
+        let payload = (res?["data"] as? [String: Any])?[field] as? [String: Any]
+        let error = payload?["error"] as? [String: Any]
+        if let payload, error == nil, res?["errors"] == nil,
+           !(needsFollow && payload["follow"] is NSNull) {
+            return nil
+        }
+        return error?["code"] as? String ?? ""
     }
 
     func toggle(token: String?) async {
@@ -188,14 +213,19 @@ final class FollowService: ObservableObject {
             await sendUnfollow(token: token)
         } else {
             let target = channelId, who = login
+            lastError = nil
             let res = await TwitchGQL.shared.mutation("FollowButton_FollowUser",
                         variables: ["input": ["disableNotifications": false, "targetID": target]],
                         sha256: Self.hashFollow, token: token)
-            if let d = res?["data"] as? [String: Any], d["followUser"] != nil, res?["errors"] == nil {
-                logger.success("FOLLOW", "Suit @\(who)", nil)
-                if isCurrent(target) { isFollowing = true }
-                NotificationCenter.default.post(name: .twitchFollowsChanged, object: nil)
-            } else { logger.warn("FOLLOW", "Follow échoué @\(who)", nil) }
+            if let code = Self.refusal(res, "followUser", needsFollow: true) {
+                // État gardé : le cœur ne se remplit pas pour un suivi refusé.
+                logger.warn("FOLLOW", "Follow échoué @\(who)", code.isEmpty ? nil : code)
+                if isCurrent(target) { lastError = code }
+                return
+            }
+            logger.success("FOLLOW", "Suit @\(who)", nil)
+            if isCurrent(target) { isFollowing = true }
+            NotificationCenter.default.post(name: .twitchFollowsChanged, object: nil)
         }
     }
 }

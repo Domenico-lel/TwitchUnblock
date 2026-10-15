@@ -38,14 +38,19 @@ final class VodRecoveryService: ObservableObject {
         guard !login.isEmpty else { return }
         if login == channel, !streams.isEmpty { return }   // déjà chargé
         channel = login; loading = true; failed = false; streams = []
-        defer { loading = false }
+        // Une autre chaîne demandée pendant l'attente : cette réponse n'est
+        // pas la sienne (ses diffusions s'affichaient parmi les VODs de la
+        // suivante), et son indicateur de chargement non plus.
+        defer { if channel == login { loading = false } }
 
         guard let url = URL(string: kVodRecoveryMetaAPI + login) else { failed = true; return }
         var req = URLRequest(url: url)
         req.setValue("Mozilla/5.0", forHTTPHeaderField: "User-Agent")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        guard let (data, resp) = try? await session.data(for: req),
+        let response = try? await session.data(for: req)
+        guard channel == login else { return }
+        guard let (data, resp) = response,
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             logger.warn("RECOVER", "Source externe injoignable", login)

@@ -275,7 +275,10 @@ no key to paste. The backend is already hosted and shared by every install.
   art.
 * 🏷 **Stream tags** — language, DropsEnabled… under each live stream, like on
   Twitch.
-* 🔍 **Search** — by streamer name, channel link, or VOD ID.
+* 🔍 **Search** — by streamer name, channel link, VOD link or ID (a `?t=`
+  link starts at that time) or clip link (played right away). On a channel,
+  the VOD keyword filter can also look through older VODs (**Search older
+  VODs**).
 * ℹ️ **About** — a channel's description, followers, social links and panels.
 * 🕒 **History** — recently watched VODs and channels, each removable.
 * 🔄 **Cloud sync** — watch progress and history follow your Twitch account, so

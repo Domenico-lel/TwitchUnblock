@@ -37,6 +37,8 @@ struct SearchView: View {
 
     // Résultats « chaîne »
     @State private var liveData: LiveData? = nil
+    /// Début du dernier live (même sans VOD), pour « hors ligne depuis ».
+    @State private var lastBroadcastAt: String? = nil
     @State private var avatarURL = ""
     @State private var vods: [VodData] = []
     @State private var vodCursor: String? = nil
@@ -46,6 +48,8 @@ struct SearchView: View {
     /// pour réessayer, le défilement infini ne relance pas seul).
     @State private var vodsRefused   = false
     @State private var vodsMoreFailed = false
+    /// Filtre par mot-clé : pages suivantes demandées pour y chercher.
+    @State private var searchingOlder = false
 
     // Onglets de la chaîne : 0 VODs, 1 Highlights, 2 Playlists, 3 Clips, 4 À propos
     @State private var channelTab   = 0
@@ -54,6 +58,9 @@ struct SearchView: View {
     // date parmi les VODs, reconstruites au toucher.
     @StateObject private var recovery = VodRecoveryService()
     @State private var resolvingID: String? = nil   // diffusion en cours de reconstruction
+    /// Reconstruction en cours : annulée si on ouvre une autre chaîne ou si
+    /// la page se ferme, pour qu'elle n'ouvre pas le lecteur après coup.
+    @State private var recoverTask: Task<Void, Never>? = nil
     /// Diffusions dont le CDN ne sert plus les segments.
     @State private var goneIDs: Set<String> = []
     @State private var highlights: [VodData] = []
@@ -91,6 +98,8 @@ struct SearchView: View {
     /// Le texte saisi désigne-t-il une VOD (lien twitch.tv/videos/… ou ID) ?
     /// Même règle que le « + » du multi-live (TwitchAPI).
     private var queryIsVod: Bool { isVodInput(query) }
+    /// Lien de clip collé : il s'ouvre directement, comme sur le site.
+    private var queryIsClip: Bool { clipSlugFromInput(query) != nil }
 
     private var channelName: String {
         searchedName.isEmpty ? "" : searchedName
@@ -157,11 +166,16 @@ struct SearchView: View {
     }
 
     private var offlineSinceText: String? {
-        guard liveData?.error != nil, let first = vods.first else { return nil }
+        guard liveData?.error != nil else { return nil }
+        // La dernière VOD, ou le dernier live s'il est plus récent (un live
+        // sans VOD n'en laisse pas) : comme l'accueil, qui disait « 1 j »
+        // quand la page disait « 21 j ».
+        let first = vods.first
         // Chaîne vide = date illisible : on préfère ne rien dire plutôt
         // qu'afficher « Hors ligne depuis : » suivi de rien.
-        guard let end = lastLiveEnd(publishedAt: first.publishedAt,
-                                    lengthSeconds: first.lengthSeconds, lastStart: nil) else { return nil }
+        guard let end = lastLiveEnd(publishedAt: first?.publishedAt,
+                                    lengthSeconds: first?.lengthSeconds ?? 0,
+                                    lastStart: lastBroadcastAt) else { return nil }
         let since = offlineLabel(since: end, store: store)
         return since.isEmpty ? nil : since
     }
@@ -185,7 +199,7 @@ struct SearchView: View {
             VStack(spacing: TSpace.sm) {
                 HStack(spacing: TSpace.sm) {
                     searchField
-                    TPrimaryButton(title: queryIsVod ? store.t("btn_open") : store.t("btn_search")) {
+                    TPrimaryButton(title: queryIsVod || queryIsClip ? store.t("btn_open") : store.t("btn_search")) {
                         queryFocused = false
                         Task { await submit() }
                     }
@@ -195,9 +209,9 @@ struct SearchView: View {
                 // Indique ce qui va se passer : l'utilisateur n'a pas à deviner.
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                     HStack(spacing: TSpace.xs) {
-                        Image(systemName: queryIsVod ? "play.rectangle.fill" : "person.fill")
+                        Image(systemName: queryIsClip ? "scissors" : queryIsVod ? "play.rectangle.fill" : "person.fill")
                             .font(.system(size: 10))
-                        Text(queryIsVod ? store.t("hint_is_vod") : store.t("hint_is_channel"))
+                        Text(store.t(queryIsClip ? "hint_is_clip" : queryIsVod ? "hint_is_vod" : "hint_is_channel"))
                             .font(.tMeta)
                     }
                     .foregroundColor(.tMuted)
@@ -248,6 +262,12 @@ struct SearchView: View {
             if let login = initialChannel, searchedName.isEmpty, !loading {
                 Task { await searchChannel(login) }
             }
+        }
+        // Page quittée (autre onglet, feuille fermée) : une reconstruction en
+        // cours n'ouvre plus le lecteur après coup.
+        .onDisappear {
+            recoverTask?.cancel()
+            recoverTask = nil
         }
     }
 
@@ -460,6 +480,15 @@ struct SearchView: View {
                     Button(store.t("cancel"), role: .cancel) {}
                 }
                 .padding(.horizontal, TSpace.lg)
+
+                // Twitch a refusé (limite de suivis, chaîne qui bloque…) : le
+                // cœur garde son état, et on le dit au lieu de ne rien faire.
+                if let code = follow.lastError {
+                    Text(store.t("follow_failed") + (code.isEmpty ? "" : " (\(code))"))
+                        .font(.tMeta).foregroundColor(.tDanger)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, TSpace.lg)
+                }
             }
 
             // Chaîne masquée des listes de découverte : la réafficher d'ici.
@@ -542,7 +571,7 @@ struct SearchView: View {
                                         // Défilement infini : charge la suite quand la
                                         // dernière VOD apparaît.
                                         guard vod.id == filteredVods.last?.id,
-                                              hasMoreVods, !isLoadingMore else { return }
+                                              hasMoreVods, !isLoadingMore, !searchingOlder else { return }
                                         isLoadingMore = true
                                         Task { await loadMoreVods() }
                                     }
@@ -550,22 +579,31 @@ struct SearchView: View {
                                     UnlistedVodCardView(stream: s,
                                                         resolving: resolvingID == s.streamID,
                                                         gone: goneIDs.contains(s.streamID)) {
-                                        Task { await recover(s) }
+                                        // Une seule à la fois : la tâche gardée est
+                                        // celle qui tourne vraiment.
+                                        guard resolvingID == nil else { return }
+                                        recoverTask = Task { await recover(s) }
                                     }
                                 }
                             }
                         }
                         .padding(.horizontal, TSpace.lg)
+                    }
 
-                        if isLoadingMore {
-                            TLoader()
-                        } else if vodsMoreFailed {
-                            TLoadMoreButton(busy: false) {
-                                isLoadingMore = true
-                                Task { await loadMoreVods() }
-                            }
-                        } else if vodsRefused {
-                            TListEndNote(key: "more_unavailable")
+                    if isLoadingMore || searchingOlder {
+                        TLoader()
+                    } else if vodsMoreFailed {
+                        TLoadMoreButton(busy: false) {
+                            isLoadingMore = true
+                            Task { await loadMoreVods() }
+                        }
+                    } else if vodsRefused {
+                        TListEndNote(key: "more_unavailable")
+                    } else if !filterText.trimmingCharacters(in: .whitespaces).isEmpty, vodCursor != nil {
+                        // Le filtre ne voit que les VODs chargées : sans
+                        // correspondance, rien ne demandait la suite.
+                        TLoadMoreButton(busy: false, titleKey: "vods_search_older") {
+                            Task { await searchOlderVods() }
                         }
                     }
                 }
@@ -729,7 +767,10 @@ struct SearchView: View {
         let login = searchedName.lowercased()
         guard !login.isEmpty else { return }
         let key = "\(login)|\(clipPeriod)"
-        if clipsFor == key, !clips.isEmpty { return }
+        // Retour sur la période déjà affichée (« 24 h » puis aussitôt
+        // « Semaine ») : la demande en route pour l'autre sera écartée, rien
+        // ne remettrait le chargeur à faux.
+        if clipsFor == key, !clips.isEmpty { loadingClips = false; return }
         loadingClips = true
         let result = await getClipsPage(login: login, period: clipPeriod, after: nil)
         guard key == "\(searchedName.lowercased())|\(clipPeriod)" else { return }
@@ -807,10 +848,18 @@ struct SearchView: View {
     /// ne la sert plus, sa carte le dit ; un nouvel essai reste possible.
     @MainActor private func recover(_ s: RecoverableStream) async {
         guard resolvingID == nil else { return }
+        let login = searchedName
         resolvingID = s.streamID
         goneIDs.remove(s.streamID)
         let links = await recovery.resolve(s)
+        // Abandonnée (autre chaîne ouverte, page quittée) : rien ne s'ouvre,
+        // et la carte n'est pas marquée perdue.
+        guard !Task.isCancelled, login == searchedName else {
+            if resolvingID == s.streamID { resolvingID = nil }
+            return
+        }
         resolvingID = nil
+        recoverTask = nil
         if let links, !links.isEmpty {
             onRecovered(RecoveredVod(
                 streamID: s.streamID,
@@ -826,6 +875,13 @@ struct SearchView: View {
     @MainActor private func submit() async {
         let raw = query.trimmingCharacters(in: .whitespaces)
         guard !raw.isEmpty else { return }
+        // Lien de clip : lu tout de suite. Avant, « clips.twitch.tv/Slug »
+        // cherchait une chaîne « slug » et « twitch.tv/x/clip/… » ouvrait x.
+        if let slug = clipSlugFromInput(raw) {
+            suggestions = []
+            onPlayClip(slug, nil)
+            return
+        }
         if queryIsVod { await openVod(raw) } else { await searchChannel(raw) }
     }
 
@@ -844,6 +900,9 @@ struct SearchView: View {
         guard !(m3u8.links.isEmpty && m3u8.error != nil) else {
             errorMsg = m3u8.error; return
         }
+        // « ?t=1h2m3s » du lien : la VOD part de là (le lecteur reprend à la
+        // position enregistrée).
+        if let start = vodStartFromInput(raw) { store.setVodProgress(vodId, time: start) }
         // La lecture passe par le lecteur global : l'historique y est enregistré.
         onPlayVod(vodId, meta?.title ?? "VOD \(vodId)", meta?.thumb, meta?.streamer)
     }
@@ -854,27 +913,48 @@ struct SearchView: View {
         let login = loginFromInput(name)
         guard !login.isEmpty else { return }
 
-        loading = true; errorMsg = nil; liveData = nil; vods = []
+        loading = true; errorMsg = nil; liveData = nil; lastBroadcastAt = nil; vods = []
         // Le suivi de la chaîne précédente ne doit ni s'afficher ni se modifier ici.
         follow.reset(); confirmUnfollow = false
         filterText = ""; searchedName = login; suggestions = []
-        channelTab = 0; clips = []; clipsFor = ""
+        channelTab = 0; clips = []; clipsFor = ""; loadingClips = false
         clipsLocked = false; clipsCursor = nil; loadingMoreClips = false
         about = nil; aboutFor = ""; loadingAbout = false
+        // Reconstruction de la chaîne précédente : abandonnée.
+        recoverTask?.cancel(); recoverTask = nil
         resolvingID = nil; goneIDs = []
         playlists = []; playlistsFor = ""; loadingPlaylists = false
         highlights = []; highlightsFor = ""; loadingHighlights = false
         vodCursor = nil; hasMoreVods = false; isLoadingMore = false
-        vodsRefused = false; vodsMoreFailed = false
+        vodsRefused = false; vodsMoreFailed = false; searchingOlder = false
 
-        async let liveTask   = getLive(channelName: login)
+        // Lien vers une page du site (« twitch.tv/settings »), ou saisie qui
+        // ne peut pas être un nom de chaîne : inutile de demander à Twitch.
+        guard isValidLogin(login) else {
+            errorMsg = store.t("not_found")
+            searchedName = ""
+            loading = false
+            return
+        }
+
+        // Le bandeau ne demande que les infos de la chaîne : plus de
+        // résolution du direct (proxys, jusqu'à une minute par miroir muet),
+        // que « Regarder » refait de toute façon.
+        async let infoTask   = getChannelInfo(channelName: login)
         async let videosTask = getChannelVideos(channelName: login)
-        let (live, ch) = await (liveTask, videosTask)
+        let (info, ch) = await (infoTask, videosTask)
+        let live = info.live
+
+        // Une autre recherche est partie pendant l'attente (ou une VOD a été
+        // ouverte) : c'est elle qui conclut ; ces résultats ne s'écrivent pas
+        // sous son nom.
+        guard login == searchedName else { return }
 
         avatarURL = live.avatar ?? ch.avatar ?? ""
 
         if live.error != nil && ch.error != nil && live.avatar == nil {
-            errorMsg = store.t("not_found")
+            // Twitch n'a pas répondu : ce n'est pas « introuvable ».
+            errorMsg = store.t(live.error == "network" ? "err_loading" : "not_found")
             searchedName = ""
         } else {
             // Photo gardée dans l'historique, comme le site l'y met.
@@ -884,6 +964,7 @@ struct SearchView: View {
                 addedAt: Date().timeIntervalSince1970 * 1000,
                 avatar: avatarURL.isEmpty ? nil : avatarURL))
             liveData    = live
+            lastBroadcastAt = info.lastStart
             Task { await loadFollowState(login: login, channelId: live.userId) }
             vods        = ch.videos
             vodCursor   = ch.cursor
@@ -932,11 +1013,29 @@ struct SearchView: View {
         hasMoreVods = ch.cursor != nil && !fresh.isEmpty
     }
 
+    /// Filtre par mot-clé : il ne voit que les VODs chargées. Page après
+    /// page (5 au plus par toucher, soit 500 VODs), jusqu'à ce que la suite
+    /// apporte une nouvelle correspondance, s'arrête ou échoue.
+    @MainActor private func searchOlderVods() async {
+        let login = searchedName.lowercased()
+        guard !login.isEmpty, !searchingOlder, !isLoadingMore else { return }
+        searchingOlder = true
+        defer { searchingOlder = false }
+        let before = filteredVods.count
+        for _ in 0..<5 {
+            guard vodCursor != nil, login == searchedName.lowercased() else { break }
+            isLoadingMore = true
+            await loadMoreVods()
+            guard login == searchedName.lowercased() else { break }
+            if filteredVods.count > before || vodsMoreFailed || vodsRefused { break }
+        }
+    }
+
     /// Suggestions de chaînes, différées de 300 ms pour ne pas appeler à chaque frappe.
     private func suggest(_ text: String) {
         suggestTask?.cancel()
         let t = text.trimmingCharacters(in: .whitespaces)
-        guard t.count >= 2, !queryIsVod else { suggestions = []; return }
+        guard t.count >= 2, !queryIsVod, !queryIsClip else { suggestions = []; return }
         suggestTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }

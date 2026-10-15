@@ -423,6 +423,13 @@ struct ClipCardView: View {
         return parts.joined(separator: " · ")
     }
 
+    /// « 0:28 » : un clip dure une minute au plus, formatDuration (heures et
+    /// minutes) affichait « 0min » sur presque toutes les cartes.
+    private var durationText: String {
+        let s = max(0, clip.durationSeconds)
+        return "\(s / 60):" + String(format: "%02d", s % 60)
+    }
+
     var body: some View {
         Button(action: onPress) {
             VStack(alignment: .leading, spacing: 0) {
@@ -442,7 +449,7 @@ struct ClipCardView: View {
                         Spacer()
                         HStack {
                             Spacer()
-                            Text(formatDuration(clip.durationSeconds))
+                            Text(durationText)
                                 .font(.tBadge).foregroundColor(.white)
                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                 .background(Color.black.opacity(0.65)).cornerRadius(4)

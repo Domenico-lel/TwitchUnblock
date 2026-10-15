@@ -780,6 +780,48 @@ func getStreamStats(channelName: String) async -> (viewerCount: Int, startedAt: 
     return (viewerCount, startedAt)
 }
 
+// MARK: – Page d'une chaîne (bandeau)
+/// Ce qu'affiche la page d'une chaîne, en une requête GQL publique : avatar,
+/// identifiant, direct en cours (titre, jeu, spectateurs, aperçu, début) et
+/// début du dernier live (`lastStart`, pour « hors ligne depuis » quand le
+/// dernier live n'a pas laissé de VOD). Sans résoudre les liens du direct :
+/// getLive essayait toutes les sources (jusqu'à une minute par miroir muet)
+/// avant d'afficher la page, et « Regarder » les résout de toute façon.
+/// `live.error` : "offline" hors ligne, "Streamer introuvable" si la chaîne
+/// n'existe pas, "network" si Twitch n'a pas répondu.
+func getChannelInfo(channelName: String) async -> (live: LiveData, lastStart: String?) {
+    let login = channelName.trimmingCharacters(in: .whitespaces).lowercased()
+    let q = """
+    query($l: String!) { user(login: $l) {
+        id profileImageURL(width: 70)
+        lastBroadcast { startedAt }
+        stream { title game { name } previewImageURL(width: 320, height: 180) viewersCount createdAt }
+    } }
+    """
+    guard let d = await gqlRequest(q, ["l": login]) else {
+        logger.warn("VIDEOS", "Page de \"\(login)\" : Twitch ne répond pas")
+        return (LiveData(title: "", game: "", thumbnail: "", error: "network"), nil)
+    }
+    guard let user = d["user"] as? [String: Any] else {
+        logger.warn("VIDEOS", "Streamer \"\(login)\" introuvable")
+        return (LiveData(title: "", game: "", thumbnail: "", error: "Streamer introuvable"), nil)
+    }
+    let avatar = user["profileImageURL"] as? String
+    let userId = user["id"] as? String
+    let lastStart = (user["lastBroadcast"] as? [String: Any])?["startedAt"] as? String
+    guard let stream = user["stream"] as? [String: Any] else {
+        return (LiveData(title: "Hors ligne", game: "", thumbnail: "", avatar: avatar,
+                         userId: userId, error: "offline"), lastStart)
+    }
+    return (LiveData(title: stream["title"] as? String ?? "",
+                     game: (stream["game"] as? [String: Any])?["name"] as? String ?? "",
+                     thumbnail: stream["previewImageURL"] as? String ?? "",
+                     avatar: avatar, userId: userId,
+                     viewerCount: stream["viewersCount"] as? Int ?? 0,
+                     startedAt: parseTwitchDate(stream["createdAt"] as? String)),
+            lastStart)
+}
+
 // MARK: – getChannelVideos
 func getChannelVideos(channelName: String, cursor: String? = nil) async -> (videos: [VodData], avatar: String?, error: String?, cursor: String?) {
     let page = await getChannelVideosPage(channelName: channelName, cursor: cursor)
@@ -1224,19 +1266,61 @@ func isVodInput(_ input: String) -> Bool {
     return t.allSatisfy(\.isNumber) && t.count >= 8
 }
 
+/// Pages du site de Twitch, pas des chaînes (« twitch.tv/directory »,
+/// « twitch.tv/settings/profile »…).
+private let twitchSitePaths: Set<String> = [
+    "videos", "directory", "settings", "subscriptions", "inventory", "wallet", "drops",
+    "search", "downloads", "jobs", "p", "collections", "moderator", "popout", "embed",
+    "login", "signup", "logout", "payments",
+]
+
 /// Chaîne désignée par une saisie : le premier mot en minuscules, sans
 /// « @ », ou la chaîne d'un lien Twitch collé (« twitch.tv/xqc »,
-/// « https://www.twitch.tv/xqc/clips »). Pas forcément un nom valide :
-/// voir `isValidLogin`.
+/// « https://www.twitch.tv/xqc/clips »). Un lien vers une page du site ou
+/// vers un clip (clips.twitch.tv) n'en désigne pas : la saisie reste telle
+/// quelle. Pas forcément un nom valide : voir `isValidLogin`.
 func loginFromInput(_ input: String) -> String {
     var login = input.trimmingCharacters(in: .whitespaces)
         .components(separatedBy: " ").first?.lowercased() ?? ""
-    if let r = login.range(of: #"twitch\.tv/([a-z0-9_]{1,25})"#, options: .regularExpression) {
+    if login.range(of: #"(^|[/.])clips\.twitch\.tv/"#, options: .regularExpression) == nil,
+       let r = login.range(of: #"twitch\.tv/([a-z0-9_]{1,25})"#, options: .regularExpression) {
         let path = login[r].replacingOccurrences(of: "twitch.tv/", with: "")
-        if !["videos", "directory"].contains(path) { login = path }
+        if !twitchSitePaths.contains(path) { login = path }
     }
     if login.hasPrefix("@") { login.removeFirst() }
     return login
+}
+
+private let clipLinkPattern = try? NSRegularExpression(
+    pattern: #"^(?:https?://)?(?:www\.|m\.)?(?:clips\.twitch\.tv/|twitch\.tv/[a-z0-9_]+/clip/)([A-Za-z0-9_-]{3,100})"#,
+    options: [.caseInsensitive])
+private let twitchTimePattern = try? NSRegularExpression(
+    pattern: #"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$"#, options: [.caseInsensitive])
+
+/// Clip désigné par un lien (« clips.twitch.tv/Slug »,
+/// « twitch.tv/chaine/clip/Slug »), nil sinon. Même règle que le site
+/// (clipSlugFrom) ; la casse du slug compte.
+func clipSlugFromInput(_ input: String) -> String? {
+    let t = input.trimmingCharacters(in: .whitespaces)
+    guard let m = clipLinkPattern?.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)),
+          let r = Range(m.range(at: 1), in: t) else { return nil }
+    return String(t[r])
+}
+
+/// Instant de départ d'un lien de VOD (« ?t=1h2m3s », « &t=3723s »,
+/// « ?t=3723 »), en secondes ; nil sans « t » ou s'il est nul. Même règle
+/// que le site (twitchTime).
+func vodStartFromInput(_ input: String) -> Double? {
+    guard let r = input.range(of: #"[?&]t=[^&#\s]+"#, options: .regularExpression) else { return nil }
+    let raw = String(input[r].drop(while: { $0 != "=" }).dropFirst())
+    guard let m = twitchTimePattern?.firstMatch(in: raw, range: NSRange(raw.startIndex..., in: raw))
+    else { return nil }
+    func part(_ i: Int) -> Int {
+        guard let r = Range(m.range(at: i), in: raw) else { return 0 }
+        return Int(raw[r]) ?? 0
+    }
+    let seconds = part(1) * 3600 + part(2) * 60 + part(3)
+    return seconds > 0 ? Double(seconds) : nil
 }
 
 /// Nom de chaîne Twitch possible : 1 à 25 caractères parmi a-z, 0-9 et « _ ».

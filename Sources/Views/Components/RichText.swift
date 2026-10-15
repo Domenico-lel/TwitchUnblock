@@ -14,6 +14,14 @@ func richText(_ raw: String, markdown: Bool = false) -> AttributedString {
     if markdown, let md = try? AttributedString(
         markdown: raw, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
         out = md
+        // Liens Markdown : adresses web seulement, comme les liens nus.
+        // « [Code promo](shortcuts://…) » dans un panneau lançait Raccourcis
+        // (ou itms-services://, twitchunblock://…).
+        let unsafe = out.runs.compactMap { run -> Range<AttributedString.Index>? in
+            guard let url = run.link else { return nil }
+            return ["http", "https"].contains(url.scheme?.lowercased() ?? "") ? nil : run.range
+        }
+        for r in unsafe { out[r].link = nil }
     }
     guard let linkDetector else { return out }
     let plain = String(out.characters)

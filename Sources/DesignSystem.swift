@@ -363,6 +363,8 @@ struct TMeta: View {
 // MARK: – Bouton de pagination
 struct TLoadMoreButton: View {
     let busy: Bool
+    /// Clé de traduction du libellé (« Charger plus » par défaut).
+    var titleKey = "load_more"
     let action: () -> Void
     @EnvironmentObject private var store: AppStore
 
@@ -372,7 +374,7 @@ struct TLoadMoreButton: View {
                 if busy {
                     ProgressView().tint(.tPrimary)
                 } else {
-                    Text(store.t("load_more")).font(.tLabel).foregroundColor(.tPrimary)
+                    Text(store.t(titleKey)).font(.tLabel).foregroundColor(.tPrimary)
                 }
             }
             .frame(maxWidth: .infinity)
