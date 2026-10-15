@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.60",
+          "buildVersion": "291",
+          "date": "2026-10-15",
+          "localizedDescription": "- While a live loads, the player says which source it's trying and can be minimized or closed; the screen now only stays awake while a video plays on screen (paused, minimized or audio only, it sleeps).\n- Apple's player (immersive player off) resumes VODs and clips where they were, even after a quality change, and its lock screen activity follows pause and progress; the sleep timer now also stops multi-live.\n- Closing the player or starting another video during Picture in Picture now ends it cleanly, changing quality keeps your place, and a stream that drops shows a Retry button instead of freezing.\n- When no source can play a live stream, or Twitch doesn't answer, the player now says so with a Retry button instead of calling the channel offline; lives also start when Twitch's own API is unreachable.\n- Cloud sync keeps each Twitch account's history apart, and a VOD or channel you delete in the app is removed from the backup right away.\n- A category you follow on Twitch now shows as followed on its page and can be unfollowed there; category lists get Retry and pull to refresh.\n- Search opens clip links and starts VOD links at their ?t= time; channel pages open faster, and the VOD filter can look through older VODs.\n- Restoring an expired Twitch web session now asks you to sign in again, and drops stop counting for an account you signed out of.\n- Playback resumes on its own after a call or another app's audio: VODs where they left off, live streams back at live.\n- Opening the app no longer stops music playing in another app: the sound only switches over when a video starts, and goes back to that app when you close the player.\n- Other improvements and fixes",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-291/TwitchUnblock.ipa",
+          "size": 3522836,
+          "commit": "3943049b19d76f2fd0bc399e95ff3ba98f223adf"
+        },
+        {
           "version": "1.3.36",
           "buildVersion": "290",
           "date": "2026-10-15",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-259/TwitchUnblock.ipa",
           "size": 2596972,
           "commit": "eaaf0d39e0ead64052b8bc59fdd320872d99eb91"
-        },
-        {
-          "version": "1.2.33",
-          "buildVersion": "258",
-          "date": "2026-10-11",
-          "localizedDescription": "- Download a whole VOD or just a part of it (from one time to another) to watch offline, from the player's ⋯ menu. Parts muted for copyrighted music keep their original sound while Twitch still has it. Your downloads are in the My VODs tab.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-258/TwitchUnblock.ipa",
-          "size": 2542788,
-          "commit": "9284438af8a98715ec531b42ae0d832573ca963c"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.36",
+      "version": "1.3.60",
       "versionDate": "2026-10-15",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-290/TwitchUnblock.ipa",
-      "size": 3390174
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-291/TwitchUnblock.ipa",
+      "size": 3522836
     }
   ],
   "news": []
