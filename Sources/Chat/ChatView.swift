@@ -13,11 +13,15 @@ struct ChatView: View {
     /// Présentation : plein cadre, colonne étroite, ou calque sur l'image.
     var style: ChatStyle = .standard
     var onJoinChannel: (String) -> Void = { _ in }   // raid → bascule vers une autre chaîne
+    /// « Voir la chaîne » dans la fiche d'une emote. Faux en multi-live : la
+    /// mosaïque est plein écran, la page s'ouvrirait dessous.
+    var opensChannelPages = true
 
     @EnvironmentObject private var store: AppStore
     @StateObject private var chat          = ChatService()
     @StateObject private var pointsService = ChannelPointsService()
     @StateObject private var pubsub        = ChatPubSub()
+    @StateObject private var dropsNotice   = ChannelDropsNotice()
     @StateObject private var follow        = FollowService()
     @StateObject private var events        = LiveEventsService()
     @StateObject private var raidService   = RaidService()
@@ -35,6 +39,13 @@ struct ChatView: View {
     @State private var threadRoot: ChatMessage? = nil   // fil de discussion ouvert
     @State private var pinnedExpanded   = false   // bandeau épinglé déplié
     @State private var dismissedPinId: String? = nil   // épingle réduite en pastille
+    /// Sondages, prédictions et hype trains fermés (×), par `noticeKey` :
+    /// gardés tant que ce chat vit (mini-lecteur, rotation compris).
+    @State private var closedNotices: Set<String> = []
+    /// « Ne plus suivre » touché : on demande d'abord confirmation.
+    @State private var confirmUnfollow = false
+    /// Emote ou badge touché : sa fiche (nom exact, source, copier).
+    @State private var infoItem: ChatInfoItem? = nil
     @State private var chromeWidth: CGFloat = 320
     @State private var isSetup          = false   // chat/points déjà initialisés
     @State private var teardownWork: DispatchWorkItem? = nil   // anti-rebond plein écran
@@ -46,16 +57,19 @@ struct ChatView: View {
 
     private let bottomAnchor = "chat_bottom_anchor"   // sentinelle de bas de liste
 
-    private var canSendMessages: Bool { token != nil && login != nil }
+    /// Faux aussi en lecture seule (compte banni de ce chat) : plus de champ,
+    /// de sélecteur d'emotes, de réponse ni de commandes.
+    private var canSendMessages: Bool { token != nil && login != nil && !chat.readOnly }
     private var canSend: Bool {
         chat.isConnected && chat.isAuthenticated &&
         !messageText.trimmingCharacters(in: .whitespaces).isEmpty &&
         messageText.count <= 500
     }
 
-    /// Décor autour des messages : statut de connexion, épinglés, sondages,
-    /// raids. En paysage la colonne est étroite et ce bandeau lui mangeait la
-    /// moitié de la hauteur utile — d'où `ChatStyle.showsChrome`.
+    /// Barre de statut au-dessus des messages : connexion, synchro, suivre,
+    /// épingle réduite. En paysage la colonne est étroite et elle lui
+    /// mangeait la hauteur utile — d'où `ChatStyle.showsChrome`. Les bandeaux
+    /// (épinglé, drops, sondages, raid) sont à part : voir `notices`.
     @ViewBuilder private var chrome: some View {
         VStack(spacing: 0) {
 
@@ -64,9 +78,10 @@ struct ChatView: View {
                 // Seul le point dit l'état de la connexion : la place va aux
                 // pastilles utiles (synchro, série, suivre, épinglé).
                 Circle()
-                    .fill(chat.isConnected ? Color.tSuccess : Color.tDanger)
+                    .fill(chat.readOnly ? Color.tWarning : (chat.isConnected ? Color.tSuccess : Color.tDanger))
                     .frame(width: 7, height: 7)
-                    .accessibilityLabel(chat.isConnected ? store.t("chat_connected") : store.t("chat_connecting"))
+                    .accessibilityLabel(chat.readOnly ? store.t("chat_ban_banner")
+                                        : chat.isConnected ? store.t("chat_connected") : store.t("chat_connecting"))
                 Spacer(minLength: 4)
                 // Synchro auto : décalage appliqué au chat. Un appui le retouche
                 // d'une seconde : le bon réglage dépend aussi du retard des
@@ -113,10 +128,20 @@ struct ChatView: View {
                     .padding(.horizontal, 6).padding(.vertical, 3)
                     .background(Color.tWarning.opacity(0.15)).cornerRadius(6)
                 }
-                // Bouton Suivre / Ne plus suivre
+                // Bouton Suivre / Ne plus suivre. Juste sous la vidéo en
+                // portrait, à portée de pouce : ne plus suivre se confirme
+                // (sur Twitch avec la session web, et les notifications avec).
                 if store.showFollowButton, let following = follow.isFollowing {
                     Button {
-                        Task { await follow.toggle(token: store.twitchWebToken) }
+                        if follow.isFollowing == true {
+                            confirmUnfollow = true
+                            return
+                        }
+                        Task { @MainActor in
+                            await follow.toggle(token: store.twitchWebToken)
+                            // Suivie (aussi sur Twitch) : plus masquée des listes.
+                            if follow.isFollowing == true { store.unhideChannel(channelName) }
+                        }
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: following ? "heart.fill" : "heart")
@@ -134,6 +159,23 @@ struct ChatView: View {
                     }
                     .disabled(follow.busy)
                     .opacity(follow.busy ? 0.5 : 1)
+                    .confirmationDialog(
+                        store.t("unfollow_confirm").replacingOccurrences(of: "{c}", with: channelName),
+                        isPresented: $confirmUnfollow, titleVisibility: .visible
+                    ) {
+                        // Action explicite, jamais une bascule : un statut relu
+                        // entre-temps ne peut pas la changer en abonnement.
+                        Button(store.t("unfollow"), role: .destructive) {
+                            Task { @MainActor in await follow.unfollow(token: store.twitchWebToken) }
+                        }
+                        Button(store.t("follow_hide_button")) {
+                            store.showFollowButton = false
+                            logger.settingChanged("Bouton suivre", value: "désactivé")
+                        }
+                        Button(store.t("cancel"), role: .cancel) {}
+                    } message: {
+                        Text(store.t("follow_hide_hint"))
+                    }
                 }
                 // Épingle réduite : une pastille la rouvre.
                 if store.showPinnedMessages, let pin = pubsub.pinned, pin.id == dismissedPinId {
@@ -150,6 +192,12 @@ struct ChatView: View {
                     }
                     .fixedSize()
                 }
+                // Bandeaux fermés (×) : une seule pastille les rouvre tous.
+                if !closedKinds.isEmpty {
+                    ClosedNoticesChip(kinds: closedKinds, pollEnds: pollEnds,
+                                      predictionEnds: predictionEnds,
+                                      hypeEnds: hypeEnds) { reopenClosedNotices() }
+                }
             }
             // Hauteur stable même quand seul le point est affiché.
             .frame(minHeight: 22)
@@ -162,7 +210,14 @@ struct ChatView: View {
             })
             .background(Color.tCard)
             .overlay(Divider().background(Color.tBorder), alignment: .bottom)
+        }
+    }
 
+    /// Bandeaux du salon : message épinglé, drops de la chaîne, sondages,
+    /// prédictions, raid. Affichés aussi sans la barre de statut (chat en
+    /// paysage, posé sur l'image) : avant, ils disparaissaient avec elle.
+    @ViewBuilder private var notices: some View {
+        VStack(spacing: 0) {
             // ── Message épinglé ─────────────────────────────────────
             // Replié, il garde sa place ; déplié, il s'affiche par-dessus le chat
             // au lieu de le pousser : le chat ne bouge pas et continue de défiler.
@@ -177,9 +232,19 @@ struct ChatView: View {
                 .transition(.opacity)
             }
 
+            // ── Drops de la chaîne (carte à fermer) ─────────────────
+            if store.showDropsNotice, let campaign = dropsNotice.campaign {
+                DropsNoticeCard(campaign: campaign) {
+                    withAnimation(.easeInOut(duration: 0.18)) { dropsNotice.dismiss(campaign) }
+                }
+                .transition(.opacity)
+            }
+
             // ── Événements live (sondage / prédiction / hype train) ─
             if store.showLiveEvents {
-                LiveEventsBanner(events: events, points: pointsService)
+                LiveEventsBanner(events: events, points: pointsService, closed: closedNotices) { key in
+                    withAnimation(.easeInOut(duration: 0.18)) { _ = closedNotices.insert(key) }
+                }
             }
 
             // ── Raid sortant ────────────────────────────────────────
@@ -213,6 +278,95 @@ struct ChatView: View {
         }
     }
 
+    /// Bandeaux présents, dans l'ordre d'affichage (épingle réduite comprise).
+    private var activeNotices: [ChatNoticeKind] {
+        var kinds: [ChatNoticeKind] = []
+        if store.showPinnedMessages, pubsub.pinned != nil { kinds.append(.pinned) }
+        if store.showDropsNotice, dropsNotice.campaign != nil { kinds.append(.drops) }
+        if store.showLiveEvents {
+            if events.poll != nil { kinds.append(.poll) }
+            if events.prediction != nil { kinds.append(.prediction) }
+            if events.hype != nil { kinds.append(.hype) }
+        }
+        if store.enableRaids, raidService.raid != nil { kinds.append(.raid) }
+        return kinds
+    }
+
+    /// Événements présents dont le bandeau a été fermé (×) : leur pastille.
+    private var closedKinds: [ChatNoticeKind] {
+        guard store.showLiveEvents, !closedNotices.isEmpty else { return [] }
+        var kinds: [ChatNoticeKind] = []
+        if let p = events.poll, closedNotices.contains(p.noticeKey) { kinds.append(.poll) }
+        if let p = events.prediction, closedNotices.contains(p.noticeKey) { kinds.append(.prediction) }
+        if let h = events.hype, closedNotices.contains(h.noticeKey) { kinds.append(.hype) }
+        return kinds
+    }
+
+    /// Fin d'un sondage ou d'une prédiction encore ouverts (comptes à rebours
+    /// des icônes).
+    private var pollEnds: Date? { events.poll.flatMap { $0.isActive ? $0.endsAt : nil } }
+    private var predictionEnds: Date? {
+        events.prediction.flatMap { $0.locked || $0.winnerId != nil ? nil : $0.closesAt }
+    }
+    /// Fin de l'approche ou du niveau en cours (nil sur l'écran de fin).
+    private var hypeEnds: Date? { events.hype?.endsAt }
+
+    /// Clés des événements présents (sondage, prédiction, hype train).
+    private var liveNoticeKeys: Set<String> {
+        var keys: Set<String> = []
+        if let p = events.poll { keys.insert(p.noticeKey) }
+        if let p = events.prediction { keys.insert(p.noticeKey) }
+        if let h = events.hype { keys.insert(h.noticeKey) }
+        return keys
+    }
+
+    private func reopenClosedNotices() {
+        withAnimation(.easeInOut(duration: 0.18)) { closedNotices = [] }
+    }
+
+    /// Les bandeaux, et en paysage (sans barre de statut) de quoi les replier :
+    /// la colonne est étroite, un sondage et une prédiction la remplissaient.
+    /// Repliés, ils tiennent sur une ligne d'icônes qui les rouvre ; le choix
+    /// est retenu (Réglages → Personnaliser).
+    @ViewBuilder private var noticesArea: some View {
+        if style.showsChrome {
+            notices
+        } else if !activeNotices.isEmpty {
+            if store.landscapeNoticesHidden {
+                CollapsedNoticesBar(
+                    kinds: activeNotices,
+                    pollEnds: pollEnds,
+                    predictionEnds: predictionEnds,
+                    hypeEnds: hypeEnds
+                ) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        dismissedPinId = nil
+                        closedNotices = []
+                        store.landscapeNoticesHidden = false
+                    }
+                }
+                .transition(.opacity)
+            } else {
+                notices
+                NoticesHideStrip(
+                    // Sa pastille vit dans la barre de statut, absente ici.
+                    showPinChip: pubsub.pinned.map { $0.id == dismissedPinId } ?? false,
+                    onReopenPin: { withAnimation(.easeInOut(duration: 0.18)) { dismissedPinId = nil } },
+                    closedKinds: closedKinds,
+                    pollEnds: pollEnds,
+                    predictionEnds: predictionEnds,
+                    hypeEnds: hypeEnds,
+                    onReopenClosed: { reopenClosedNotices() },
+                    onHide: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            pinnedExpanded = false
+                            store.landscapeNoticesHidden = true
+                        }
+                    })
+            }
+        }
+    }
+
     var body: some View {
         content
             // Message épinglé déplié : par-dessus tout le chat, à la place exacte
@@ -233,18 +387,36 @@ struct ChatView: View {
                     }
                 }
             }
+            .sheet(item: $infoItem) { item in
+                ChatInfoSheet(item: item, channelId: channelId,
+                              onInsert: canSendMessages ? { (e: TwitchEmote) in insertEmote(e); infoItem = nil } : nil,
+                              onOpenChannel: opensChannelPages ? { (login: String) in
+                                  // Une seule feuille à la fois : la fiche se ferme
+                                  // avant que la page s'ouvre (le lecteur se réduit).
+                                  infoItem = nil
+                                  DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                      store.openChannelPage(login)
+                                  }
+                              } : nil)
+                    .environmentObject(store)
+            }
+            // Toucher une emote ou un badge (messages, épinglé) : sa fiche.
+            .environment(\.chatInfoAction, { infoItem = $0 })
     }
 
     private var content: some View {
         VStack(spacing: 0) {
 
             if style.showsChrome { chrome }
+            noticesArea
 
             // ── Zone principale ─────────────────────────────────────
             if showEmotePicker && canSendMessages {
-                EmotePickerView(channelId: channelId) { emote in
-                    insertEmote(emote)
-                }
+                // Appui long sur une emote : sa fiche (le sélecteur est dans la
+                // vue, pas dans une feuille : aucun conflit).
+                EmotePickerView(channelId: channelId,
+                                onSelect: { emote in insertEmote(emote) },
+                                onInfo: { emote in infoItem = .emote(emote) })
                 .transition(.asymmetric(
                     insertion: .move(edge: .bottom).combined(with: .opacity),
                     removal:   .move(edge: .bottom).combined(with: .opacity)
@@ -346,7 +518,8 @@ struct ChatView: View {
             }
 
             // ── Barre d'envoi ───────────────────────────────────────
-            if canSendMessages { inputBar }
+            // Compte banni de ce chat : un bandeau à la place du champ.
+            if chat.readOnly { readOnlyBar } else if canSendMessages { inputBar }
         }
         .task(id: messageText) { await refreshEmoteSuggestions() }
         // Superposé à l'image : pas de fond opaque, mais un dégradé qui assombrit
@@ -400,7 +573,10 @@ struct ChatView: View {
         .sheet(isPresented: $showPointsSheet) {
             ChannelPointsSheet(service: pointsService) {
                 // L'utilisateur demande à connecter son compte pour les points.
-                webLoginClear   = pointsService.needsWebLogin && store.twitchWebToken != nil
+                // Session refusée (expirée, autre compte) : cookies effacés,
+                // sinon la page reprenait aussitôt l'ancienne session.
+                webLoginClear   = (pointsService.needsWebLogin && store.twitchWebToken != nil)
+                    || store.webSessionExpired || store.webSessionMismatch != nil
                 showPointsSheet = false
                 // Délai : éviter le conflit « fermeture + ouverture » de sheets simultanées.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -423,7 +599,7 @@ struct ChatView: View {
                 onCancel: { showWebLogin = false }
             )
         }
-        // ── Token web mis à jour → recharge les points ───────────────
+        // ── Token web mis à jour → recharge les points et le suivi ───
         .onChange(of: store.twitchWebToken) { newWebToken in
             guard let cid = channelId else { return }
             logger.info("POINTS", "Token web mis à jour → rechargement points",
@@ -437,7 +613,24 @@ struct ChatView: View {
                     viewerId:    store.twitchUserId
                 )
             }
+            // Sans ça, le bouton gardait le mode d'avant (appareil ou compte)
+            // et ne faisait plus rien, en silence.
+            // Bouton masqué : statut oublié, relu quand on le réactive.
+            if store.showFollowButton { Task { await loadFollow() } } else { follow.reset() }
         }
+        // Bouton Suivre réactivé pendant le live : il revient tout de suite.
+        .onChange(of: store.showFollowButton) { show in
+            guard show, follow.isFollowing == nil else { return }
+            Task { await loadFollow() }
+        }
+        // Événement terminé : sa fermeture (×) est oubliée, le suivant
+        // s'affiche même s'il reprend la même clé (id absent).
+        .onChange(of: liveNoticeKeys) { keys in
+            closedNotices.formIntersection(keys)
+        }
+        // Événements masqués ou réaffichés pendant le live : le relevé du
+        // hype train (toutes les 5 s pendant une approche) suit.
+        .onChange(of: store.showLiveEvents) { events.setHypeEnabled($0) }
         // ── Token OAuth mis à jour → reconnecte uniquement l'IRC ──────
         .onChange(of: store.twitchToken) { newToken in
             guard let tok = newToken else { return }
@@ -468,6 +661,8 @@ struct ChatView: View {
                 guard !PlayerFullscreen.isActive else { return }   // plein écran → on garde tout actif
                 chat.disconnect()
                 pubsub.disconnect()
+                dropsNotice.stop()
+                if let cid = channelId { Task { await BTTVLive.shared.leave(channelId: cid) } }
                 events.stop()
                 raidService.disconnect()
                 pointsService.stopPolling()
@@ -482,27 +677,30 @@ struct ChatView: View {
 
     // MARK: – Setup initial
     private func setupChat() async {
-        await EmoteService.shared.loadGlobals()
-        if let cid = channelId {
-            await EmoteService.shared.loadChannel(channelId: cid, channelName: channelName)
+        // Emotes (globales, de la chaîne) et badges en parallèle avant la
+        // connexion : les messages sont découpés en emotes à la réception, le
+        // premier et l'historique doivent les trouver. Mais 3,5 s au plus :
+        // l'un après l'autre et sans délai propre, un service lent ou bloqué
+        // laissait le champ sur « Connecting… ». Le reste arrive derrière.
+        let cid = channelId, name = channelName, tok = token
+        // Salon déjà refusé à ce compte pendant la séance : bandeau d'emblée.
+        chat.prepare(channel: channelName, login: login)
+        let assets = Task {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await EmoteService.shared.loadGlobals() }
+                // Sans compte : BadgeService passe par la requête GQL publique.
+                group.addTask { await BadgeService.shared.loadGlobal(token: tok) }
+                if let cid {
+                    group.addTask { await EmoteService.shared.loadChannel(channelId: cid, channelName: name) }
+                    group.addTask { await BadgeService.shared.loadChannel(channelId: cid, token: tok) }
+                }
+            }
         }
-        // Sans compte : BadgeService passe par la requête GQL publique.
-        await BadgeService.shared.loadGlobal(token: token)
-        if let cid = channelId {
-            await BadgeService.shared.loadChannel(channelId: cid, token: token)
-        }
+        let ready = await finishes(assets, within: 3.5)
+        if !ready { logger.warn("CHAT", "Emotes et badges encore en chargement après 3,5 s", "connexion sans les attendre") }
+        // Chat refermé pendant l'attente : pas de connexion orpheline.
+        guard isSetup else { return }
         pointsService.autoClaim = store.autoClaimChest
-        // Points : on utilise le token de session web (cookie auth-token), pas l'OAuth.
-        // Si absent, load() affiche quand même les récompenses et signale needsWebLogin.
-        if let cid = channelId {
-            await pointsService.load(
-                channelLogin: channelName,
-                channelId:   cid,
-                token:       store.twitchWebToken ?? "",
-                userLogin:   login,
-                viewerId:    store.twitchUserId
-            )
-        }
         chat.channelId = channelId
         chat.displayDelay = chatDelay
         // Réglés AVANT la connexion : c'est elle qui déclenche le rejeu de
@@ -511,6 +709,20 @@ struct ChatView: View {
         chat.keepDeleted = store.chatShowDeleted
         chat.connect(channel: channelName, token: token, login: login)
 
+        if let cid = channelId {
+            // BTTV en direct : emotes personnelles (Pro), emotes ajoutées en live.
+            await BTTVLive.shared.join(channelId: cid)
+            // Points : on utilise le token de session web (cookie auth-token), pas l'OAuth.
+            // Si absent, load() affiche quand même les récompenses et signale needsWebLogin.
+            await pointsService.load(
+                channelLogin: channelName,
+                channelId:   cid,
+                token:       store.twitchWebToken ?? "",
+                userLogin:   login,
+                viewerId:    store.twitchUserId
+            )
+        }
+
         // Les services ci-dessous sont conditionnés par les réglages de personnalisation :
         // on n'ouvre pas de sondage/websocket inutile si l'option est désactivée.
         // Messages épinglés (PubSub) — nécessite un token + l'ID du canal.
@@ -518,26 +730,35 @@ struct ChatView: View {
         if store.showPinnedMessages, let cid = channelId {
             pubsub.connect(channelId: cid)
         }
+        // Drops de la chaîne : lecture publique, une carte à fermer.
+        if store.showDropsNotice, let cid = channelId {
+            dropsNotice.start(channelId: cid)
+        }
         if let cid = channelId {
             // Statut de suivi (nécessite le token web pour le champ self.follower)
-            if store.showFollowButton {
-                if store.twitchWebToken == nil {
-                    // Sans session web, le suivi reste sur cet appareil.
-                    follow.loadLocal(login: channelName, store: store)
-                } else {
-                    await follow.load(login: channelName, channelId: cid, token: store.twitchWebToken)
-                }
-            }
+            if store.showFollowButton { await loadFollow() }
             // Événements live (série de visionnage, sondage, prédiction, hype train)
             if store.showWatchStreak || store.showLiveEvents {
                 events.start(login: channelName, channelId: cid,
                              token: store.twitchWebToken,
-                             viewerId: store.twitchUserId ?? "")
+                             viewerId: store.twitchUserId ?? "",
+                             hype: store.showLiveEvents)
             }
             // Raid sortant (auto-bascule vers la chaîne raidée)
             if store.enableRaids {
                 raidService.connect(channelId: cid, token: store.twitchWebToken ?? "")
             }
+        }
+    }
+
+    /// Statut de suivi : celui du compte avec la session web (champ
+    /// self.follower), sinon le suivi gardé sur cet appareil.
+    private func loadFollow() async {
+        guard let cid = channelId else { return }
+        if store.twitchWebToken == nil {
+            follow.loadLocal(login: channelName, store: store)
+        } else {
+            await follow.load(login: channelName, channelId: cid, token: store.twitchWebToken)
         }
     }
 
@@ -752,6 +973,52 @@ struct ChatView: View {
             .padding(.horizontal, style.showsChrome ? 12 : 8)
             .padding(.top, style.showsChrome ? 8 : 4)
             .padding(.bottom, style.showsChrome ? 10 : 6)
+            .background(style.translucent ? Color.black.opacity(0.45) : Color.tCard)
+        }
+    }
+
+    /// Lecture seule : Twitch refuse le compte dans ce chat (banni), le chat
+    /// continue sans lui. Twitch ne prévient pas d'un déban sur l'IRC, d'où
+    /// le bouton qui retente avec le compte. Le menu « … » reste à portée.
+    private var readOnlyBar: some View {
+        VStack(spacing: 0) {
+            if !style.translucent { Divider().background(Color.tBorder) }
+            HStack(spacing: 8) {
+                Image(systemName: "nosign").font(.system(size: 12, weight: .bold))
+                Text(store.t("chat_ban_banner"))
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    chat.reconnect(token: token, login: login)
+                } label: {
+                    Text(store.t("chat_ban_retry"))
+                        .font(.system(size: 12, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Color.tWarning.opacity(0.18))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                Button {
+                    showChatMenu = true
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.tMuted)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .foregroundColor(.tWarning)
+            .padding(.leading, style.showsChrome ? 12 : 8)
+            .padding(.trailing, style.showsChrome ? 4 : 2)
+            .padding(.vertical, 2)
+            .background(Color.tWarning.opacity(0.14))
+            .accessibilityElement(children: .contain)
             .background(style.translucent ? Color.black.opacity(0.45) : Color.tCard)
         }
     }
@@ -992,6 +1259,8 @@ struct WrappingHStack: View {
     let timeString: String
     let availableWidth: CGFloat
     var style: ChatStyle = .standard
+    /// Fiche d'une emote ou d'un badge touché (fournie par le chat).
+    @Environment(\.chatInfoAction) private var infoAction
 
     var body: some View {
         let blocks = message.tokens.enumerated().map { i, t in TokenBlock(id: i, content: t) }
@@ -1012,6 +1281,7 @@ struct WrappingHStack: View {
             ForEach(message.badges) { badge in
                 CachedEmoteImage(url: badge.url, name: "", height: style.badgeHeight,
                                  showsNameFallback: false)
+                    .chatInfoTap(infoAction, .badge(badge))
             }
             Text(message.displayName + ":")
                 .font(.system(size: size, weight: .bold)).foregroundColor(message.color)
@@ -1022,6 +1292,7 @@ struct WrappingHStack: View {
                         .foregroundColor(message.isAction ? message.color : .tText)
                 case .emote(let e):
                     CachedEmoteImage(url: e.url, name: e.name, height: emoteHeight)
+                        .chatInfoTap(infoAction, .emote(e))
                 case .mention(let m):
                     Text("@\(m)").font(.system(size: size, weight: .semibold)).foregroundColor(.tPrimary)
                 case .link(let l):
@@ -1125,5 +1396,32 @@ struct ChatRulesSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.tDark.ignoresSafeArea())
         .presentationDetents([.medium, .large])
+    }
+}
+
+/// Attend `work` au plus `seconds` secondes ; au-delà, il continue sans nous.
+/// true s'il a fini à temps.
+private func finishes(_ work: Task<Void, Never>, within seconds: Double) async -> Bool {
+    await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+        let gate = FirstResume(cont)
+        Task { await work.value; gate.resume(true) }
+        Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            gate.resume(false)
+        }
+    }
+}
+
+/// Reprend une attente une seule fois : le premier arrivé l'emporte.
+private final class FirstResume {
+    private let lock = NSLock()
+    private var cont: CheckedContinuation<Bool, Never>?
+    init(_ cont: CheckedContinuation<Bool, Never>) { self.cont = cont }
+    func resume(_ value: Bool) {
+        lock.lock()
+        let c = cont
+        cont = nil
+        lock.unlock()
+        c?.resume(returning: value)
     }
 }

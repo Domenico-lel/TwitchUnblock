@@ -16,8 +16,27 @@ struct LiveData {
     /// nil si le streamer n'archive pas ses lives.
     var dvrVideoId: String? = nil
     var error: String?
-    /// Source qui a servi le direct (« as », « al », « eu », « twitch », « worker »).
+    /// Source qui a servi le direct (« account », « as », « al », « eu »,
+    /// « twitch », « worker ») ; « account » : le compte, sans pub.
     var source: String? = nil
+    /// Hauteur, cadence et débit de chaque qualité (mêmes clés que `links`) ;
+    /// vide quand la source ne les donne pas.
+    var variants: [String: VariantInfo] = [:]
+    /// La session web donnée à getLive a été refusée par Twitch (401/403).
+    var webSessionExpired: Bool = false
+    /// Abonné à la chaîne d'après le jeton du compte (nil : pas demandé).
+    var subscriber: Bool? = nil
+}
+
+/// Ce que la liste maîtresse dit d'une variante (RESOLUTION, FRAME-RATE,
+/// BANDWIDTH), ou ce qu'en renvoie le Worker (`variants` : h, fps, bw).
+/// « Source » ne dit pas sa hauteur dans son nom (1080p60, 720p60, 936p…) :
+/// sans elle, une qualité préférée en 720p se tromperait de variante.
+struct VariantInfo: Equatable {
+    /// 0 pour l'audio seul.
+    let height: Int
+    let fps: Double
+    let bandwidth: Int
 }
 
 struct VodData: Identifiable {
@@ -114,6 +133,7 @@ struct ChannelVideosData {
 struct M3U8Data {
     let links: QualityLinks
     let error: String?
+    var variants: [String: VariantInfo] = [:]
 }
 
 struct TwitchStream: Identifiable {
@@ -126,6 +146,10 @@ struct TwitchStream: Identifiable {
     let thumbnailURL: String
     /// Tags de la chaîne, langue comprise (« English », « DropsEnabled »…).
     var tags: [String] = []
+    /// Identifiant de la catégorie (game_id) : le nom vient de Helix ou de
+    /// GQL selon le compte, seul l'identifiant sert à masquer une catégorie.
+    /// Vide si la requête ne le demande pas (listes des suivis).
+    var gameId: String = ""
 }
 
 /// Catégorie / jeu Twitch (onglet Catégories).
@@ -163,10 +187,13 @@ struct VodMeta {
     let thumb: String
     var lengthSeconds: Int = 0
     var viewCount: Int = 0
+    /// Login de la chaîne (vide si Twitch ne l'a pas donné) : `streamer` est
+    /// le nom affiché.
+    var login: String = ""
 }
 
 // MARK: – App Models
-struct HistoryItem: Codable, Identifiable {
+struct HistoryItem: Codable, Identifiable, Equatable {
     var id: String { term }
     let term: String
     let type: HistoryType
@@ -174,6 +201,9 @@ struct HistoryItem: Codable, Identifiable {
     let thumb: String?
     let streamer: String?
     let addedAt: Double
+    /// Photo d'une chaîne, mise par le site : gardée et renvoyée telle
+    /// quelle, sinon un envoi de l'app la faisait disparaître du site.
+    var avatar: String? = nil
 
     enum HistoryType: String, Codable { case vod, channel }
 }
@@ -191,6 +221,7 @@ extension HistoryItem {
         thumb    = try? c.decodeIfPresent(String.self, forKey: .thumb)
         streamer = try? c.decodeIfPresent(String.self, forKey: .streamer)
         addedAt  = (try? c.decodeIfPresent(Double.self, forKey: .addedAt)) ?? 0
+        avatar   = try? c.decodeIfPresent(String.self, forKey: .avatar)
     }
 }
 

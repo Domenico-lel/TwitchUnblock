@@ -24,6 +24,8 @@ struct MessageSheet: View {
     @State private var replying = false
     @State private var replyText = ""
     @State private var copied = false
+    /// Emote ou badge touché dans le fil : sa fiche, par-dessus cette feuille.
+    @State private var infoItem: ChatInfoItem? = nil
     @FocusState private var focused: Bool
 
     private var rootId: String { message.threadRootId ?? message.id }
@@ -54,6 +56,14 @@ struct MessageSheet: View {
                     .padding(.top, TSpace.md)
                     .transition(.opacity)
             }
+        }
+        // Fiche présentée depuis cette feuille : celle du chat, en dessous, ne
+        // peut pas s'afficher tant que le fil est ouvert (elle surgissait à sa
+        // fermeture). Ni « Ajouter au message » ni « Voir la chaîne » ici :
+        // il faudrait fermer deux feuilles l'une après l'autre.
+        .sheet(item: $infoItem) { item in
+            ChatInfoSheet(item: item, channelId: chat.channelId, onInsert: nil)
+                .environmentObject(store)
         }
         .task {
             // Le chat IRC ne transporte pas les photos de profil : une requête
@@ -169,6 +179,8 @@ struct MessageSheet: View {
                 .onAppear { proxy.scrollTo(message.id, anchor: .center) }
             }
         }
+        // Remplace l'action héritée du chat, qui ouvrait la fiche sous le fil.
+        .environment(\.chatInfoAction, { infoItem = $0 })
     }
 
     // MARK: – Réponse

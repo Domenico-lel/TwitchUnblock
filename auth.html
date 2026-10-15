@@ -16,29 +16,60 @@
 <body>
 <div class="box">
   <div class="icon">🟣</div>
-  <h2 id="status">Connexion en cours...</h2>
-  <p id="sub">Retourne dans l'application</p>
+  <h2 id="status">TwitchUnblock</h2>
+  <p id="sub"></p>
 </div>
 <script>
-  // Récupérer le token depuis le fragment (#access_token=...)
+  // Textes dans la langue du navigateur (anglais par défaut, comme l'app).
+  const TEXTS = {
+    fr: { ok: '✅ Connecté !', back: 'Retourne dans TwitchUnblock',
+          fail: 'Connexion annulée', failSub: 'Retourne dans TwitchUnblock pour réessayer.' },
+    en: { ok: '✅ Signed in!', back: 'Go back to TwitchUnblock',
+          fail: 'Sign-in cancelled', failSub: 'Go back to TwitchUnblock to try again.' },
+    es: { ok: '✅ ¡Sesión iniciada!', back: 'Vuelve a TwitchUnblock',
+          fail: 'Inicio de sesión cancelado', failSub: 'Vuelve a TwitchUnblock para intentarlo de nuevo.' },
+    ru: { ok: '✅ Вход выполнен!', back: 'Вернитесь в TwitchUnblock',
+          fail: 'Вход отменён', failSub: 'Вернитесь в TwitchUnblock, чтобы попробовать снова.' },
+  };
+  const T = TEXTS[(navigator.language || 'en').slice(0, 2).toLowerCase()] || TEXTS.en;
+  const show = (status, sub) => {
+    document.getElementById('status').textContent = status;
+    document.getElementById('sub').textContent = sub;
+  };
+
+  // Jeton dans le fragment (#access_token=…) ; refus ou erreur de Twitch
+  // dans la requête (?error=access_denied&…).
   const raw = (window.location.hash || window.location.search).replace(/^[#?]/, '');
   const params = new URLSearchParams(raw);
+  // Lu : le jeton ne reste ni dans l'adresse ni dans l'historique.
+  try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
   const token = params.get('access_token');
+  const error = params.get('error');
+  // Le state est renvoyé tel quel à l'app, qui vérifie qu'il correspond à
+  // sa demande.
+  const state = params.get('state') || '';
+  const withState = (link) => link + (state ? '&state=' + encodeURIComponent(state) : '');
 
-  // Jeton Twitch : lettres et chiffres uniquement. Le state est renvoyé tel
-  // quel à l'app, qui vérifie qu'il correspond à sa demande.
+  // Jeton Twitch : lettres et chiffres uniquement.
   if (token && /^[a-z0-9]+$/i.test(token)) {
-    const state = params.get('state') || '';
-    const deepLink = 'twitchunblock://auth?access_token=' + encodeURIComponent(token) +
-      (state ? '&state=' + encodeURIComponent(state) : '');
-    window.location.href = deepLink;
-
-    document.getElementById('status').textContent = '✅ Connecté !';
-    document.getElementById('sub').textContent = 'Retourne dans TwitchUnblock';
+    window.location.href = withState('twitchunblock://auth?access_token=' + encodeURIComponent(token));
+    show(T.ok, T.back);
+  } else if (error && state) {
+    // Refus (« Annuler » sur Twitch) ou erreur : retour à l'app, qui ferme
+    // cette page. Avant, on restait bloqué ici sur un message en français.
+    // Seulement pour une app qui envoie un state (1.0.185 et après, qui lit
+    // les paramètres un par un) : les versions d'avant découpaient
+    // l'adresse de retour et prenaient « twitchunblock://auth?error=… »
+    // pour un jeton, rangé à la place du vrai.
+    const desc = params.get('error_description') || '';
+    window.location.href = withState('twitchunblock://auth?error=' + encodeURIComponent(error) +
+      (desc ? '&error_description=' + encodeURIComponent(desc) : ''));
+    show(T.fail, T.failSub);
+  } else if (error) {
+    // Ancienne app : pas de retour, comme avant ; « Annuler » ferme la page.
+    show(T.fail, T.failSub);
   } else {
-    const error = params.get('error_description') || params.get('error') || 'Inconnu';
-    document.getElementById('status').textContent = '❌ Erreur';
-    document.getElementById('sub').textContent = 'Erreur: ' + error;
+    show('TwitchUnblock', T.back);
   }
 </script>
 </body>

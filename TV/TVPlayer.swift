@@ -22,7 +22,8 @@ struct TVPlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let player = model.player {
-                TVPlayerController(player: player, model: model, session: session, chat: chat)
+                TVPlayerController(player: player, model: model, session: session, chat: chat,
+                                   channel: item.channel)
                     .ignoresSafeArea()
             } else if let error = model.error {
                 VStack(spacing: 40) {
@@ -37,7 +38,7 @@ struct TVPlayerScreen: View {
         .task {
             switch item {
             case .live(let login, _): chat.start(login)
-            case .vod(let id, _):     chat.startVod(id)
+            case .vod(let id, _, _):  chat.startVod(id)
             }
             await model.load(item, session: session)
         }
@@ -60,6 +61,8 @@ final class TVPlayerModel: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var links: QualityLinks = [:]
     @Published private(set) var quality = ""
+    /// Hauteur et cadence de chaque qualité (qualité préférée, ordre du menu).
+    private(set) var variants: [String: VariantInfo] = [:]
     private(set) var isLive = false
 
     private var current: TVPlayback?
@@ -68,6 +71,9 @@ final class TVPlayerModel: ObservableObject {
     private var vodId: String?
     private var statusObs: NSKeyValueObservation?
     private var timeObs: Any?
+    /// Siri, FaceTime… : la lecture mise en pause par tvOS repart à la fin
+    /// (PlaybackInterruptions) — VOD à l'endroit, direct relu au bord.
+    private var interruptions: PlaybackInterruptions?
 
     func load(_ item: TVPlayback, session: TVSession) async {
         current = item
@@ -86,7 +92,8 @@ final class TVPlayerModel: ObservableObject {
             // Playlists réécrites avec la vraie durée des segments (2 s) : le
             // lecteur tient le bord du direct au lieu de rester ~20 s derrière.
             links = LivePlaylistLoader.wrap(raw)
-        case .vod(let id, let videoTitle):
+            variants = data.variants
+        case .vod(let id, let videoTitle, _):
             isLive = false
             title = videoTitle
             subtitle = ""
@@ -95,17 +102,17 @@ final class TVPlayerModel: ObservableObject {
             let data = await getM3U8(vodId: id)
             let markers = await markersTask
             guard !data.links.isEmpty else {
-                error = data.error ?? session.t("tv_error_vod")
+                // Code d'erreur (getM3U8) traduit : le texte venait en français.
+                error = session.t(data.error.map(apiErrorKey) ?? "tv_error_vod")
                 return
             }
             // VOD récente avec des passages coupés : le son d'origine est
             // peut-être encore sur le CDN (VodUnmuteLoader).
             links = VodUnmuteLoader.worthTrying(markers) ? VodUnmuteLoader.wrap(data.links) : data.links
+            variants = data.variants
         }
-        let keys = sortQualities(Array(links.keys))
-        let saved = UserDefaults.standard.string(forKey: "tv_quality") ?? ""
-        quality = keys.contains(saved) ? saved
-            : (keys.first { $0.lowercased() != "audio_only" } ?? keys.first ?? "")
+        // Qualité préférée, sinon la plus proche en dessous (même règle que l'iPhone).
+        quality = preferredQualityKey(Array(links.keys), pref: session.qualityPref, variants: variants)
         start(at: isLive ? 0 : TVProgress.position(vodId))
     }
 
@@ -126,8 +133,14 @@ final class TVPlayerModel: ObservableObject {
         let p = player ?? AVPlayer()
         p.replaceCurrentItem(with: item)
         p.play()
+        interruptions?.settle()
         if player == nil {
             player = p
+            interruptions = PlaybackInterruptions(name: "Apple TV") { [weak self] _ in
+                Task { @MainActor in self?.resumeAfterInterruption() }
+                return "lecture relancée (VOD à l'endroit, direct au bord)"
+            }
+            interruptions?.watch(p)
             // Avancement d'une VOD gardé toutes les 10 s (reprise au même endroit).
             if let id = vodId {
                 timeObs = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 10, preferredTimescale: 1),
@@ -139,10 +152,13 @@ final class TVPlayerModel: ObservableObject {
         }
     }
 
-    func setQuality(_ key: String) {
+    /// Qualité choisie dans la barre : elle devient la qualité préférée.
+    func setQuality(_ key: String, session: TVSession) {
         guard key != quality, links[key] != nil else { return }
         quality = key
-        UserDefaults.standard.set(key, forKey: "tv_quality")
+        if let pref = qualityPreference(for: key, among: Array(links.keys), variants: variants) {
+            session.qualityPref = pref
+        }
         start(at: isLive ? 0 : (player?.currentTime().seconds ?? 0))
     }
 
@@ -152,7 +168,20 @@ final class TVPlayerModel: ObservableObject {
         await load(current, session: session)
     }
 
+    /// Fin d'une interruption du son : VOD à l'endroit (rien en fin de VOD),
+    /// direct relu au bord (même qualité).
+    private func resumeAfterInterruption() {
+        guard let p = player, let item = p.currentItem, item.status != .failed,
+              p.timeControlStatus == .paused else { return }
+        if isLive { start(at: 0); return }
+        let length = item.duration.seconds
+        if length.isFinite, length > 0, p.currentTime().seconds >= length - 1 { return }
+        p.play()
+    }
+
     func stop() {
+        // Lecteur fermé : une fin d'interruption ne doit plus le relancer.
+        interruptions = nil
         if let p = player, let id = vodId {
             let duration = p.currentItem?.duration.seconds ?? 0
             TVProgress.save(id, at: p.currentTime().seconds, duration: duration.isFinite ? duration : 0)
@@ -185,6 +214,8 @@ struct TVPlayerController: UIViewControllerRepresentable {
     @ObservedObject var model: TVPlayerModel
     @ObservedObject var session: TVSession
     let chat: TVChatModel
+    /// Chaîne regardée : le chat y garde la place choisie dans le menu Chat.
+    let channel: String
 
     final class Coordinator {
         var chatHost: UIHostingController<TVChatOverlay>?
@@ -195,11 +226,13 @@ struct TVPlayerController: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let vc = AVPlayerViewController()
         vc.player = player
+        // Vitesse : le contrôle de tvOS sur une VOD, aucun sur un direct (il
+        // n'y a rien à accélérer). L'écran est propre à un seul contenu.
+        vc.speeds = model.isLive ? [] : AVPlaybackSpeed.systemDefaultSpeeds
         vc.transportBarCustomMenuItems = menus()
         // Chat dans le calque du lecteur : sur l'image, sous les commandes,
         // sans jamais prendre le focus.
-        let host = UIHostingController(rootView: TVChatOverlay(
-            model: chat, waitingText: session.t(model.isLive ? "tv_chat_waiting" : "tv_chat_loading")))
+        let host = UIHostingController(rootView: overlay())
         host.view.backgroundColor = .clear
         host.view.isUserInteractionEnabled = false
         if let overlay = vc.contentOverlayView {
@@ -220,17 +253,25 @@ struct TVPlayerController: UIViewControllerRepresentable {
         showChat(context)
     }
 
+    /// Chat posé sur l'image, à la place retenue pour cette chaîne.
+    private func overlay() -> TVChatOverlay {
+        TVChatOverlay(model: chat, waitingText: session.t(model.isLive ? "tv_chat_waiting" : "tv_chat_loading"),
+                      layout: session.chatLayout(for: channel))
+    }
+
     private func showChat(_ context: Context) {
-        context.coordinator.chatHost?.view.isHidden = !session.tvChat
+        guard let host = context.coordinator.chatHost else { return }
+        host.view.isHidden = !session.tvChat
+        host.rootView = overlay()
     }
 
     /// Menus de la barre de lecture : Qualité, et Source pour un direct.
     private func menus() -> [UIMenuElement] {
         let model = self.model
         let session = self.session
-        let qualities: [UIMenuElement] = sortQualities(Array(model.links.keys)).map { key in
+        let qualities: [UIMenuElement] = sortQualities(Array(model.links.keys), variants: model.variants).map { key in
             UIAction(title: label(key), state: key == model.quality ? .on : .off) { _ in
-                Task { @MainActor in model.setQuality(key) }
+                Task { @MainActor in model.setQuality(key, session: session) }
             }
         }
         var items: [UIMenuElement] = [
@@ -250,21 +291,61 @@ struct TVPlayerController: UIViewControllerRepresentable {
                                 image: UIImage(systemName: "antenna.radiowaves.left.and.right"),
                                 children: sources))
         }
-        // Chat affiché ou masqué (gardé pour les prochaines lectures).
-        items.append(UIAction(title: session.t("tv_chat"),
-                              image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
-                                                                        : "bubble.left.and.bubble.right"),
-                              state: session.tvChat ? .on : .off) { _ in
-            Task { @MainActor in session.tvChat.toggle() }
-        })
+        items.append(chatMenu())
         return items
     }
 
-    private func label(_ key: String) -> String {
-        switch key.lowercased() {
-        case "chunked", "source": return "Source"
-        case "audio_only":        return session.t("tv_audio")
-        default:                  return key
+    /// Menu Chat : affiché ou masqué (gardé pour les prochaines lectures), et
+    /// sa place sur l'image — côté, hauteur — retenue pour cette chaîne.
+    private func chatMenu() -> UIMenu {
+        let session = self.session
+        let channel = self.channel
+        let layout = session.chatLayout(for: channel)
+        /// Place changée : chat affiché s'il était masqué, pour la voir.
+        func place(_ change: @escaping (inout TVChatLayout) -> Void) {
+            Task { @MainActor in
+                var next = session.chatLayout(for: channel)
+                change(&next)
+                session.setChatLayout(next, for: channel)
+                if !session.tvChat { session.tvChat = true }
+            }
         }
+        let sides: [UIMenuElement] = TVChatLayout.Side.allCases.map { side in
+            UIAction(title: session.t("tv_chat_\(side.rawValue)"), state: layout.side == side ? .on : .off) { _ in
+                place { $0.side = side }
+            }
+        }
+        let heights: [UIMenuElement] = TVChatLayout.Height.allCases.map { height in
+            UIAction(title: session.t("tv_chat_\(height.rawValue)"), state: layout.height == height ? .on : .off) { _ in
+                place { $0.height = height }
+            }
+        }
+        var children: [UIMenuElement] = [
+            UIAction(title: session.t("tv_chat_show"), state: session.tvChat ? .on : .off) { _ in
+                Task { @MainActor in session.tvChat.toggle() }
+            },
+            UIMenu(title: session.t("tv_chat_side"), options: .displayInline, children: sides),
+            UIMenu(title: session.t("tv_chat_height"), options: .displayInline, children: heights),
+        ]
+        // Place propre à cette chaîne : la garder partout, ou revenir à celle par défaut.
+        if layout != session.chatLayout {
+            children.append(UIMenu(title: "", options: .displayInline, children: [
+                UIAction(title: session.t("tv_chat_all")) { _ in
+                    Task { @MainActor in session.makeDefaultChatLayout(from: channel) }
+                },
+                UIAction(title: session.t("tv_chat_reset")) { _ in
+                    Task { @MainActor in session.setChatLayout(session.chatLayout, for: channel) }
+                },
+            ]))
+        }
+        return UIMenu(title: session.t("tv_chat"),
+                      image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
+                                                                : "bubble.left.and.bubble.right"),
+                      children: children)
+    }
+
+    /// Libellé commun avec l'iPhone ; l'audio seul garde le texte de la TV.
+    private func label(_ key: String) -> String {
+        isAudioQuality(key) ? session.t("tv_audio") : qualityText(key, session.lang)
     }
 }

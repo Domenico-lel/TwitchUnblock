@@ -41,6 +41,19 @@ final class ChatService: NSObject, ObservableObject {
     /// Attente avant la prochaine reconnexion automatique (recul progressif).
     private var reconnectDelay: Double = 2
     private var reconnectTask: Task<Void, Never>?
+    /// Échecs d'affilée (délai dépassé, connexion perdue) depuis le dernier
+    /// « 001 » : au troisième, on le dit dans le chat au lieu de rester muet.
+    private var failures = 0
+
+    /// Lecture seule : Twitch refuse le compte dans ce salon (NOTICE
+    /// `msg_banned` au JOIN), le chat continue sans compte. Rien ne s'envoie.
+    @Published private(set) var readOnly = false
+    /// Couples « compte#chaîne » refusés pendant cette séance : rouvrir le
+    /// chat (multi-live, mini-lecteur, retour) repart directement sans compte.
+    private static var readOnlyKeys = Set<String>()
+    /// Dernière reconnexion sur un PART ou un CLEARCHAT à notre nom : une
+    /// seule par 15 s, si Twitch en renvoyait en boucle.
+    private var lastRejoin: Date?
 
     /// Garder à l'écran les messages supprimés par la modération, barrés, au
     /// lieu de les faire disparaître. Piloté par les réglages.
@@ -100,11 +113,15 @@ final class ChatService: NSObject, ObservableObject {
         channelName = channel.lowercased()
         lastToken = token
         lastLogin = login
+        // Remis à jour à chaque connexion : autre chaîne ou autre compte,
+        // l'état d'avant ne vaut plus.
+        prepare(channel: channelName, login: login)
+        let asAccount = !readOnly
         roomModes = ChatRoomModes()
         rules = []
         let name = channelName
         Task { await loadChatSettings(name) }
-        logger.info("CHAT", "Connexion IRC → #\(channelName)")
+        logger.info("CHAT", "Connexion IRC → #\(channelName)", readOnly ? "lecture seule (compte refusé)" : nil)
 
         guard let url = URL(string: "wss://irc-ws.chat.twitch.tv:443") else { return }
         webSocketTask = session.webSocketTask(with: url)
@@ -114,12 +131,17 @@ final class ChatService: NSObject, ObservableObject {
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             guard let self, !Task.isCancelled, !self.isConnected else { return }
             logger.warn("CHAT", "Timeout IRC (10 s) — fallback anonyme")
+            self.countFailure("pas de réponse de l'IRC en 10 s")
+            // Oubliée d'abord : reconnectAnonymously annule la tâche du délai,
+            // c'est-à-dire celle-ci — la connexion anonyme partait alors dans
+            // une tâche annulée (envois et lecture interrompus).
+            self.connectionTimeoutTask = nil
             await self.reconnectAnonymously()
         }
 
         Task {
             await send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership")
-            if let token = token, let login = login, !login.isEmpty,
+            if asAccount, let token = token, let login = login, !login.isEmpty,
                token.allSatisfy({ $0.isLetter || $0.isNumber }),
                login.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) {
                 await send("PASS oauth:\(token)")
@@ -151,7 +173,68 @@ final class ChatService: NSObject, ObservableObject {
     func reconnect(token: String?, login: String?) {
         guard !channelName.isEmpty else { return }
         logger.info("CHAT", "Reconnexion demandée → #\(channelName)")
+        // Nouvel essai voulu : une nouvelle série d'échecs sera signalée.
+        failures = 0
+        reconnectDelay = 2
+        // Retente avec le compte (bouton du bandeau, menu du chat) : débanni,
+        // il repasse ; sinon le refus de Twitch remet la lecture seule.
+        if let key = Self.readOnlyKey(channelName, login) { Self.readOnlyKeys.remove(key) }
         connect(channel: channelName, token: token, login: login)
+    }
+
+    /// Avant `connect` (le chat attend d'abord emotes et badges, jusqu'à
+    /// 3,5 s) : un salon déjà refusé à ce compte montre le bandeau tout de
+    /// suite au lieu du champ « Connecting… ».
+    func prepare(channel: String, login: String?) {
+        readOnly = Self.readOnlyKey(channel, login).map { Self.readOnlyKeys.contains($0) } ?? false
+    }
+
+    /// Clé de la mémoire de séance ; nil sans compte.
+    private static func readOnlyKey(_ channel: String, _ login: String?) -> String? {
+        guard let login, !login.isEmpty, !channel.isEmpty else { return nil }
+        return "\(login.lowercased())#\(channel.lowercased())"
+    }
+
+    /// Twitch refuse le compte (banni) : on rouvre le salon sans lui, comme
+    /// un spectateur déconnecté. Par `connect` et non `reconnectAnonymously` :
+    /// nouvelle génération, présence et infos du compte remises à zéro.
+    private func enterReadOnly() {
+        guard !readOnly else { return }
+        readOnly = true
+        if let key = Self.readOnlyKey(channelName, lastLogin ?? localLogin) { Self.readOnlyKeys.insert(key) }
+        insertSystemMessage(translate("chat_ban_switched", lang))
+        logger.warn("CHAT", "Compte refusé dans #\(channelName) (banni)", "lecture seule, sans compte")
+        connect(channel: channelName, token: lastToken, login: lastLogin ?? localLogin)
+    }
+
+    /// PART ou CLEARCHAT sans durée à notre nom : signal ambigu (ban, coupure,
+    /// chat partagé). On rejoint avec le compte ; si le ban est réel, le
+    /// `msg_banned` du JOIN fera passer en lecture seule.
+    private func rejoinWithAccount(_ reason: String) {
+        if let last = lastRejoin, Date().timeIntervalSince(last) < 15 {
+            // Pas ignoré : un vrai ban peut suivre de près un premier signal
+            // (chat partagé). Reporté à la fin de la fenêtre, une fois ; toute
+            // reconnexion d'ici là (nouvelle génération) l'annule.
+            guard reconnectTask == nil else { return }
+            let wait = 15 - Date().timeIntervalSince(last)
+            let gen = generation
+            logger.info("CHAT", "\(reason) à notre nom", "reconnexion récente, reportée de \(Int(wait.rounded(.up))) s")
+            reconnectTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(max(wait, 0) * 1_000_000_000))
+                guard let self, !Task.isCancelled, self.generation == gen, !self.readOnly else { return }
+                self.reconnectTask = nil
+                self.rejoinWithAccount(reason)
+            }
+            return
+        }
+        lastRejoin = Date()
+        logger.warn("CHAT", "\(reason) à notre nom → #\(channelName)", "reconnexion avec le compte")
+        connect(channel: channelName, token: lastToken, login: lastLogin)
+    }
+
+    /// Langue de l'app, pour les lignes écrites par l'app dans le chat.
+    private var lang: Lang {
+        Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
     }
 
     /// Envoie une commande de chat telle quelle (/color, /me…).
@@ -186,6 +269,19 @@ final class ChatService: NSObject, ObservableObject {
               let url = URL(string: "wss://irc-ws.chat.twitch.tv:443") else { return }
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
+        // Même délai qu'à la connexion : sans lui, une connexion anonyme muette
+        // laissait le chat sur « Connecting… » pour de bon.
+        let gen = generation
+        let task = webSocketTask
+        connectionTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            guard let self, !Task.isCancelled, !self.isConnected,
+                  self.generation == gen, self.webSocketTask === task else { return }
+            logger.warn("CHAT", "Timeout IRC anonyme (10 s)", "nouvel essai")
+            self.webSocketTask?.cancel(with: .goingAway, reason: nil)
+            self.webSocketTask = nil
+            self.scheduleReconnect(gen: gen, reason: "connexion anonyme muette (10 s)")
+        }
         await send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership")
         await send("NICK justinfan\(Int.random(in: 10000...99999))")
         await send("JOIN #\(channelName)")
@@ -280,7 +376,7 @@ final class ChatService: NSObject, ObservableObject {
                 guard webSocketTask === task, generation == gen else { return }
                 logger.error("CHAT", "Connexion IRC perdue", error.localizedDescription)
                 isConnected = false
-                scheduleReconnect(gen: gen)
+                scheduleReconnect(gen: gen, reason: error.localizedDescription)
                 return
             }
         }
@@ -288,13 +384,16 @@ final class ChatService: NSObject, ObservableObject {
 
     /// Reconnexion automatique après une coupure (réseau, serveur), avec un
     /// recul progressif plafonné à 30 s.
-    private func scheduleReconnect(gen: Int) {
+    private func scheduleReconnect(gen: Int, reason: String) {
         guard !channelName.isEmpty else { return }
+        countFailure(reason)
         let delay = reconnectDelay
         reconnectDelay = min(reconnectDelay * 2, 30)
         // Plusieurs échecs d'affilée (jeton refusé par l'IRC, par ex.) : on
-        // repasse en lecture anonyme plutôt que de réessayer sans fin.
-        if delay >= 8 { lastToken = nil; lastLogin = nil }
+        // repasse en lecture anonyme plutôt que de réessayer sans fin. Déjà en
+        // lecture seule, on est anonyme : le compte est gardé, c'est lui qui
+        // retrouve la mémoire de séance (et le bandeau) à la reconnexion.
+        if delay >= 8, !readOnly { lastToken = nil; lastLogin = nil }
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -304,16 +403,30 @@ final class ChatService: NSObject, ObservableObject {
         }
     }
 
+    /// Un échec de plus ; au troisième d'affilée, une ligne dans le chat
+    /// (VPN, réseau filtré…) qui renvoie à « Reconnecter le chat ».
+    private func countFailure(_ reason: String) {
+        failures += 1
+        logger.warn("CHAT", "Échec de connexion n°\(failures) → #\(channelName)", reason)
+        guard failures == 3 else { return }
+        insertSystemMessage(translate("chat_unreachable", lang))
+    }
+
     // MARK: – Handle raw IRC lines
     private func handleRaw(_ text: String) async {
         let lines = text.components(separatedBy: "\r\n").filter { !$0.isEmpty }
+        let gen = generation
         for line in lines {
+            // Connexion remplacée en cours de trame (lecture seule, reconnexion) :
+            // la suite appartient à l'ancienne socket, on ne la traite pas.
+            guard generation == gen else { break }
             guard let irc = IRCParser.parse(line) else { continue }
             switch irc.command {
             case "001":
                 isConnected = true
                 connectionTimeoutTask?.cancel(); connectionTimeoutTask = nil
                 reconnectDelay = 2
+                failures = 0
                 logger.success("CHAT", "IRC connecté à #\(channelName)")
             case "PING":
                 await send("PONG :tmi.twitch.tv")
@@ -345,7 +458,16 @@ final class ChatService: NSObject, ObservableObject {
             case "JOIN":
                 if let who = irc.tags["login"] ?? irc.prefixNick { presentUsers.insert(who.lowercased()) }
             case "PART":
-                if let who = irc.tags["login"] ?? irc.prefixNick { presentUsers.remove(who.lowercased()) }
+                if let who = (irc.tags["login"] ?? irc.prefixNick)?.lowercased() {
+                    // Twitch nous sort du salon (ban en plein direct, ou coupure) :
+                    // on y retourne avec le compte, le JOIN dira s'il est banni.
+                    // En lecture seule, `localLogin` est vide : rien à faire.
+                    if who == localLogin, !localLogin.isEmpty, isAuthenticated, !readOnly {
+                        rejoinWithAccount("PART")
+                    } else {
+                        presentUsers.remove(who)
+                    }
+                }
             case "ROOMSTATE":
                 applyRoomState(irc.tags)
             case "NOTICE":
@@ -402,7 +524,8 @@ final class ChatService: NSObject, ObservableObject {
             twitchEmotesByRange[range] = emote
         }
 
-        let tokens = await tokenize(text: text, twitchRanges: twitchEmotesByRange, channelId: channelId)
+        let tokens = await tokenize(text: text, twitchRanges: twitchEmotesByRange, channelId: channelId,
+                                    userId: irc.userId)
 
         // Le rejeu n'a pas de tag `login` fiable : on retombe sur le préfixe IRC.
         let login = irc.tags["login"] ?? irc.prefixNick ?? ""
@@ -460,7 +583,8 @@ final class ChatService: NSObject, ObservableObject {
                     source: .twitch)
                 await EmoteService.shared.registerTwitchEmote(id: emoteId, name: name)
             }
-            tokens = await tokenize(text: text, twitchRanges: byRange, channelId: channelId)
+            tokens = await tokenize(text: text, twitchRanges: byRange, channelId: channelId,
+                                    userId: irc.userId)
         }
 
         guard !systemMsg.isEmpty || !tokens.isEmpty else { return nil }
@@ -534,16 +658,21 @@ final class ChatService: NSObject, ObservableObject {
             return
         }
 
+        // Compte banni de ce salon : Twitch le refuse au JOIN (et à l'envoi).
+        // Pas un message refusé : le chat continue en lecture seule, sans compte.
+        if msgId == "msg_banned" {
+            guard isAuthenticated, !readOnly else { return }
+            removeRecentEcho()
+            enterReadOnly()
+            return
+        }
+
         // Message refusé par Twitch (mode abonnés, followers, lent…) : la
         // raison dans la langue de l'app, et le message, affiché d'avance
         // comme envoyé, retiré — sinon on croyait qu'il était passé.
         if let key = Self.rejectionKeys[msgId] ?? (msgId.hasPrefix("msg_") ? "chat_rej_generic" : nil) {
             logger.warn("CHAT", "Message refusé : \(msgId)", text)
-            if let i = messages.firstIndex(where: { $0.id.hasPrefix("local-") }),
-               Date().timeIntervalSince(messages[i].timestamp) < 20 {
-                messages.remove(at: i)
-            }
-            let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+            removeRecentEcho()
             let minutes = roomModes.followersMinutes ?? 0
             insertSystemMessage(translate(key, lang)
                 .replacingOccurrences(of: "{d}", with: minutes > 0 ? ChatRoomModes.duration(minutes, lang: lang) : "")
@@ -564,7 +693,7 @@ final class ChatService: NSObject, ObservableObject {
         "msg_subsonly": "chat_rej_subs", "msg_emoteonly": "chat_rej_emotes", "msg_emotesonly": "chat_rej_emotes",
         "msg_slowmode": "chat_rej_slow", "msg_r9k": "chat_rej_unique", "msg_duplicate": "chat_rej_duplicate",
         "msg_verified_email": "chat_rej_verified", "msg_requires_verified_phone_number": "chat_rej_verified",
-        "msg_timedout": "chat_rej_timeout", "msg_banned": "chat_rej_banned",
+        "msg_timedout": "chat_rej_timeout",
         "msg_rejected": "chat_rej_automod", "msg_rejected_mandatory": "chat_rej_automod",
         "msg_ratelimit": "chat_rej_ratelimit", "msg_channel_suspended": "chat_rej_suspended",
         "msg_suspended": "chat_rej_suspended",
@@ -600,11 +729,20 @@ final class ChatService: NSObject, ObservableObject {
         roomModes = m
     }
 
+    /// Retire notre dernier message, affiché d'avance comme envoyé, quand
+    /// Twitch le refuse dans la foulée.
+    private func removeRecentEcho() {
+        if let i = messages.firstIndex(where: { $0.id.hasPrefix("local-") }),
+           Date().timeIntervalSince(messages[i].timestamp) < 20 {
+            messages.remove(at: i)
+        }
+    }
+
     private func insertSystemMessage(_ text: String) {
         messages.insert(ChatMessage(
             id: UUID().uuidString,
             userId: "system", userName: "system",
-            displayName: "⚠️ Système",
+            displayName: "⚠️ " + translate("chat_system", lang),
             color: Color(hex: "fbbf24"), badges: [],
             tokens: [.text(text)], timestamp: Date(),
             isAction: false, isHighlight: false,
@@ -616,7 +754,8 @@ final class ChatService: NSObject, ObservableObject {
     private func tokenize(
         text: String,
         twitchRanges: [Range<String.Index>: TwitchEmote],
-        channelId: String?
+        channelId: String?,
+        userId: String? = nil
     ) async -> [MessageToken] {
         var tokens: [MessageToken] = []
         var currentIndex = text.startIndex
@@ -626,19 +765,19 @@ final class ChatService: NSObject, ObservableObject {
             guard range.lowerBound >= currentIndex else { continue }
             if range.lowerBound > currentIndex {
                 tokens += await tokenizeText(String(text[currentIndex..<range.lowerBound]),
-                                             channelId: channelId)
+                                             channelId: channelId, userId: userId)
             }
             if let emote = twitchRanges[range] { tokens.append(.emote(emote)) }
             currentIndex = range.upperBound
         }
         if currentIndex < text.endIndex {
-            tokens += await tokenizeText(String(text[currentIndex...]), channelId: channelId)
+            tokens += await tokenizeText(String(text[currentIndex...]), channelId: channelId, userId: userId)
         }
         return tokens
     }
 
-    private func tokenizeText(_ segment: String, channelId: String?) async -> [MessageToken] {
-        await tokenizeChatSegment(segment, channelId: channelId)
+    private func tokenizeText(_ segment: String, channelId: String?, userId: String? = nil) async -> [MessageToken] {
+        await tokenizeChatSegment(segment, channelId: channelId, userId: userId)
     }
 
     // MARK: – Moderation
@@ -646,12 +785,40 @@ final class ChatService: NSObject, ObservableObject {
         if let target = irc.params.last, !target.hasPrefix("#") {
             // Exclusion / bannissement : tous les messages de la personne.
             mark(where: { $0.userName == target })
+            // Nous visés, avec le compte (en lecture seule `localLogin` est
+            // vide : les exclusions des autres ne nous concernent pas).
+            guard target.lowercased() == localLogin, !localLogin.isEmpty,
+                  isAuthenticated, !readOnly else { return }
+            if let seconds = irc.tags["ban-duration"].flatMap({ Int($0) }) {
+                // Exclusion temporaire : on reste dans le salon, Twitch
+                // refusera les messages d'ici là (`msg_timedout`).
+                logger.warn("CHAT", "Exclu de #\(channelName)", "\(seconds) s")
+                insertSystemMessage(translate("chat_timed_out", lang)
+                    .replacingOccurrences(of: "{d}", with: Self.duration(seconds: seconds, lang: lang)))
+            } else {
+                rejoinWithAccount("CLEARCHAT")
+            }
         } else {
             // Purge complète du canal : même avec le réglage, garder l'écran
             // barré de bout en bout n'aurait aucun intérêt.
             messages.removeAll()
             logger.warn("CHAT", "Chat effacé par un modérateur")
         }
+    }
+
+    /// « 45 s », « 10 min », « 2 h 30 min », « 14 j » : `ban-duration` est en
+    /// secondes et va jusqu'à deux semaines (ChatRoomModes.duration prend des minutes).
+    private static func duration(seconds: Int, lang: Lang) -> String {
+        let f = DateComponentsFormatter()
+        f.unitsStyle = .abbreviated
+        f.allowedUnits = seconds >= 86_400 ? [.day, .hour]
+            : seconds >= 3_600 ? [.hour, .minute]
+            : seconds >= 60 ? [.minute, .second] : [.second]
+        f.maximumUnitCount = 2
+        var calendar = Calendar.current
+        calendar.locale = Locale(identifier: lang.rawValue)
+        f.calendar = calendar
+        return f.string(from: TimeInterval(seconds)) ?? "\(seconds) s"
     }
 
     private func handleClearMsg(_ irc: IRCMessage) async {

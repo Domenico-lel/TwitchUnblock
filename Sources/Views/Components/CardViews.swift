@@ -84,6 +84,12 @@ struct OneLineLayout: Layout {
 // MARK: – Carte de direct
 struct StreamCardView: View {
     let stream: TwitchStream
+    /// Chaîne suivie : l'appui long propose de l'épingler en tête.
+    var pinnable = false
+    /// Liste de découverte : l'appui long propose de masquer la chaîne et,
+    /// si `hideCategory`, sa catégorie.
+    var hideable = false
+    var hideCategory = true
     let onPress: () -> Void
     @EnvironmentObject private var store: AppStore
 
@@ -133,10 +139,13 @@ struct StreamCardView: View {
 
                     // Le pseudo ouvre la chaîne (comme sur Twitch), la carte le direct.
                     Button { store.openChannelPage(stream.userLogin) } label: {
-                        Text(stream.userName)
-                            .font(.tMeta)
-                            .foregroundColor(.tPurple)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            if pinnable && store.isPinned(stream.userLogin) { PinnedMark() }
+                            Text(stream.userName)
+                                .font(.tMeta)
+                                .foregroundColor(.tPurple)
+                                .lineLimit(1)
+                        }
                     }
                     .buttonStyle(.plain)
 
@@ -161,7 +170,84 @@ struct StreamCardView: View {
             .cornerRadius(TRadius.card)
         }
         .buttonStyle(.plain)
-        .contextMenu { MultiLiveMenuButton(login: stream.userLogin, name: stream.userName) }
+        .contextMenu {
+            MultiLiveMenuButton(login: stream.userLogin, name: stream.userName)
+            if pinnable { PinStreamerMenuButton(login: stream.userLogin) }
+            if hideable { HideMenuButtons(stream: stream, allowCategory: hideCategory) }
+        }
+    }
+}
+
+// MARK: – Épingler un streamer
+/// Appui long sur une chaîne suivie : l'épingler en tête des suivis, ou l'en retirer.
+struct PinStreamerMenuButton: View {
+    let login: String
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        let pinned = store.isPinned(login)
+        Button { withAnimation { store.togglePin(login) } } label: {
+            Label(store.t(pinned ? "unpin_streamer" : "pin_streamer"),
+                  systemImage: pinned ? "pin.slash" : "pin")
+        }
+    }
+}
+
+// MARK: – Masquer (listes de découverte)
+/// Appui long sur un live du top ou d'une catégorie : masquer la chaîne, ou
+/// toute sa catégorie. Rien pour une chaîne suivie ou épinglée, ni pour une
+/// catégorie suivie : elles ne sont jamais masquées.
+struct HideMenuButtons: View {
+    let stream: TwitchStream
+    var allowCategory = true
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        if !store.isFollowedOrPinned(stream.userLogin) {
+            Button(role: .destructive) {
+                withAnimation { store.hideChannel(login: stream.userLogin, name: stream.userName) }
+            } label: {
+                Label(store.t("hide_channel"), systemImage: "eye.slash")
+            }
+        }
+        if allowCategory, !stream.gameId.isEmpty, !stream.gameName.isEmpty,
+           !store.followsCategory(stream.gameId) {
+            Button(role: .destructive) {
+                withAnimation { store.hideCategory(id: stream.gameId, name: stream.gameName, box: "") }
+            } label: {
+                Label(store.t("hide_category").replacingOccurrences(of: "{c}", with: stream.gameName),
+                      systemImage: "eye.slash")
+            }
+        }
+    }
+}
+
+/// Pastille « Masquée » : élément masqué montré quand même (recherche,
+/// page ouverte directement).
+struct HiddenBadge: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "eye.slash").font(.system(size: 10, weight: .bold))
+            Text(store.t("hidden_badge")).font(.system(size: 11, weight: .bold)).lineLimit(1)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(Color.black.opacity(0.7))
+        .clipShape(Capsule())
+    }
+}
+
+/// Petite punaise devant le nom d'une chaîne épinglée.
+struct PinnedMark: View {
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        Image(systemName: "pin.fill")
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(.tPrimary)
+            .accessibilityLabel(store.t("pinned_short"))
     }
 }
 
@@ -337,6 +423,13 @@ struct ClipCardView: View {
         return parts.joined(separator: " · ")
     }
 
+    /// « 0:28 » : un clip dure une minute au plus, formatDuration (heures et
+    /// minutes) affichait « 0min » sur presque toutes les cartes.
+    private var durationText: String {
+        let s = max(0, clip.durationSeconds)
+        return "\(s / 60):" + String(format: "%02d", s % 60)
+    }
+
     var body: some View {
         Button(action: onPress) {
             VStack(alignment: .leading, spacing: 0) {
@@ -356,7 +449,7 @@ struct ClipCardView: View {
                         Spacer()
                         HStack {
                             Spacer()
-                            Text(formatDuration(clip.durationSeconds))
+                            Text(durationText)
                                 .font(.tBadge).foregroundColor(.white)
                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                 .background(Color.black.opacity(0.65)).cornerRadius(4)
@@ -384,7 +477,16 @@ struct ClipCardView: View {
 // MARK: – Carte de catégorie
 struct CategoryCardView: View {
     let category: TwitchCategory
+    /// Grille « Toutes » : l'appui long propose de masquer la catégorie (ou
+    /// de la réafficher), et une catégorie masquée montrée par la recherche
+    /// est atténuée.
+    var hideable = false
     let onPress: () -> Void
+    @EnvironmentObject private var store: AppStore
+
+    private var isHidden: Bool {
+        hideable && store.hidden.hides(category: category.id) && !store.followsCategory(category.id)
+    }
 
     var body: some View {
         Button(action: onPress) {
@@ -397,6 +499,9 @@ struct CategoryCardView: View {
                             .font(.system(size: 20)).foregroundColor(.tMuted.opacity(0.5)))
                 }
                 .clipped()
+                .overlay(alignment: .topLeading) {
+                    if isHidden { HiddenBadge().padding(TSpace.sm) }
+                }
 
                 // Nom puis audience, sous la jaquette : l'affiche reste lisible.
                 // L'audience arrive après la grille (requête séparée) : sa
@@ -421,8 +526,28 @@ struct CategoryCardView: View {
             }
             .background(Color.tCard)
             .cornerRadius(TRadius.card)
+            .opacity(isHidden ? 0.5 : 1)
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            if hideable && !store.followsCategory(category.id) {
+                if store.hidden.hides(category: category.id) {
+                    Button {
+                        withAnimation { store.unhideCategory(category.id) }
+                    } label: {
+                        Label(store.t("unhide"), systemImage: "eye")
+                    }
+                } else {
+                    Button(role: .destructive) {
+                        withAnimation {
+                            store.hideCategory(id: category.id, name: category.name, box: category.boxArtURL)
+                        }
+                    } label: {
+                        Label(store.t("hide_this_category"), systemImage: "eye.slash")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -507,6 +632,11 @@ struct ChannelHeroView: View {
 /// Miniature à gauche, infos à droite : plus de chaînes visibles d'un coup.
 struct StreamRowView: View {
     let stream: TwitchStream
+    /// Chaîne suivie : l'appui long propose de l'épingler en tête.
+    var pinnable = false
+    /// Liste de découverte : l'appui long propose de masquer (voir StreamCardView).
+    var hideable = false
+    var hideCategory = true
     let onPress: () -> Void
     @EnvironmentObject private var store: AppStore
 
@@ -536,10 +666,13 @@ struct StreamRowView: View {
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Button { store.openChannelPage(stream.userLogin) } label: {
-                        Text(stream.userName)
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.tText)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            if pinnable && store.isPinned(stream.userLogin) { PinnedMark() }
+                            Text(stream.userName)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.tText)
+                                .lineLimit(1)
+                        }
                     }
                     .buttonStyle(.plain)
                     Text(stream.title)
@@ -563,6 +696,10 @@ struct StreamRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .contextMenu { MultiLiveMenuButton(login: stream.userLogin, name: stream.userName) }
+        .contextMenu {
+            MultiLiveMenuButton(login: stream.userLogin, name: stream.userName)
+            if pinnable { PinStreamerMenuButton(login: stream.userLogin) }
+            if hideable { HideMenuButtons(stream: stream, allowCategory: hideCategory) }
+        }
     }
 }

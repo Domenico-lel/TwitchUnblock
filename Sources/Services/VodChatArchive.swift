@@ -4,8 +4,9 @@ import Foundation
 // ═══════════════════════════════════════════════════════════════════════════
 //  Chat d'une VOD gardé avec son téléchargement, pour être rejoué hors ligne.
 //
-//  Les commentaires du passage (GQL `video.comments`, par position puis par
-//  curseur) sont mis en forme comme dans le chat de VOD — badges, emotes
+//  Les commentaires du passage (GQL `video.comments`, par position : les
+//  pages se chevauchent, les doublons sont écartés ; le curseur est refusé
+//  par Twitch) sont mis en forme comme dans le chat de VOD — badges, emotes
 //  Twitch, 7TV, BTTV, FFZ — puis écrits dans chat.json. Leurs images sont
 //  gardées dans le dossier (chat-images/) : sans connexion, tout s'affiche.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -56,28 +57,44 @@ enum VodChatArchive {
             await BadgeService.shared.loadChannel(channelId: cid, token: token)
         }
 
+        // Par position, comme le chat de VOD (le curseur est refusé par
+        // Twitch) : chaque page repart du dernier instant reçu, les doublons
+        // du chevauchement sont écartés, +5 s après une page sans nouveauté.
         var comments: [OfflineChat.Comment] = []
         var seen = Set<String>()
-        var cursor: String? = nil
+        var position = Int(max(0, from))
         var pages = 0
-        while pages < 4000 {
+        var failures = 0
+        while pages < 4000, Double(position) <= to {
             if Task.isCancelled { return nil }
-            guard let page = await VodChatService.commentsPage(videoId: vodId,
-                                                              offset: cursor == nil ? Int(from) : nil,
-                                                              cursor: cursor) else { return nil }
+            guard let page = await VodChatService.commentsPage(videoId: vodId, offset: position) else {
+                // Coupure passagère : deux nouveaux essais (2 s, puis 4 s)
+                // avant de renoncer au chat.
+                failures += 1
+                if failures > 2 { return nil }
+                try? await Task.sleep(nanoseconds: UInt64(failures) * 2_000_000_000)
+                continue
+            }
+            failures = 0
             pages += 1
             var beyond = false
+            var fresh = 0
+            var newest = -1.0
             for node in page.nodes {
                 let offset = (node["contentOffsetSeconds"] as? Double)
                     ?? Double(node["contentOffsetSeconds"] as? Int ?? 0)
                 if offset > to { beyond = true; break }
-                guard offset >= from, let id = node["id"] as? String, seen.insert(id).inserted,
+                guard let id = node["id"] as? String, seen.insert(id).inserted else { continue }
+                fresh += 1
+                newest = max(newest, offset)
+                guard offset >= from,
                       let comment = await comment(node, offset: offset, channelId: owner?.id) else { continue }
                 comments.append(comment)
             }
-            guard !beyond, page.hasNext, let next = page.cursor else { break }
-            cursor = next
+            if beyond || (!page.hasNext && fresh == 0) { break }
+            position = fresh > 0 ? max(position + 1, Int(newest)) : position + 5
         }
+        comments.sort { $0.o < $1.o }
 
         let images = await saveImages(of: comments, into: folder.appendingPathComponent(imagesFolder, isDirectory: true))
         let chat = OfflineChat(base: from, channelLogin: owner?.login ?? "", comments: comments, images: images)

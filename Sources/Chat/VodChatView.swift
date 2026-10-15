@@ -9,6 +9,9 @@ struct VodChatView: View {
     var style: ChatStyle = .standard
     /// VOD téléchargée : le chat gardé avec elle (chat.json), lu sans réseau.
     var offlineFile: URL? = nil
+    /// « Voir la chaîne » dans la fiche d'une emote. Faux en multi-live : la
+    /// mosaïque est plein écran, la page s'ouvrirait dessous.
+    var opensChannelPages = true
 
     @EnvironmentObject private var store: AppStore
     @StateObject private var vod = VodChatService()
@@ -16,6 +19,8 @@ struct VodChatView: View {
     @State private var autoScroll      = true
     @State private var sentinelVisible = true
     @State private var isDragging      = false
+    /// Emote ou badge touché : sa fiche (nom exact, source).
+    @State private var infoItem: ChatInfoItem? = nil
 
     private let bottomAnchor = "vod_chat_bottom"
 
@@ -150,5 +155,17 @@ struct VodChatView: View {
             Task { await vod.update(offset: playbackTime) }
         }
         .onDisappear { vod.stop() }
+        .sheet(item: $infoItem) { item in
+            ChatInfoSheet(item: item, channelId: vod.channelId,
+                          onOpenChannel: opensChannelPages ? { (login: String) in
+                              // La fiche se ferme d'abord : une seule feuille à la fois.
+                              infoItem = nil
+                              DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                  store.openChannelPage(login)
+                              }
+                          } : nil)
+                .environmentObject(store)
+        }
+        .environment(\.chatInfoAction, { infoItem = $0 })
     }
 }

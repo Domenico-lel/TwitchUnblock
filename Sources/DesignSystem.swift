@@ -245,14 +245,23 @@ struct TSearchField: View {
     let placeholder: String
     var submitLabel: SubmitLabel = .search
     var onSubmit: () -> Void = {}
+    /// Recherche en cours : un indicateur à la place de la loupe.
+    var busy = false
 
     @FocusState private var focused: Bool
 
     var body: some View {
         HStack(spacing: TSpace.sm) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(focused ? .tPrimary : .tMuted)
+            if busy {
+                ProgressView()
+                    .tint(.tPrimary)
+                    .scaleEffect(0.75)
+                    .frame(width: 15, height: 15)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(focused ? .tPrimary : .tMuted)
+            }
 
             TextField(placeholder, text: $text)
                 .font(.tBody)
@@ -363,6 +372,8 @@ struct TMeta: View {
 // MARK: – Bouton de pagination
 struct TLoadMoreButton: View {
     let busy: Bool
+    /// Clé de traduction du libellé (« Charger plus » par défaut).
+    var titleKey = "load_more"
     let action: () -> Void
     @EnvironmentObject private var store: AppStore
 
@@ -372,7 +383,7 @@ struct TLoadMoreButton: View {
                 if busy {
                     ProgressView().tint(.tPrimary)
                 } else {
-                    Text(store.t("load_more")).font(.tLabel).foregroundColor(.tPrimary)
+                    Text(store.t(titleKey)).font(.tLabel).foregroundColor(.tPrimary)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -384,6 +395,22 @@ struct TLoadMoreButton: View {
         .disabled(busy)
         .padding(.horizontal, TSpace.lg)
         .padding(.top, TSpace.md)
+    }
+}
+
+/// À la place de TLoadMoreButton quand Twitch refuse la suite d'une liste :
+/// une ligne discrète qui dit pourquoi (`key` : clé de traduction).
+struct TListEndNote: View {
+    let key: String
+    @EnvironmentObject private var store: AppStore
+
+    var body: some View {
+        Text(store.t(key))
+            .font(.tMeta).foregroundColor(.tMuted)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, TSpace.lg)
+            .padding(.top, TSpace.sm)
     }
 }
 

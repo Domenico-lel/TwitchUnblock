@@ -26,20 +26,33 @@ struct SearchView: View {
     @EnvironmentObject private var store: AppStore
     /// Suivre pour de vrai (session web) depuis la page de la chaîne.
     @StateObject private var follow = FollowService()
+    /// « Ne plus suivre » touché : on demande d'abord confirmation.
+    @State private var confirmUnfollow = false
 
     @State private var query        = ""
     @State private var filterText   = ""
     @State private var loading      = false
     @State private var errorMsg: String? = nil
+    /// Chaîne dont la page n'a pas pu se charger, Twitch n'ayant pas répondu :
+    /// « Réessayer » la redemande (rien à refaire pour une chaîne introuvable).
+    @State private var retryLogin: String? = nil
     @State private var searchedName = ""
 
     // Résultats « chaîne »
     @State private var liveData: LiveData? = nil
+    /// Début du dernier live (même sans VOD), pour « hors ligne depuis ».
+    @State private var lastBroadcastAt: String? = nil
     @State private var avatarURL = ""
     @State private var vods: [VodData] = []
     @State private var vodCursor: String? = nil
     @State private var hasMoreVods  = false
     @State private var isLoadingMore = false
+    /// Suite des VODs : Twitch la refuse (message), ou panne réseau (bouton
+    /// pour réessayer, le défilement infini ne relance pas seul).
+    @State private var vodsRefused   = false
+    @State private var vodsMoreFailed = false
+    /// Filtre par mot-clé : pages suivantes demandées pour y chercher.
+    @State private var searchingOlder = false
 
     // Onglets de la chaîne : 0 VODs, 1 Highlights, 2 Playlists, 3 Clips, 4 À propos
     @State private var channelTab   = 0
@@ -48,6 +61,9 @@ struct SearchView: View {
     // date parmi les VODs, reconstruites au toucher.
     @StateObject private var recovery = VodRecoveryService()
     @State private var resolvingID: String? = nil   // diffusion en cours de reconstruction
+    /// Reconstruction en cours : annulée si on ouvre une autre chaîne ou si
+    /// la page se ferme, pour qu'elle n'ouvre pas le lecteur après coup.
+    @State private var recoverTask: Task<Void, Never>? = nil
     /// Diffusions dont le CDN ne sert plus les segments.
     @State private var goneIDs: Set<String> = []
     @State private var highlights: [VodData] = []
@@ -62,10 +78,11 @@ struct SearchView: View {
     @State private var clipPeriod   = "LAST_WEEK"
     @State private var clipsFor     = ""
     @State private var loadingClips = false
-    /// Twitch en a d'autres que les 100 premiers ; la suite vient de Helix
-    /// (compte connecté), à partir de ce curseur.
-    @State private var clipsMore    = false
-    @State private var clipsCursor: String? = nil
+    /// Suite des clips : GQL sans compte (Client-ID d'Android), ou Helix avec
+    /// le compte si Twitch refuse GQL. nil : pas de suite.
+    @State private var clipsCursor: ListCursor? = nil
+    /// Twitch refuse la suite sans compte : un message remplace le bouton.
+    @State private var clipsLocked  = false
     @State private var loadingMoreClips = false
 
     // Onglet « À propos » (description, réseaux, panneaux)
@@ -82,13 +99,10 @@ struct SearchView: View {
                            GridItem(.flexible(), alignment: .top)]
 
     /// Le texte saisi désigne-t-il une VOD (lien twitch.tv/videos/… ou ID) ?
-    private var queryIsVod: Bool {
-        let t = query.trimmingCharacters(in: .whitespaces)
-        guard !t.isEmpty else { return false }
-        // Un identifiant de VOD est un nombre long ; un lien contient /videos/.
-        if t.lowercased().contains("/videos/") { return true }
-        return t.allSatisfy(\.isNumber) && t.count >= 8
-    }
+    /// Même règle que le « + » du multi-live (TwitchAPI).
+    private var queryIsVod: Bool { isVodInput(query) }
+    /// Lien de clip collé : il s'ouvre directement, comme sur le site.
+    private var queryIsClip: Bool { clipSlugFromInput(query) != nil }
 
     private var channelName: String {
         searchedName.isEmpty ? "" : searchedName
@@ -125,7 +139,8 @@ struct SearchView: View {
         for v in vods {
             if let d = parseTwitchDate(v.publishedAt) { dated.append((vod: v, date: d)) }
         }
-        let oldest = hasMoreVods ? dated.map { $0.date }.min() : nil
+        // Liste incomplète : suite à charger, en panne, ou refusée par Twitch.
+        let oldest = vodCursor != nil || vodsRefused ? dated.map { $0.date }.min() : nil
         // Le direct en cours a sa propre page : pas une VOD perdue.
         let liveStart = liveData?.error == nil ? liveData?.startedAt : nil
         return recovery.streams.filter { s in
@@ -154,11 +169,16 @@ struct SearchView: View {
     }
 
     private var offlineSinceText: String? {
-        guard liveData?.error != nil, let first = vods.first else { return nil }
+        guard liveData?.error != nil else { return nil }
+        // La dernière VOD, ou le dernier live s'il est plus récent (un live
+        // sans VOD n'en laisse pas) : comme l'accueil, qui disait « 1 j »
+        // quand la page disait « 21 j ».
+        let first = vods.first
         // Chaîne vide = date illisible : on préfère ne rien dire plutôt
         // qu'afficher « Hors ligne depuis : » suivi de rien.
-        guard let end = lastLiveEnd(publishedAt: first.publishedAt,
-                                    lengthSeconds: first.lengthSeconds, lastStart: nil) else { return nil }
+        guard let end = lastLiveEnd(publishedAt: first?.publishedAt,
+                                    lengthSeconds: first?.lengthSeconds ?? 0,
+                                    lastStart: lastBroadcastAt) else { return nil }
         let since = offlineLabel(since: end, store: store)
         return since.isEmpty ? nil : since
     }
@@ -182,7 +202,7 @@ struct SearchView: View {
             VStack(spacing: TSpace.sm) {
                 HStack(spacing: TSpace.sm) {
                     searchField
-                    TPrimaryButton(title: queryIsVod ? store.t("btn_open") : store.t("btn_search")) {
+                    TPrimaryButton(title: queryIsVod || queryIsClip ? store.t("btn_open") : store.t("btn_search")) {
                         queryFocused = false
                         Task { await submit() }
                     }
@@ -192,9 +212,9 @@ struct SearchView: View {
                 // Indique ce qui va se passer : l'utilisateur n'a pas à deviner.
                 if !query.trimmingCharacters(in: .whitespaces).isEmpty {
                     HStack(spacing: TSpace.xs) {
-                        Image(systemName: queryIsVod ? "play.rectangle.fill" : "person.fill")
+                        Image(systemName: queryIsClip ? "scissors" : queryIsVod ? "play.rectangle.fill" : "person.fill")
                             .font(.system(size: 10))
-                        Text(queryIsVod ? store.t("hint_is_vod") : store.t("hint_is_channel"))
+                        Text(store.t(queryIsClip ? "hint_is_clip" : queryIsVod ? "hint_is_vod" : "hint_is_channel"))
                             .font(.tMeta)
                     }
                     .foregroundColor(.tMuted)
@@ -223,7 +243,9 @@ struct SearchView: View {
                     if loading {
                         TLoader()
                     } else if let err = errorMsg {
-                        TEmptyState(icon: "exclamationmark.triangle", title: err)
+                        TEmptyState(icon: "exclamationmark.triangle", title: err,
+                                    actionTitle: retryLogin == nil ? nil : store.t("retry"),
+                                    action: retryAction)
                     } else if !searchedName.isEmpty {
                         results
                     } else if !queryFocused, query.isEmpty, recentChannelItems.isEmpty {
@@ -245,6 +267,12 @@ struct SearchView: View {
             if let login = initialChannel, searchedName.isEmpty, !loading {
                 Task { await searchChannel(login) }
             }
+        }
+        // Page quittée (autre onglet, feuille fermée) : une reconstruction en
+        // cours n'ouvre plus le lecteur après coup.
+        .onDisappear {
+            recoverTask?.cancel()
+            recoverTask = nil
         }
     }
 
@@ -301,7 +329,16 @@ struct SearchView: View {
                         .overlay(Circle().stroke(s.isLive ? Color.tLive : .clear, lineWidth: 2).padding(-2))
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(s.name).font(.tCardTitle).foregroundColor(.tText).lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text(s.name).font(.tCardTitle).foregroundColor(.tText).lineLimit(1)
+                                // Masquée des listes : la recherche la trouve quand même.
+                                if store.hidden.hides(channel: s.login) {
+                                    Image(systemName: "eye.slash")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(.tMuted)
+                                        .accessibilityLabel(store.t("hidden_badge"))
+                                }
+                            }
                             if let viewers = s.viewers {
                                 HStack(spacing: 5) {
                                     Text("LIVE")
@@ -397,7 +434,7 @@ struct SearchView: View {
                 thumbnailURL: live.thumbnail,
                 viewerCount: live.viewerCount,
                 offlineSince: offlineSinceText,
-                onWatchLive: live.error == nil ? { onPlayLive(channelName) } : nil
+                onWatchLive: live.error == nil ? { leaveRecovery(); onPlayLive(channelName) } : nil
             )
             .padding(.horizontal, TSpace.lg)
 
@@ -409,7 +446,18 @@ struct SearchView: View {
                 let local = store.twitchWebToken == nil
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    Task { await follow.toggle(token: store.twitchWebToken) }
+                    // Ne plus suivre se confirme (sur Twitch avec la session web).
+                    if follow.isFollowing == true {
+                        confirmUnfollow = true
+                        return
+                    }
+                    let login = channelName
+                    Task { @MainActor in
+                        await follow.toggle(token: store.twitchWebToken)
+                        // Suivie (aussi sur Twitch, sans passer par AppStore) :
+                        // elle n'a plus à être masquée.
+                        if follow.isFollowing == true { store.unhideChannel(login) }
+                    }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: on ? "heart.fill" : "heart")
@@ -427,6 +475,43 @@ struct SearchView: View {
                 .buttonStyle(.plain)
                 .disabled(follow.busy)
                 .opacity(follow.busy ? 0.5 : 1)
+                .confirmationDialog(
+                    store.t("unfollow_confirm").replacingOccurrences(of: "{c}", with: channelName),
+                    isPresented: $confirmUnfollow, titleVisibility: .visible
+                ) {
+                    Button(store.t("unfollow"), role: .destructive) {
+                        Task { @MainActor in await follow.unfollow(token: store.twitchWebToken) }
+                    }
+                    Button(store.t("cancel"), role: .cancel) {}
+                }
+                .padding(.horizontal, TSpace.lg)
+
+                // Twitch a refusé (limite de suivis, chaîne qui bloque…) : le
+                // cœur garde son état, et on le dit au lieu de ne rien faire.
+                if let code = follow.lastError {
+                    Text(store.t("follow_failed") + (code.isEmpty ? "" : " (\(code))"))
+                        .font(.tMeta).foregroundColor(.tDanger)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, TSpace.lg)
+                }
+            }
+
+            // Chaîne masquée des listes de découverte : la réafficher d'ici.
+            if !channelName.isEmpty, store.hidden.hides(channel: channelName) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { store.unhideChannel(channelName) }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "eye")
+                        Text("\(store.t("hidden_badge")) · \(store.t("unhide"))")
+                            .font(.system(size: 13, weight: .bold))
+                    }
+                    .foregroundColor(.tMuted)
+                    .padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Color.tSurface)
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
                 .padding(.horizontal, TSpace.lg)
             }
         }
@@ -484,13 +569,15 @@ struct SearchView: View {
                                     let progress = vod.lengthSeconds > 0
                                         ? saved / Double(vod.lengthSeconds) : 0
                                     VodCardView(vod: vod, progress: progress) {
+                                        leaveRecovery()
                                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                                     }
+                                    .contextMenu { multiMenu(vod) }
                                     .onAppear {
                                         // Défilement infini : charge la suite quand la
                                         // dernière VOD apparaît.
                                         guard vod.id == filteredVods.last?.id,
-                                              hasMoreVods, !isLoadingMore else { return }
+                                              hasMoreVods, !isLoadingMore, !searchingOlder else { return }
                                         isLoadingMore = true
                                         Task { await loadMoreVods() }
                                     }
@@ -498,14 +585,32 @@ struct SearchView: View {
                                     UnlistedVodCardView(stream: s,
                                                         resolving: resolvingID == s.streamID,
                                                         gone: goneIDs.contains(s.streamID)) {
-                                        Task { await recover(s) }
+                                        // Une seule à la fois : la tâche gardée est
+                                        // celle qui tourne vraiment.
+                                        guard resolvingID == nil else { return }
+                                        recoverTask = Task { await recover(s) }
                                     }
                                 }
                             }
                         }
                         .padding(.horizontal, TSpace.lg)
+                    }
 
-                        if isLoadingMore { TLoader() }
+                    if isLoadingMore || searchingOlder {
+                        TLoader()
+                    } else if vodsMoreFailed {
+                        TLoadMoreButton(busy: false) {
+                            isLoadingMore = true
+                            Task { await loadMoreVods() }
+                        }
+                    } else if vodsRefused {
+                        TListEndNote(key: "more_unavailable")
+                    } else if !filterText.trimmingCharacters(in: .whitespaces).isEmpty, vodCursor != nil {
+                        // Le filtre ne voit que les VODs chargées : sans
+                        // correspondance, rien ne demandait la suite.
+                        TLoadMoreButton(busy: false, titleKey: "vods_search_older") {
+                            Task { await searchOlderVods() }
+                        }
                     }
                 }
             } else if liveData != nil, errorMsg == nil {
@@ -526,12 +631,20 @@ struct SearchView: View {
                     let saved = store.getVodProgress(vod.id)
                     let progress = vod.lengthSeconds > 0 ? saved / Double(vod.lengthSeconds) : 0
                     VodCardView(vod: vod, progress: progress) {
+                        leaveRecovery()
                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                     }
+                    .contextMenu { multiMenu(vod) }
                 }
             }
             .padding(.horizontal, TSpace.lg)
         }
+    }
+
+    /// Appui long sur une VOD (ou un temps fort) de la chaîne : le multi-live.
+    private func multiMenu(_ vod: VodData) -> some View {
+        MultiVodMenuButton(vodId: vod.id, title: vod.title, thumb: vod.previewThumbnailURL,
+                           name: channelName, login: channelName)
     }
 
     @MainActor private func loadHighlights() async {
@@ -568,6 +681,7 @@ struct SearchView: View {
                             }
                             Spacer(minLength: 0)
                             Button {
+                                leaveRecovery()
                                 onPlayQueue(list.videos, channelName)
                             } label: {
                                 Label(store.t("play_all"), systemImage: "play.fill")
@@ -586,8 +700,10 @@ struct SearchView: View {
                                     let saved = store.getVodProgress(vod.id)
                                     let progress = vod.lengthSeconds > 0 ? saved / Double(vod.lengthSeconds) : 0
                                     VodCardView(vod: vod, progress: progress) {
+                                        leaveRecovery()
                                         onPlayVod(vod.id, vod.title, vod.previewThumbnailURL, channelName)
                                     }
+                                    .contextMenu { multiMenu(vod) }
                                     .frame(width: 200)
                                 }
                             }
@@ -632,20 +748,24 @@ struct SearchView: View {
             } else {
                 LazyVGrid(columns: columns, spacing: TSpace.md) {
                     ForEach(clips) { clip in
-                        ClipCardView(clip: clip) { onPlayClip(clip.id, clip.title) }
+                        ClipCardView(clip: clip) { leaveRecovery(); onPlayClip(clip.id, clip.title) }
                     }
                 }
                 .padding(.horizontal, TSpace.lg)
 
-                // Au-delà des 100 premiers : il faut le compte (Helix).
-                if clipsMore {
+                // Au-delà des 100 premiers : GQL sans compte ; si Twitch le
+                // refuse, Helix avec le compte, sinon un message.
+                if clipsCursor != nil {
+                    TLoadMoreButton(busy: loadingMoreClips) { Task { await loadMoreClips() } }
+                } else if clipsLocked {
                     if store.twitchToken != nil {
-                        TLoadMoreButton(busy: loadingMoreClips) { Task { await loadMoreClips() } }
+                        // Connecté depuis le refus : Helix reprend du début.
+                        TLoadMoreButton(busy: loadingMoreClips) {
+                            clipsCursor = .helix(nil); clipsLocked = false
+                            Task { await loadMoreClips() }
+                        }
                     } else {
-                        Text(store.t("more_needs_login"))
-                            .font(.tMeta).foregroundColor(.tMuted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, TSpace.sm)
+                        TListEndNote(key: "more_needs_login")
                     }
                 }
             }
@@ -656,46 +776,56 @@ struct SearchView: View {
         let login = searchedName.lowercased()
         guard !login.isEmpty else { return }
         let key = "\(login)|\(clipPeriod)"
-        if clipsFor == key, !clips.isEmpty { return }
+        // Retour sur la période déjà affichée (« 24 h » puis aussitôt
+        // « Semaine ») : la demande en route pour l'autre sera écartée, rien
+        // ne remettrait le chargeur à faux.
+        if clipsFor == key, !clips.isEmpty { loadingClips = false; return }
         loadingClips = true
-        let result = await getClips(login: login, period: clipPeriod)
+        let result = await getClipsPage(login: login, period: clipPeriod, after: nil)
         guard key == "\(searchedName.lowercased())|\(clipPeriod)" else { return }
-        clips = result.clips
-        clipsMore = result.more
-        clipsCursor = nil
+        clips = result?.clips ?? []
+        if let next = result?.next {
+            clipsCursor = .gql(next)
+        } else if result?.more == true, store.twitchToken != nil {
+            // Suite annoncée sans curseur GQL : Helix la donne avec le compte.
+            clipsCursor = .helix(nil)
+        } else {
+            clipsCursor = nil
+        }
+        clipsLocked = false
         clipsFor = key
         loadingClips = false
     }
 
-    /// Clips au-delà des 100 premiers : Helix, avec le compte. Helix repart du
-    /// début (ses 100 premiers recouvrent ceux déjà là) : jusqu'à 3 pages pour
-    /// trouver du neuf.
+    /// Clips au-delà des 100 premiers : GQL sans compte (Client-ID
+    /// d'Android). Si Twitch le refuse, Helix avec le compte, qui repart du
+    /// début (ses 100 premiers recouvrent ceux déjà là) : loadMorePages
+    /// enchaîne jusqu'à 3 pages pour trouver du neuf.
     @MainActor private func loadMoreClips() async {
-        guard clipsMore, !loadingMoreClips, let token = store.twitchToken else { return }
+        guard let c = clipsCursor, !loadingMoreClips else { return }
         let key = clipsFor
         let login = searchedName.lowercased()
+        let period = clipPeriod
         loadingMoreClips = true
         defer { loadingMoreClips = false }
         var broadcaster = liveData?.userId ?? ""
-        if broadcaster.isEmpty { broadcaster = await getUserIdGQL(login: login) ?? "" }
-        guard !broadcaster.isEmpty else { clipsMore = false; return }
-        var known = Set(clips.map(\.id))
-        var cursor = clipsCursor
-        var fresh: [ClipData] = []
-        for _ in 0..<3 {
-            let page = await getClipsHelix(token: token, broadcasterId: broadcaster,
-                                           period: clipPeriod, cursor: cursor)
-            cursor = page.cursor
-            for c in page.clips where !known.contains(c.id) {
-                known.insert(c.id)
-                fresh.append(c)
-            }
-            if !fresh.isEmpty || cursor == nil { break }
-        }
+        let result = await loadMorePages(
+            after: c, current: clips, token: store.twitchToken,
+            gql: { after in
+                guard let p = await getClipsPage(login: login, period: period, after: after) else { return nil }
+                return (p.clips, p.next, p.refused)
+            },
+            helix: { token, after in
+                if broadcaster.isEmpty { broadcaster = await getUserIdGQL(login: login) ?? "" }
+                guard !broadcaster.isEmpty else { return nil }
+                let p = await getClipsHelix(token: token, broadcasterId: broadcaster,
+                                            period: period, cursor: after)
+                return (p.clips, p.cursor)
+            })
         guard key == clipsFor else { return }
-        clips += fresh
-        clipsCursor = cursor
-        clipsMore = cursor != nil
+        clips += result.fresh
+        clipsCursor = result.cursor
+        clipsLocked = result.locked
     }
 
     // MARK: – À propos
@@ -727,10 +857,18 @@ struct SearchView: View {
     /// ne la sert plus, sa carte le dit ; un nouvel essai reste possible.
     @MainActor private func recover(_ s: RecoverableStream) async {
         guard resolvingID == nil else { return }
+        let login = searchedName
         resolvingID = s.streamID
         goneIDs.remove(s.streamID)
         let links = await recovery.resolve(s)
+        // Abandonnée (autre chaîne ouverte, page quittée) : rien ne s'ouvre,
+        // et la carte n'est pas marquée perdue.
+        guard !Task.isCancelled, login == searchedName else {
+            if resolvingID == s.streamID { resolvingID = nil }
+            return
+        }
         resolvingID = nil
+        recoverTask = nil
         if let links, !links.isEmpty {
             onRecovered(RecoveredVod(
                 streamID: s.streamID,
@@ -741,19 +879,43 @@ struct SearchView: View {
         }
     }
 
+    /// Autre lecture lancée d'ici (direct, VOD, playlist, clip) : la
+    /// reconstruction en cours est abandonnée. Dans l'onglet Recherche, la
+    /// page reste sous le lecteur et rien ne l'annulait : en aboutissant, elle
+    /// ouvrait la VOD retrouvée à la place de ce qu'on venait de lancer.
+    private func leaveRecovery() {
+        recoverTask?.cancel()
+        recoverTask = nil
+        resolvingID = nil
+    }
+
     // MARK: – Actions
+    /// « Réessayer » sous l'erreur : la page de la même chaîne, redemandée.
+    private var retryAction: (() -> Void)? {
+        guard let login = retryLogin else { return nil }
+        return { Task { await searchChannel(login) } }
+    }
+
     /// Aiguille vers la VOD ou la chaîne selon ce qui a été saisi.
     @MainActor private func submit() async {
         let raw = query.trimmingCharacters(in: .whitespaces)
         guard !raw.isEmpty else { return }
+        // Lien de clip : lu tout de suite. Avant, « clips.twitch.tv/Slug »
+        // cherchait une chaîne « slug » et « twitch.tv/x/clip/… » ouvrait x.
+        if let slug = clipSlugFromInput(raw) {
+            suggestions = []
+            leaveRecovery()
+            onPlayClip(slug, nil)
+            return
+        }
         if queryIsVod { await openVod(raw) } else { await searchChannel(raw) }
     }
 
     @MainActor private func openVod(_ raw: String) async {
         guard let vodId = extractVodId(raw) else {
-            errorMsg = store.t("err_bad_vod"); return
+            errorMsg = store.t("err_bad_vod"); retryLogin = nil; return
         }
-        loading = true; errorMsg = nil; searchedName = ""
+        loading = true; errorMsg = nil; retryLogin = nil; searchedName = ""
         suggestions = []
 
         async let metaTask = getVodMetaGQL(vodId)
@@ -762,48 +924,76 @@ struct SearchView: View {
         loading = false
 
         guard !(m3u8.links.isEmpty && m3u8.error != nil) else {
-            errorMsg = m3u8.error; return
+            errorMsg = m3u8.error.map { store.t(apiErrorKey($0)) }; return
         }
+        // « ?t=1h2m3s » du lien : la VOD part de là (le lecteur reprend à la
+        // position enregistrée).
+        if let start = vodStartFromInput(raw) { store.setVodProgress(vodId, time: start) }
         // La lecture passe par le lecteur global : l'historique y est enregistré.
-        onPlayVod(vodId, meta?.title ?? "VOD \(vodId)", meta?.thumb, meta?.streamer)
+        onPlayVod(vodId, meta?.title ?? "VOD \(vodId)", meta?.thumb,
+                  meta.flatMap { $0.streamer.isEmpty ? nil : $0.streamer })
     }
 
     @MainActor private func searchChannel(_ name: String) async {
-        var login = name.trimmingCharacters(in: .whitespaces)
-            .components(separatedBy: " ").first?.lowercased() ?? ""
         // Lien Twitch collé (« twitch.tv/xqc », « https://www.twitch.tv/xqc/clips ») :
-        // on en garde la chaîne.
-        if let r = login.range(of: #"twitch\.tv/([a-z0-9_]{1,25})"#, options: .regularExpression) {
-            let path = login[r].replacingOccurrences(of: "twitch.tv/", with: "")
-            if !["videos", "directory"].contains(path) { login = path }
-        }
+        // on en garde la chaîne ; « @xqc » donne xqc (TwitchAPI).
+        let login = loginFromInput(name)
         guard !login.isEmpty else { return }
 
-        loading = true; errorMsg = nil; liveData = nil; vods = []
+        loading = true; errorMsg = nil; retryLogin = nil; liveData = nil; lastBroadcastAt = nil; vods = []
+        // Le suivi de la chaîne précédente ne doit ni s'afficher ni se modifier ici.
+        follow.reset(); confirmUnfollow = false
         filterText = ""; searchedName = login; suggestions = []
-        channelTab = 0; clips = []; clipsFor = ""
-        clipsMore = false; clipsCursor = nil; loadingMoreClips = false
+        channelTab = 0; clips = []; clipsFor = ""; loadingClips = false
+        clipsLocked = false; clipsCursor = nil; loadingMoreClips = false
         about = nil; aboutFor = ""; loadingAbout = false
+        // Reconstruction de la chaîne précédente : abandonnée.
+        recoverTask?.cancel(); recoverTask = nil
         resolvingID = nil; goneIDs = []
         playlists = []; playlistsFor = ""; loadingPlaylists = false
         highlights = []; highlightsFor = ""; loadingHighlights = false
         vodCursor = nil; hasMoreVods = false; isLoadingMore = false
+        vodsRefused = false; vodsMoreFailed = false; searchingOlder = false
 
-        async let liveTask   = getLive(channelName: login)
+        // Lien vers une page du site (« twitch.tv/settings »), ou saisie qui
+        // ne peut pas être un nom de chaîne : inutile de demander à Twitch.
+        guard isValidLogin(login) else {
+            errorMsg = store.t("not_found")
+            searchedName = ""
+            loading = false
+            return
+        }
+
+        // Le bandeau ne demande que les infos de la chaîne : plus de
+        // résolution du direct (proxys, jusqu'à une minute par miroir muet),
+        // que « Regarder » refait de toute façon.
+        async let infoTask   = getChannelInfo(channelName: login)
         async let videosTask = getChannelVideos(channelName: login)
-        let (live, ch) = await (liveTask, videosTask)
+        let (info, ch) = await (infoTask, videosTask)
+        let live = info.live
+
+        // Une autre recherche est partie pendant l'attente (ou une VOD a été
+        // ouverte) : c'est elle qui conclut ; ces résultats ne s'écrivent pas
+        // sous son nom.
+        guard login == searchedName else { return }
 
         avatarURL = live.avatar ?? ch.avatar ?? ""
 
         if live.error != nil && ch.error != nil && live.avatar == nil {
-            errorMsg = store.t("not_found")
+            // Twitch n'a pas répondu : ce n'est pas « introuvable », et on
+            // peut réessayer.
+            errorMsg = store.t(live.error == "network" ? "err_loading" : "not_found")
+            if live.error == "network" { retryLogin = login }
             searchedName = ""
         } else {
+            // Photo gardée dans l'historique, comme le site l'y met.
             store.saveToHistory(HistoryItem(
                 term: login, type: .channel, display: login,
                 thumb: nil, streamer: nil,
-                addedAt: Date().timeIntervalSince1970 * 1000))
+                addedAt: Date().timeIntervalSince1970 * 1000,
+                avatar: avatarURL.isEmpty ? nil : avatarURL))
             liveData    = live
+            lastBroadcastAt = info.lastStart
             Task { await loadFollowState(login: login, channelId: live.userId) }
             vods        = ch.videos
             vodCursor   = ch.cursor
@@ -823,24 +1013,58 @@ struct SearchView: View {
         await follow.load(login: login, channelId: cid, token: web)
     }
 
+    /// Suite des VODs (défilement infini) : au-delà des 100 premières, Twitch
+    /// ne la donne qu'au Client-ID d'Android (getChannelVideosPage).
     @MainActor private func loadMoreVods() async {
-        guard let cursor = vodCursor, !channelName.isEmpty else {
+        let login = searchedName.lowercased()
+        guard let cursor = vodCursor, !login.isEmpty else {
             isLoadingMore = false; return
         }
-        let ch = await getChannelVideos(channelName: channelName, cursor: cursor)
+        vodsMoreFailed = false
+        let ch = await getChannelVideosPage(channelName: login, cursor: cursor)
+        // Autre chaîne ouverte pendant l'attente : cette page n'est pas la sienne.
+        guard login == searchedName.lowercased() else { return }
+        isLoadingMore = false
+        if ch.refused {
+            // Se connecter n'y changerait rien : pas de secours Helix ici.
+            vodCursor = nil; hasMoreVods = false; vodsRefused = true
+            return
+        }
+        if ch.error != nil {
+            // Panne réseau : on garde le curseur, un bouton permet de réessayer.
+            hasMoreVods = false; vodsMoreFailed = true
+            return
+        }
         let known = Set(vods.map(\.id))
         let fresh = ch.videos.filter { !known.contains($0.id) }
         vods += fresh
         vodCursor   = ch.cursor
         hasMoreVods = ch.cursor != nil && !fresh.isEmpty
-        isLoadingMore = false
+    }
+
+    /// Filtre par mot-clé : il ne voit que les VODs chargées. Page après
+    /// page (5 au plus par toucher, soit 500 VODs), jusqu'à ce que la suite
+    /// apporte une nouvelle correspondance, s'arrête ou échoue.
+    @MainActor private func searchOlderVods() async {
+        let login = searchedName.lowercased()
+        guard !login.isEmpty, !searchingOlder, !isLoadingMore else { return }
+        searchingOlder = true
+        defer { searchingOlder = false }
+        let before = filteredVods.count
+        for _ in 0..<5 {
+            guard vodCursor != nil, login == searchedName.lowercased() else { break }
+            isLoadingMore = true
+            await loadMoreVods()
+            guard login == searchedName.lowercased() else { break }
+            if filteredVods.count > before || vodsMoreFailed || vodsRefused { break }
+        }
     }
 
     /// Suggestions de chaînes, différées de 300 ms pour ne pas appeler à chaque frappe.
     private func suggest(_ text: String) {
         suggestTask?.cancel()
         let t = text.trimmingCharacters(in: .whitespaces)
-        guard t.count >= 2, !queryIsVod else { suggestions = []; return }
+        guard t.count >= 2, !queryIsVod, !queryIsClip else { suggestions = []; return }
         suggestTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }

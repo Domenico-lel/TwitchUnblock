@@ -30,9 +30,10 @@ enum LiveNotifier {
         }
     }
 
-    /// Programme le prochain réveil (sans effet si l'option est coupée).
+    /// Programme le prochain réveil : pour les lives suivis (option), ou pour
+    /// les réponses aux retours envoyés (FeedbackStore).
     static func schedule() {
-        guard isEnabled else { return }
+        guard isEnabled || UserDefaults.standard.bool(forKey: FeedbackStore.hasReportsKey) else { return }
         let req = BGAppRefreshTaskRequest(identifier: taskId)
         req.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
         do {
@@ -87,7 +88,9 @@ enum LiveNotifier {
     private static func handle(_ task: BGAppRefreshTask) {
         schedule()   // le suivant d'abord : un échec ne doit pas tout arrêter
         let work = Task {
-            let ok = await check(notify: true)
+            let ok = isEnabled ? await check(notify: true) : true
+            // Réponses aux retours envoyés : notifiées par FeedbackStore.
+            await FeedbackStore.shared.refresh(force: true)
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastRunKey)
             UserDefaults.standard.set(ok, forKey: lastOkKey)
             task.setTaskCompleted(success: ok)
@@ -103,10 +106,15 @@ enum LiveNotifier {
         // Suivis du compte Twitch (si connecté) + suivis sur cet appareil.
         var streams: [TwitchStream] = []
         var reached = false
+        // Liste partielle (une page suivante n'a pas répondu) : un live qui
+        // n'y est pas n'est pas fini pour autant. Le retirer des connus le
+        // faisait notifier de nouveau au contrôle suivant, en rafale.
+        var partial = false
         if let token = Keychain.loadToken("twitch_token"),
            let userId = ud.string(forKey: "twitch_user_id"), !userId.isEmpty {
-            guard let followed = try? await getFollowedStreams(token: token, userId: userId) else { return false }
-            streams = followed
+            guard let followed = try? await getFollowedStreamsPaged(token: token, userId: userId) else { return false }
+            streams = followed.streams
+            partial = !followed.complete
             reached = true
         }
         let local = ud.stringArray(forKey: "local_follows") ?? []
@@ -133,7 +141,7 @@ enum LiveNotifier {
                 try? await UNUserNotificationCenter.current().add(req)
             }
         }
-        ud.set(Array(now), forKey: knownKey)
+        ud.set(Array(partial ? known.union(now) : now), forKey: knownKey)
         return true
     }
 }
@@ -141,4 +149,6 @@ enum LiveNotifier {
 extension Notification.Name {
     /// Ouvrir le direct d'une chaîne (touche d'une notification).
     static let openLiveChannel = Notification.Name("OpenLiveChannel")
+    /// Ouvrir « Mes signalements » (notification d'une réponse).
+    static let openMyFeedback = Notification.Name("OpenMyFeedback")
 }

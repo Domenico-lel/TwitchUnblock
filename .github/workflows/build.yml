@@ -195,11 +195,13 @@ jobs:
           SOURCE: ${{ steps.vars.outputs.source }}
         run: |
           # Notes de version : les commits qui touchent l'app depuis le build
-          # précédent de ce canal (commit gardé dans la source). Une ligne
-          # « Changelog: … » dans le corps d'un commit remplace son titre ;
-          # les commits automatiques « [skip ci] » sont ignorés, ainsi que ceux
-          # listés dans .github/changelog-ignore (une fonction ajoutée puis
-          # retirée ne doit pas être annoncée).
+          # précédent de ce canal (commit gardé dans la source). En anglais —
+          # la communauté l'est surtout, et le bot Discord les reprend : seules
+          # les lignes « Changelog: … » du corps des commits sont listées ; un
+          # commit sans elles (titre en français) compte dans « Other
+          # improvements and fixes ». Les commits automatiques « [skip ci] »
+          # sont ignorés, ainsi que ceux listés dans .github/changelog-ignore
+          # (une fonction ajoutée puis retirée ne doit pas être annoncée).
           python3 - <<'PY'
           import json, os, subprocess
           src = os.environ['SOURCE']
@@ -221,6 +223,7 @@ jobs:
           args += ['--', 'Sources', 'Shared', 'Widgets', 'Info.plist', 'project.yml', 'buildipa.sh', 'assets/icon.png', 'assets/icons']
           out = subprocess.run(args, capture_output=True, text=True).stdout
           lines = []
+          other = 0
           for rec in out.split('\x1e'):
               if not rec.strip():
                   continue
@@ -229,11 +232,26 @@ jobs:
               if '[skip ci]' in subject or any(sha.startswith(i) for i in ignored):
                   continue
               custom = [l.split(':', 1)[1].strip() for l in body.splitlines() if l.lower().startswith('changelog:')]
-              for item in (custom or [subject.strip()]):
+              if not custom:
+                  other += 1
+                  continue
+              for item in custom:
                   if item and item not in lines:
                       lines.append(item)
-          # 20 lignes au plus : assez pour une version majeure (1.3.0 en a 17).
-          notes = '\n'.join(f'- {l}' for l in lines[:20]) or '- Améliorations et corrections'
+          # 80 lignes et 12 000 caractères au plus (20 lignes avant : la
+          # version suivant les séries 17 et 18 en a 66). L'app les fait
+          # défiler, le bot Discord les découpe en messages de 2 000
+          # caractères ; son brouillon (20 000 au plus) doit tenir.
+          MAX, BUDGET = 80, 12000
+          items, size = [], 0
+          for l in lines:
+              if len(items) >= MAX or size + len(l) > BUDGET:
+                  break
+              items.append(l)
+              size += len(l) + 3
+          if (other or len(items) < len(lines)) and len(items) < MAX:
+              items.append('Other improvements and fixes')
+          notes = '\n'.join(f'- {l}' for l in items) or '- Improvements and fixes'
           open('changelog.md', 'w').write(notes + '\n')
           print(notes)
           PY
@@ -244,7 +262,7 @@ jobs:
         run: |
           FLAGS=""
           [ "${{ steps.vars.outputs.channel }}" = "test" ] && FLAGS="--prerelease"
-          { echo "Build automatique de la branche \`${{ github.ref_name }}\` le ${{ steps.vars.outputs.date }}."; echo; cat changelog.md; } > release-notes.md
+          { echo "Automatic build of the \`${{ github.ref_name }}\` branch on ${{ steps.vars.outputs.date }}."; echo; cat changelog.md; } > release-notes.md
           gh release create "${{ steps.vars.outputs.tag }}" build/TwitchUnblock.ipa $FLAGS \
             --title "TwitchUnblock ${{ steps.vars.outputs.version }}$([ "${{ steps.vars.outputs.channel }}" = "test" ] && echo " (test)")" \
             --notes-file release-notes.md

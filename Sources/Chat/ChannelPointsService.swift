@@ -72,12 +72,14 @@ final class ChannelPointsService: ObservableObject {
             logger.warn("POINTS", "Chargement annulé", "channelId manquant")
             return
         }
+        // Avant le changement de chaîne : c'est la précédente qui s'arrête
+        // (sa session de points se termine).
+        stopPolling()
         self.channelLogin = channelLogin
         self.channelId    = channelId
         self.token        = token
         self.viewerId     = viewerId ?? ""
         needsWebLogin     = false
-        stopPolling()
 
         isLoading = true; errorMsg = nil
         let start = Date()
@@ -145,6 +147,7 @@ final class ChannelPointsService: ObservableObject {
         balanceTimer?.invalidate(); balanceTimer = nil
         claimTimer?.invalidate();   claimTimer   = nil
         watchTimer?.invalidate();   watchTimer   = nil
+        PointsTracker.shared.end(channelLogin)
     }
 
     // MARK: – Refresh balance (60s)
@@ -155,6 +158,7 @@ final class ChannelPointsService: ObservableObject {
         if delta > 0 {
             logger.success("POINTS", "Points passifs gagnés",
                            "+\(delta) pts · total: \(formatted(b.balance))")
+            PointsTracker.shared.addGain(delta, channelLogin)
             balance = b.balance
             withAnimation { lastBalanceChange = delta }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -218,6 +222,7 @@ final class ChannelPointsService: ObservableObject {
             logger.success("POINTS/WATCH", "Présence active",
                            "minute-watched /\(Int(watchPollInterval))s · broadcast: \(bcast.prefix(8))…")
             guard gen == presenceGeneration else { return }
+            PointsTracker.shared.begin(channelLogin)
             await sendMinuteWatched()
             guard gen == presenceGeneration else { return }
             watchTimer?.invalidate()
@@ -254,6 +259,8 @@ final class ChannelPointsService: ObservableObject {
         if let (_, resp) = try? await URLSession.shared.data(for: req) {
             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
             logger.debug("POINTS/WATCH", "minute-watched envoyé", "HTTP \(code)")
+            // Minute que Twitch compte pour les points (Réglages → Points de chaîne).
+            if (200..<300).contains(code) { PointsTracker.shared.addMinute(channelLogin) }
         } else {
             logger.warn("POINTS/WATCH", "minute-watched échoué", "canal: \(channelLogin)")
         }
@@ -333,9 +340,11 @@ final class ChannelPointsService: ObservableObject {
         // Pas d'erreur → succès. Le selection-set de la persisted query ne renvoie pas
         // toujours `currentPoints` : on nettoie le coffre et on rafraîchit le solde.
         pendingClaimId = nil
+        PointsTracker.shared.addChest(channelLogin)
         if let pts = claim["currentPoints"] as? Int {
             let gained = pts - balance
             logger.success("POINTS", "🎉 Coffre réclamé !", "+\(gained) pts · total: \(formatted(pts))")
+            PointsTracker.shared.addGain(gained, channelLogin)
             balance = pts
             withAnimation { lastBalanceChange = gained }
             try? await Task.sleep(nanoseconds: 3_000_000_000)

@@ -45,11 +45,18 @@ final class TVChatModel: ObservableObject {
     // VOD : commentaires chargés d'avance, en attente de leur instant.
     private var vodId: String?
     private var buffer: [(offset: Double, line: TVChatLine)] = []
-    private var seen: Set<String> = []
-    private var cursor: String?
+    /// Identifiants déjà reçus → instant (les pages se chevauchent).
+    private var seen: [String: Double] = [:]
+    /// Plus grand instant reçu depuis le dernier saut (−1 : rien encore).
+    private var fetchedUntil: Double = -1
     private var hasNext = true
     private var fetching = false
     private var lastOffset: Double = -1
+    /// Change à chaque saut : une page arrivée trop tard est ignorée.
+    private var generation = 0
+    /// Après un échec, pas de nouvel essai avant cette date (3 s, puis jusqu'à 30 s).
+    private var retryAt = Date.distantPast
+    private var failures = 0
 
     func start(_ login: String) {
         let channel = login.lowercased()
@@ -75,11 +82,14 @@ final class TVChatModel: ObservableObject {
         vodId = nil
         lines = []
         buffer = []
-        seen = []
-        cursor = nil
+        seen = [:]
+        fetchedUntil = -1
         hasNext = true
         fetching = false
         lastOffset = -1
+        generation += 1
+        retryAt = .distantPast
+        failures = 0
         waiting = true
     }
 
@@ -198,37 +208,67 @@ final class TVChatModel: ObservableObject {
         }
         lastOffset = offset
         release(upTo: offset)
-        if buffer.count < 25, hasNext, !fetching, cursor != nil {
-            Task { await fetch(offset: nil) }
+        // Pagination par position (le curseur est refusé par Twitch) : la
+        // suite se charge tant qu'on a moins de 30 s d'avance. Rien encore
+        // reçu depuis le saut : on repart de la position de lecture.
+        if hasNext, !fetching, fetchedUntil < offset + 30, Date() >= retryAt {
+            let from = Int(max(0, fetchedUntil < 0 ? offset : fetchedUntil))
+            let gen = generation
+            fetching = true
+            Task { await fetch(offset: from, gen: gen) }
         }
     }
 
     private func seek(to offset: Double) async {
+        generation += 1
+        let gen = generation
         lines = []
         buffer = []
-        seen = []
-        cursor = nil
+        seen = [:]
+        fetchedUntil = -1
         hasNext = true
+        retryAt = .distantPast
+        failures = 0
         waiting = true
-        await fetch(offset: Int(offset))
+        fetching = true
+        await fetch(offset: Int(offset), gen: gen)
+        guard gen == generation else { return }
         release(upTo: lastOffset)
         waiting = false
     }
 
-    private func fetch(offset: Int?) async {
-        guard let id = vodId, !fetching else { return }
-        fetching = true
-        defer { fetching = false }
-        guard let page = await Self.commentsPage(videoId: id, offset: offset, cursor: offset == nil ? cursor : nil),
-              vodId == id else { return }
-        hasNext = page.hasNext
-        cursor = page.cursor
+    /// Une page à partir de `offset`. Elle chevauche la précédente : on ne
+    /// garde que les nouveaux, et une page sans nouveauté avance de 5 s.
+    private func fetch(offset: Int, gen: Int) async {
+        // Après un saut, c'est la page du saut qui tient le drapeau.
+        defer { if gen == generation { fetching = false } }
+        guard let id = vodId else { return }
+        let page = await Self.commentsPage(videoId: id, offset: offset)
+        guard gen == generation, vodId == id else { return }
+        guard let page else {
+            // Nouvel essai plus tard (3 s, 6 s, 12 s… jusqu'à 30 s) au lieu
+            // d'une requête refusée à chaque seconde.
+            failures += 1
+            retryAt = Date().addingTimeInterval(min(30, 3 * Double(1 << min(failures - 1, 4))))
+            return
+        }
+        failures = 0
+        retryAt = .distantPast
+        var fresh = 0
+        var newest = fetchedUntil
         for node in page.nodes {
-            guard let line = vodLine(node), let at = node["contentOffsetSeconds"] as? Double,
-                  seen.insert(line.id).inserted else { continue }
-            buffer.append((at, line))
+            guard let cid = node["id"] as? String, let at = node["contentOffsetSeconds"] as? Double,
+                  seen[cid] == nil else { continue }
+            seen[cid] = at
+            fresh += 1
+            newest = max(newest, at)
+            if let line = vodLine(node) { buffer.append((at, line)) }
         }
         buffer.sort { $0.offset < $1.offset }
+        fetchedUntil = fresh > 0 ? newest : max(fetchedUntil, Double(offset)) + 5
+        hasNext = page.hasNext || fresh > 0
+        // Longue VOD : les identifiants loin derrière ne servent plus.
+        if seen.count > 20_000 { seen = seen.filter { $0.value >= fetchedUntil - 600 } }
     }
 
     private func release(upTo offset: Double) {
@@ -258,28 +298,33 @@ final class TVChatModel: ObservableObject {
                           parts: parts, action: false)
     }
 
-    /// Une page de commentaires (par position, ou par curseur pour la suite).
-    /// La requête nommée du site d'abord ; si Twitch ne la connaît plus, la
-    /// même en clair.
-    private static func commentsPage(videoId: String, offset: Int?, cursor: String?)
-        async -> (nodes: [[String: Any]], cursor: String?, hasNext: Bool)? {
-        var vars: [String: Any] = ["videoID": videoId]
-        if let cursor { vars["cursor"] = cursor } else { vars["contentOffsetSeconds"] = offset ?? 0 }
+    /// Une page de commentaires à partir d'une position (le curseur est
+    /// refusé par Twitch). La requête nommée du site d'abord ; si Twitch ne
+    /// la connaît plus (PersistedQueryNotFound), la même en clair.
+    private static func commentsPage(videoId: String, offset: Int) async -> (nodes: [[String: Any]], hasNext: Bool)? {
+        let vars: [String: Any] = ["videoID": videoId, "contentOffsetSeconds": offset]
         var res = await gql(["operationName": "VideoCommentsByOffsetOrCursor", "variables": vars,
                              "extensions": ["persistedQuery": ["version": 1,
                                                                "sha256Hash": "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"]]])
-        if res == nil || (res?["errors"] as? [[String: Any]])?.isEmpty == false {
-            let arg = cursor.map { "after: \"\(gqlStr($0))\"" } ?? "contentOffsetSeconds: \(offset ?? 0)"
+        let errors = res?["errors"] as? [[String: Any]] ?? []
+        if errors.contains(where: { ($0["message"] as? String)?.contains("PersistedQueryNotFound") == true }) {
             res = await gql(["query": """
-                query { video(id: "\(gqlStr(videoId))") { comments(\(arg)) { edges { cursor node {
+                query { video(id: "\(gqlStr(videoId))") { comments(contentOffsetSeconds: \(offset)) { edges { node {
                   id contentOffsetSeconds commenter { login displayName }
                   message { userColor fragments { text emote { emoteID } } } } } pageInfo { hasNextPage } } } }
                 """])
         }
-        guard let comments = ((res?["data"] as? [String: Any])?["video"] as? [String: Any])?["comments"] as? [String: Any],
-              let edges = comments["edges"] as? [[String: Any]] else { return nil }
+        guard let data = res?["data"] as? [String: Any] else { return nil }
+        guard let comments = (data["video"] as? [String: Any])?["comments"] as? [String: Any],
+              let edges = comments["edges"] as? [[String: Any]] else {
+            // Sans erreur mais sans commentaires (VOD supprimée, chat
+            // indisponible) : page vide et sans suite, le chat s'arrête comme
+            // sur le site. Avec une erreur : nouvel essai plus tard.
+            if ((res?["errors"] as? [[String: Any]]) ?? []).isEmpty { return ([], false) }
+            return nil
+        }
         let hasNext = (comments["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? false
-        return (edges.compactMap { $0["node"] as? [String: Any] }, edges.last?["cursor"] as? String, hasNext)
+        return (edges.compactMap { $0["node"] as? [String: Any] }, hasNext)
     }
 
     private static func gql(_ body: [String: Any]) async -> [String: Any]? {
@@ -498,13 +543,49 @@ struct TVIRCLine {
 // MARK: – Affichage
 /// Chat sur le côté droit de l'image : les messages les plus récents en
 /// bas, les plus anciens s'effacent en haut. Ne prend jamais le focus.
+/// Place du chat sur l'image : à gauche ou à droite, sur toute la hauteur ou
+/// sur sa moitié haute ou basse (un des quatre coins).
+struct TVChatLayout: Equatable {
+    enum Side: String, CaseIterable { case left, right }
+    enum Height: String, CaseIterable { case full, top, bottom }
+
+    var side: Side
+    var height: Height
+
+    init(side: Side = .right, height: Height = .full) {
+        self.side = side
+        self.height = height
+    }
+
+    /// « right-full », « left-bottom »… (forme enregistrée dans les réglages).
+    init?(raw: String) {
+        let parts = raw.split(separator: "-").map(String.init)
+        guard parts.count == 2, let side = Side(rawValue: parts[0]),
+              let height = Height(rawValue: parts[1]) else { return nil }
+        self.init(side: side, height: height)
+    }
+
+    var raw: String { "\(side.rawValue)-\(height.rawValue)" }
+
+    fileprivate var alignment: Alignment {
+        switch (side, height) {
+        case (.left, .full):    return .leading
+        case (.left, .top):     return .topLeading
+        case (.left, .bottom):  return .bottomLeading
+        case (.right, .full):   return .trailing
+        case (.right, .top):    return .topTrailing
+        case (.right, .bottom): return .bottomTrailing
+        }
+    }
+}
+
 struct TVChatOverlay: View {
     @ObservedObject var model: TVChatModel
     let waitingText: String
+    var layout = TVChatLayout()
 
     var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
+        GeometryReader { geo in
             VStack(alignment: .leading, spacing: 12) {
                 Spacer(minLength: 0)
                 if model.lines.isEmpty && model.waiting {
@@ -519,14 +600,18 @@ struct TVChatOverlay: View {
             .frame(width: 500, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .bottom)
             .padding(.horizontal, 30)
-            .padding(.vertical, 50)
+            .padding(.vertical, layout.height == .full ? 50 : 30)
             .background(Color.black.opacity(0.5))
             .mask(LinearGradient(stops: [.init(color: .clear, location: 0),
                                          .init(color: .black, location: 0.3),
                                          .init(color: .black, location: 1)],
                                  startPoint: .top, endPoint: .bottom))
             .clipped()
+            // Moitié haute ou basse : le chat tient dans un coin de l'image.
+            .frame(height: layout.height == .full ? geo.size.height : geo.size.height / 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: layout.alignment)
         }
+        .animation(.easeInOut(duration: 0.25), value: layout)
         .allowsHitTesting(false)
     }
 }

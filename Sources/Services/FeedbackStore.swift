@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import UserNotifications
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Suivi des retours envoyés depuis l'app (« Mes signalements »).
@@ -37,6 +38,10 @@ struct MyFeedback: Codable, Identifiable, Hashable {
 
     /// Réponse (ou nouvel état) du développeur pas encore lue.
     var unread: Bool { lastFrom == "a" && updatedAt > seen }
+    /// Terminé (fait ou refusé), dernier mot au développeur : plus rien
+    /// n'est attendu, il n'est plus relu tout seul. Une réponse de la
+    /// personne le remet au suivi (dernier mot à elle).
+    var closed: Bool { (status == "done" || status == "refused") && lastFrom == "a" }
     var messages: [FeedbackMessage] { thread ?? [FeedbackMessage(f: "u", m: text, at: at)] }
 }
 
@@ -61,6 +66,10 @@ final class FeedbackStore: ObservableObject {
 
     private let key = "my_feedback"
     private var checkedAt = Date.distantPast
+    /// « Mes signalements » à l'écran (liste ou discussion) : la réponse s'y
+    /// voit déjà, pas de bandeau par-dessus.
+    var inboxViewers = 0
+    private var foregroundChecks: Task<Void, Never>?
 
     private init() {
         if let data = UserDefaults.standard.data(forKey: key),
@@ -73,7 +82,12 @@ final class FeedbackStore: ObservableObject {
         if let data = try? JSONEncoder().encode(Array(reports.prefix(50))) {
             UserDefaults.standard.set(data, forKey: key)
         }
+        // Des retours encore suivis : iOS réveille aussi l'app pour leurs
+        // réponses (LiveNotifier), même sans les notifications de live. Tous
+        // terminés : plus de réveil pour eux.
+        UserDefaults.standard.set(reports.contains { !$0.closed }, forKey: Self.hasReportsKey)
     }
+    nonisolated static let hasReportsKey = "fb_has_reports"
 
     func add(id: String, token: String, kind: String, text: String) {
         let now = Date().timeIntervalSince1970 * 1000
@@ -96,22 +110,73 @@ final class FeedbackStore: ObservableObject {
         return c?.url
     }
 
-    /// État de toutes les discussions en une requête — au plus toutes les
-    /// 3 min sans `force`. Un retour effacé ou expiré quitte la liste.
-    func refresh(force: Bool = false) async {
-        guard !reports.isEmpty, force || Date().timeIntervalSince(checkedAt) > 180 else { return }
+    /// État des discussions encore suivies, en une requête — au plus une fois
+    /// par `minInterval` sans `force`. Un retour terminé (`closed`) n'est plus
+    /// relu, sauf s'il est dans `including` (discussion qu'on ouvre, liste
+    /// tirée pour rafraîchir). Un retour effacé ou expiré quitte la liste.
+    func refresh(force: Bool = false, minInterval: TimeInterval = 180, including: Set<String> = []) async {
+        let followed = reports.filter { !$0.closed || including.contains($0.id) }
+        guard !followed.isEmpty, force || Date().timeIntervalSince(checkedAt) > minInterval else { return }
         checkedAt = Date()
-        let items = reports.map { ["id": $0.id, "token": $0.token] }
+        let items = followed.map { ["id": $0.id, "token": $0.token] }
         guard let data = await post("/api/feedback/thread", ["items": items]),
               let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
         else { return }
         let byId = Dictionary(states.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let before = Dictionary(reports.map { ($0.id, $0.updatedAt) }, uniquingKeysWith: { a, _ in a })
         reports = reports.compactMap { r in
             guard let st = byId[r.id] else { return r }
             if st.gone == true { return nil }
             return apply(st, to: r)
         }
         save()
+        // Réponse (ou nouvel état) du développeur arrivée depuis la dernière
+        // lecture : bandeau dans l'app, ou notification. Pas de bandeau si
+        // « Mes signalements » est à l'écran : la réponse y est affichée.
+        let fresh = reports.filter { $0.unread && $0.updatedAt > (before[$0.id] ?? 0) }
+        let inboxOnScreen = inboxViewers > 0 && UIApplication.shared.applicationState == .active
+        if !fresh.isEmpty, !inboxOnScreen { notifyTeamUpdates(fresh) }
+    }
+
+    /// App au premier plan : relue toutes les minutes. Avant, rien ne se
+    /// relisait tant qu'on restait dans l'app — la réponse n'arrivait qu'en
+    /// ouvrant « Mes signalements », ou en revenant dans l'app 3 min après.
+    /// Sans retour encore suivi (aucun, ou tous terminés), `refresh` ne fait
+    /// aucune requête.
+    func startForegroundChecks() {
+        guard foregroundChecks == nil else { return }
+        foregroundChecks = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.refresh(minInterval: 50)
+            }
+        }
+    }
+
+    func stopForegroundChecks() {
+        foregroundChecks?.cancel()
+        foregroundChecks = nil
+    }
+
+    /// Un avis par retour mis à jour par le développeur : bandeau dans l'app,
+    /// ou notification (InAppNotices) ; le toucher ouvre « Mes signalements ».
+    /// Identifiant = retour + date : la même mise à jour n'est jamais
+    /// annoncée deux fois.
+    private func notifyTeamUpdates(_ list: [MyFeedback]) {
+        let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+        for r in list.prefix(3) {
+            let notice: InAppNotice
+            if let m = r.messages.last(where: { $0.fromTeam })?.m, !m.isEmpty {
+                notice = InAppNotice(kind: .feedback, title: translate("fb_notif_reply", lang), body: m)
+            } else {
+                notice = InAppNotice(kind: .feedback, title: translate("fb_notif_status", lang),
+                                     body: translate("fb_status_line", lang)
+                                        .replacingOccurrences(of: "{s}", with: translate("fb_status_\(r.status)", lang)))
+            }
+            InAppNotices.shared.deliver(notice, id: "fb-\(r.id)-\(Int(r.updatedAt))",
+                                        userInfo: ["feedback": r.id])
+        }
     }
 
     private func apply(_ st: FeedbackState, to r: MyFeedback) -> MyFeedback {

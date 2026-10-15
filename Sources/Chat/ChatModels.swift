@@ -44,7 +44,8 @@ enum LandscapeChat: String, CaseIterable {
 /// paysage et le calque posé sur l'image. Passer un seul objet évite de
 /// promener cinq drapeaux jusqu'aux lignes de message.
 struct ChatStyle: Equatable {
-    /// Barre d'état, épinglés, sondages, raids — tout le décor autour des messages.
+    /// Barre d'état au-dessus des messages. Sans elle (paysage), les bandeaux
+    /// (épinglé, sondages, raid…) restent, repliables : voir ChatView.noticesArea.
     var showsChrome = true
     /// Horodatage devant chaque message.
     var showsTimestamp = true
@@ -71,10 +72,32 @@ struct TwitchEmote: Identifiable, Hashable {
     let name: String
     let url: String
     var source: EmoteSource = .twitch
+    /// Emote personnelle d'un abonné BTTV Pro (utilisable partout par lui seul).
+    var personal = false
+    // Infos déjà téléchargées avec les emotes BTTV, FFZ et 7TV, pour leur
+    // fiche. Valeurs par défaut : les emotes Twitch (tag IRC) et celles du
+    // chat.json d'une VOD téléchargée n'en ont pas.
+    var scope: EmoteScope = .unknown
+    /// Créateur de l'emote (BTTV partagée, FFZ, 7TV) ou chaîne qui l'a mise en ligne.
+    var author: String? = nil
+    /// 7TV : nom de l'emote avant que la chaîne la renomme.
+    var originalName: String? = nil
+    /// 7TV seulement : se pose par-dessus l'emote précédente (flags & 1).
+    var zeroWidth = false
+    /// Champ `modifier` de BTTV et FFZ (w!, ffzW…) : modifie une autre emote.
+    /// Ce n'est pas un zero-width.
+    var isModifier = false
+    /// Plus grande image servie (fiche) : BTTV 3x, FFZ 4, 7TV 4x.
+    var largeURL: String? = nil
 }
 
 enum EmoteSource: String {
     case twitch, bttv, ffz, seventv
+}
+
+/// Portée d'une emote tierce : de la chaîne, globale, ou personnelle (BTTV Pro).
+enum EmoteScope {
+    case global, channel, personal, unknown
 }
 
 // MARK: – Modes du salon
@@ -182,8 +205,9 @@ struct ChatMessage: Identifiable {
 
 // MARK: – Tokenisation d'un segment de texte
 /// Découpe un texte en jetons : liens, mentions, emotes tierces (BTTV/FFZ/7TV), texte.
-/// Partagé par le chat live (IRC) et le chat des VODs.
-func tokenizeChatSegment(_ segment: String, channelId: String?) async -> [MessageToken] {
+/// Partagé par le chat live (IRC) et le chat des VODs. `userId` : auteur du
+/// message, pour ses emotes personnelles BTTV Pro.
+func tokenizeChatSegment(_ segment: String, channelId: String?, userId: String? = nil) async -> [MessageToken] {
     var tokens: [MessageToken] = []
     for word in segment.components(separatedBy: " ") {
         guard !word.isEmpty else { continue }
@@ -193,7 +217,7 @@ func tokenizeChatSegment(_ segment: String, channelId: String?) async -> [Messag
             tokens.append(.link(word))
         } else if word.hasPrefix("@") && word.count > 1 {
             tokens.append(.mention(String(word.dropFirst())))
-        } else if let emote = await EmoteService.shared.resolve(name: word, channelId: channelId) {
+        } else if let emote = await EmoteService.shared.resolve(name: word, channelId: channelId, userId: userId) {
             tokens.append(.emote(emote))
         } else {
             tokens.append(.text(word))

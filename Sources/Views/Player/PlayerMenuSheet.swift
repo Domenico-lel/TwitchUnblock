@@ -13,6 +13,9 @@ struct PlayerMenuSheet: View {
     let isDvr: Bool
 
     var onSelectQuality: (String) -> Void = { _ in }
+    /// Vitesse de lecture en cours ; nil masque la section (direct).
+    var speed: Double? = nil
+    var onSelectSpeed: (Double) -> Void = { _ in }
     var onRewind:      () -> Void = {}
     var onBackToLive:  () -> Void = {}
     var onSleepTimer:  () -> Void = {}
@@ -25,7 +28,8 @@ struct PlayerMenuSheet: View {
     var onSelectSource: ((String) -> Void)? = nil
     /// VOD : télécharger un passage pour le regarder hors ligne.
     var onDownload: (() -> Void)? = nil
-    /// Direct : l'ajouter au multi-live (ou l'en retirer).
+    /// Direct ou VOD (pas le rembobinage) : l'ajouter au multi-live (ou
+    /// l'en retirer). Mêmes libellés pour les deux.
     var onMultiLive: (() -> Void)? = nil
     var multiLiveOn = false
     var multiLiveFull = false
@@ -75,6 +79,40 @@ struct PlayerMenuSheet: View {
                         divider
                     }
 
+                    // Vitesse : VODs et clips. Un direct reste à 1×.
+                    if let speed {
+                        HStack(spacing: TSpace.md) {
+                            Image(systemName: "speedometer")
+                                .font(.system(size: 15)).foregroundColor(.tPrimary)
+                                .frame(width: 24)
+                            Text(store.t("speed")).font(.tCardTitle).foregroundColor(.tText)
+                            Spacer()
+                        }
+                        .padding(.horizontal, TSpace.lg)
+                        .padding(.top, TSpace.md)
+
+                        ScrollViewReader { proxy in
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: TSpace.sm) {
+                                    ForEach(VodSpeed.all, id: \.self) { s in
+                                        TChip(title: s == 1 ? store.t("speed_normal") : VodSpeed.label(s, store.lang),
+                                              isOn: abs(s - speed) < 0.01) {
+                                            onSelectSpeed(s)
+                                        }
+                                        .id(s)
+                                    }
+                                }
+                                .padding(.horizontal, TSpace.lg)
+                            }
+                            // Les crans lents sont à gauche : la vitesse en
+                            // cours (souvent « Normale ») reste en vue.
+                            .onAppear { proxy.scrollTo(VodSpeed.nearest(speed), anchor: .center) }
+                        }
+                        .padding(.vertical, TSpace.sm)
+
+                        divider
+                    }
+
                     // Source du direct : le proxy qui sert le flux, et de quoi
                     // en changer (le direct repart aussitôt).
                     if let onSelectSource, let used = liveSource {
@@ -93,8 +131,13 @@ struct PlayerMenuSheet: View {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: TSpace.sm) {
                                 // Dans l'ordre des réglages ; en choisir une la met en tête.
+                                // Cochée : celle qui sert le flux (la première de
+                                // l'ordre a pu ne pas répondre). Lecture par le
+                                // compte ou par le Worker : aucune, l'en-tête la
+                                // nomme ; en choisir une quitte le compte pour
+                                // cette chaîne.
                                 ForEach(store.liveSourceOrder, id: \.self) { id in
-                                    TChip(title: store.t("src_\(id)"), isOn: id == store.liveSourceOrder.first) {
+                                    TChip(title: store.t("src_\(id)"), isOn: id == used) {
                                         onSelectSource(id)
                                     }
                                 }
@@ -146,10 +189,7 @@ struct PlayerMenuSheet: View {
         .background(Color.tDark)
     }
 
-    private func label(_ q: String) -> String {
-        q.replacingOccurrences(of: "chunked", with: "Source")
-         .replacingOccurrences(of: "source",  with: "Source")
-    }
+    private func label(_ q: String) -> String { qualityText(q, store.lang) }
 
     private var divider: some View {
         Divider().background(Color.tBorder).padding(.leading, 56)

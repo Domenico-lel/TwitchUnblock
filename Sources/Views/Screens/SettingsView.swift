@@ -27,7 +27,10 @@ struct SettingsView: View {
     @AppStorage(APIConfig.allKey) private var customWorkerAll = false
     @State private var workerInput = ""
     @State private var workerChecking = false
-    @State private var workerOK: Bool? = nil
+    /// Dernière vérification du Worker personnel (nil : rien à dire).
+    @State private var workerResult: APIConfig.CheckResult? = nil
+    /// « Tout par ce Worker » refusé : il n'a pas de base D1.
+    @State private var workerNoDatabase = false
     @AppStorage("onboarding_done") private var onboardingDone = false
     @State private var showLogoutAlert = false
     @State private var showClearAlert  = false
@@ -40,6 +43,7 @@ struct SettingsView: View {
     @ObservedObject private var usage      = UsageService.shared
     @Environment(\.dismiss) private var dismiss
     @State private var showSleepSheet  = false
+    @State private var showHidden      = false   // chaînes et catégories masquées
     // Sauvegarde (export / import)
     @State private var exportDoc: BackupDocument? = nil
     @State private var showExporter    = false
@@ -102,7 +106,7 @@ struct SettingsView: View {
             Button(store.t("cancel"), role: .cancel) {}
             Button(store.t("erase"), role: .destructive) {
                 logger.historyCleared()
-                store.history = []
+                store.clearHistory()
             }
         } message: {
             Text(store.t("confirm"))
@@ -144,6 +148,10 @@ struct SettingsView: View {
             SleepTimerSheet()
                 .presentationDetents([.medium, .large])
         }
+        // ── Chaînes et catégories masquées ───────────────────────────
+        .sheet(isPresented: $showHidden) {
+            HiddenContentSheet().environmentObject(store)
+        }
         // ── Logs sheet ───────────────────────────────────────────────
         .sheet(isPresented: $showLogs) {
             VStack(spacing: 0) {
@@ -171,7 +179,7 @@ struct SettingsView: View {
     // MARK: – Pages de réglages
     /// Les destinations du menu.
     enum Page: Hashable {
-        case account, general, player, chat, drops, labs, other, changelog
+        case account, general, player, chat, drops, points, labs, other, changelog
 
         var titleKey: String {
             switch self {
@@ -180,6 +188,7 @@ struct SettingsView: View {
             case .player:    return "sec_player"
             case .chat:      return "sec_chat"
             case .drops:     return "drops"
+            case .points:    return "points_tracker"
             case .labs:      return "debug_section"
             case .other:     return "sec_other"
             case .changelog: return "changelog"
@@ -192,6 +201,7 @@ struct SettingsView: View {
             case .player:    return "sec_player_sub"
             case .chat:      return "sec_chat_sub"
             case .drops:     return "drops_sub"
+            case .points:    return "points_tracker_sub"
             case .labs:      return "sec_labs_sub"
             case .other:     return "sec_other_sub"
             case .changelog: return "changelog_sub"
@@ -204,6 +214,7 @@ struct SettingsView: View {
             case .player:    return "play.rectangle.fill"
             case .chat:      return "bubble.left.and.bubble.right.fill"
             case .drops:     return "shippingbox.fill"
+            case .points:    return "circle.circle.fill"
             case .labs:      return "flask.fill"
             case .other:     return "info.circle.fill"
             case .changelog: return "sparkles"
@@ -218,6 +229,7 @@ struct SettingsView: View {
             case .player:    return .tOutplayer
             case .chat:      return .tSuccess
             case .drops:     return .tLive
+            case .points:    return .tPurple
             case .labs:      return .tWarning
             case .other:     return .tMuted
             case .changelog: return .tVLC
@@ -284,6 +296,8 @@ struct SettingsView: View {
                     rowSeparator
                     menuRow(.drops)
                     rowSeparator
+                    menuRow(.points)
+                    rowSeparator
                     menuRow(.labs)
                     rowSeparator
                     menuRow(.other)
@@ -325,11 +339,14 @@ struct SettingsView: View {
             .frame(width: 52, height: 52)
             .clipShape(Circle())
 
+            // Session web seule (connexion depuis la page Drops) : le pseudo
+            // est connu, mais pas de compte pour le chat ni les suivis.
+            let full = store.twitchToken != nil
             VStack(alignment: .leading, spacing: 2) {
                 Text(login).font(.tSection).foregroundColor(.tText).lineLimit(1)
                 HStack(spacing: 5) {
-                    Circle().fill(Color.tSuccess).frame(width: 6, height: 6)
-                    Text(store.t("connected")).font(.tMeta).foregroundColor(.tMuted)
+                    Circle().fill(full ? Color.tSuccess : Color.tWarning).frame(width: 6, height: 6)
+                    Text(store.t(full ? "connected" : "web_only")).font(.tMeta).foregroundColor(.tMuted)
                 }
             }
             Spacer(minLength: 0)
@@ -475,6 +492,7 @@ struct SettingsView: View {
                     usageCard
                 case .general:
                     langueCard
+                    hiddenCard
                     apparenceCard
                     autoclaimCard
                     veilleCard
@@ -489,6 +507,8 @@ struct SettingsView: View {
                     tailleChatCard
                 case .drops:
                     DropsPanel(onLogin: { startWebLogin() })
+                case .points:
+                    PointsTrackerPanel(onLogin: { startWebLogin() })
                 case .labs:
                     debugCard
                 case .other:
@@ -539,9 +559,11 @@ struct SettingsView: View {
                 }
                 .font(.tLabel)
                 .buttonStyle(.borderless)
-                if let ok = workerOK {
-                    Text(store.t(ok ? "expert_ok" : "expert_bad"))
-                        .font(.tMeta).foregroundColor(ok ? .tSuccess : .tDanger)
+                if let result = workerResult {
+                    // Ce qui a échoué (http://, pas de réponse, quota, pas un
+                    // Worker TwitchUnblock), plus un seul message pour tout.
+                    Text(store.t(result.messageKey))
+                        .font(.tMeta).foregroundColor(result == .ok ? .tSuccess : .tDanger)
                         .fixedSize(horizontal: false, vertical: true)
                 } else if !customWorker.isEmpty {
                     Text(store.t("expert_using").replacingOccurrences(of: "{u}", with: customWorker))
@@ -559,6 +581,24 @@ struct SettingsView: View {
                     .tint(.tPrimary)
                     .onChange(of: customWorkerAll) { on in
                         logger.settingChanged("Tout par le Worker personnel", value: on ? "oui" : "non")
+                        guard on, let base = APIConfig.custom else { return }
+                        workerNoDatabase = false
+                        // Sans base D1, sauvegarde, retours et notifications y
+                        // échoueraient en silence, pour toujours : l'option
+                        // reste coupée. (La sauvegarde, elle, relit et fusionne
+                        // avant d'écrire sur un nouveau Worker.)
+                        Task {
+                            guard await APIConfig.hasDatabase(base) == false,
+                                  customWorkerAll, APIConfig.custom == base else { return }
+                            customWorkerAll = false
+                            workerNoDatabase = true
+                            logger.warn("SETTINGS", "Worker personnel sans base D1", base)
+                        }
+                    }
+                    if workerNoDatabase {
+                        Text(store.t("expert_all_no_db"))
+                            .font(.tMeta).foregroundColor(.tDanger)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -568,17 +608,26 @@ struct SettingsView: View {
 
     /// Adresse vérifiée (c'est bien un Worker TwitchUnblock) avant d'être gardée.
     private func checkWorker() {
-        guard let base = APIConfig.normalize(workerInput) else { workerOK = false; return }
+        guard let base = APIConfig.normalize(workerInput) else { workerResult = .notAWorker; return }
         workerChecking = true
-        workerOK = nil
+        workerResult = nil
         Task {
-            let ok = await APIConfig.check(base)
+            let result = await APIConfig.check(base)
             workerChecking = false
-            workerOK = ok
-            guard ok else { return }
+            workerResult = result
+            guard result == .ok else {
+                logger.warn("SETTINGS", "Worker personnel refusé (\(result))", base)
+                return
+            }
             customWorker = base
             workerInput = base
+            workerNoDatabase = false
             logger.settingChanged("Worker personnel", value: base)
+            // « Tout par ce Worker » déjà actif : le nouveau doit avoir sa base D1.
+            if customWorkerAll, await APIConfig.hasDatabase(base) == false, APIConfig.custom == base {
+                customWorkerAll = false
+                workerNoDatabase = true
+            }
         }
     }
 
@@ -586,7 +635,8 @@ struct SettingsView: View {
         customWorker = ""
         customWorkerAll = false
         workerInput = ""
-        workerOK = nil
+        workerResult = nil
+        workerNoDatabase = false
         logger.settingChanged("Worker personnel", value: "officiels")
     }
 
@@ -628,6 +678,45 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("show_recent"), store.t("show_recent_sub"),
                           $store.showRecentChannels, log: "Streamers récents")
+            }
+        }
+    }
+
+    /// Chaînes et catégories masquées du top et des catégories : combien, et
+    /// la feuille pour les réafficher.
+    @ViewBuilder private var hiddenCard: some View {
+        settingCard {
+            VStack(alignment: .leading, spacing: 12) {
+                label("eye.slash", store.t("hidden_title"))
+                Text(store.t("hidden_sub"))
+                    .font(.tMeta).foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if store.hidden.isEmpty {
+                    Text(store.t("hidden_empty"))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    let channels = store.t("hidden_channels_n")
+                        .replacingOccurrences(of: "{n}", with: "\(store.hidden.channels.count)")
+                    let categories = store.t("hidden_categories_n")
+                        .replacingOccurrences(of: "{n}", with: "\(store.hidden.categories.count)")
+                    Button { showHidden = true } label: {
+                        HStack(spacing: 8) {
+                            Text("\(channels) · \(categories)")
+                                .font(.tCardTitle).foregroundColor(.tText)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.tMuted)
+                        }
+                        .padding(12)
+                        .background(Color.tSurface)
+                        .cornerRadius(10)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }
@@ -834,6 +923,9 @@ struct SettingsView: View {
                 toggleRow(store.t("cfg_pinned"), store.t("cfg_pinned_sub"),
                           $store.showPinnedMessages, log: "Messages épinglés")
                 Divider().background(Color.tBorder)
+                toggleRow(store.t("cfg_drops_notice"), store.t("cfg_drops_notice_sub"),
+                          $store.showDropsNotice, log: "Carte des drops")
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_follow"), store.t("cfg_follow_sub"),
                           $store.showFollowButton,   log: "Bouton suivre")
                 Divider().background(Color.tBorder)
@@ -845,6 +937,9 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_raids"),  store.t("cfg_raids_sub"),
                           $store.enableRaids,        log: "Système de raid")
+                Divider().background(Color.tBorder)
+                toggleRow(store.t("cfg_land_notices"), store.t("cfg_land_notices_sub"),
+                          $store.landscapeNoticesHidden, log: "Bandeaux repliés en paysage")
             }
         }
     }
@@ -1000,16 +1095,17 @@ struct SettingsView: View {
                           $store.chatTimestamps, log: "Horodatage du chat")
                 Divider().background(Color.tBorder)
 
+                // Mêmes bornes que l'import d'une sauvegarde (AppStore).
                 sliderRow(store.t("cfg_font_size"), value: $store.chatFontSize,
-                          range: 10...20, step: 1) { String(format: "%.0f pt", $0) }
+                          range: AppStore.chatFontRange, step: 1) { String(format: "%.0f pt", $0) }
                 sliderRow(store.t("cfg_msg_spacing"), value: $store.chatSpacing,
-                          range: 0...16, step: 1) { String(format: "%.0f px", $0) }
+                          range: AppStore.chatSpacingRange, step: 1) { String(format: "%.0f px", $0) }
                 sliderRow(store.t("cfg_badge_scale"), value: $store.chatBadgeScale,
-                          range: 0.5...2, step: 0.05) { String(format: "%.2fx", $0) }
+                          range: AppStore.chatScaleRange, step: 0.05) { String(format: "%.2fx", $0) }
                 sliderRow(store.t("cfg_emote_scale"), value: $store.chatEmoteScale,
-                          range: 0.5...2, step: 0.05) { String(format: "%.2fx", $0) }
+                          range: AppStore.chatScaleRange, step: 0.05) { String(format: "%.2fx", $0) }
                 sliderRow(store.t("cfg_chat_width"), value: $store.chatWidthRatio,
-                          range: 0.20...0.60, step: 0.01) { String(format: "%.0f %%", $0 * 100) }
+                          range: AppStore.chatWidthRange, step: 0.01) { String(format: "%.0f %%", $0 * 100) }
 
                 Text(store.t("cfg_chat_width_sub"))
                     .font(.tMeta).foregroundColor(.tMuted)
@@ -1044,6 +1140,8 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 liveSourceRow
                 Divider().background(Color.tBorder)
+                preferredQualityRow
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("fill_screen"), store.t("fill_screen_sub"),
                           $store.fillScreen, log: "Remplir l'écran")
                 Divider().background(Color.tBorder)
@@ -1057,6 +1155,35 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
                           $store.showLatency, log: "Afficher la latence")
+            }
+        }
+    }
+
+    /// Qualité préférée : celle qui démarre (ou la plus proche en dessous).
+    @ViewBuilder private var preferredQualityRow: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("pref_quality"))
+                    .font(.tCardTitle)
+                    .foregroundColor(.tText)
+                Text(store.t("pref_quality_sub"))
+                    .font(.tMeta)
+                    .foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Picker("", selection: $store.preferredQuality) {
+                ForEach(kQualityPrefs, id: \.self) { pref in
+                    Text(pref == "source" ? store.t("q_source")
+                         : pref == "audio" ? store.t("q_audio") : "\(pref)p")
+                        .tag(pref)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .tint(.tPrimary)
+            .onChange(of: store.preferredQuality) { value in
+                logger.settingChanged("Qualité préférée", value: value)
             }
         }
     }
@@ -1084,8 +1211,22 @@ struct SettingsView: View {
     }
 
     /// Ordre des sources du direct : getLive les essaie l'une après l'autre.
+    /// Au-dessus, le direct par le compte pour les abonnés (sans pub), qui
+    /// passe avant toutes les sources.
     @ViewBuilder private var liveSourceRow: some View {
         VStack(alignment: .leading, spacing: 8) {
+            toggleRow(store.t("sub_adfree"), store.t("sub_adfree_sub"),
+                      $store.subAdFree, log: "Sans pub avec mon abonnement")
+            // Il faut la session web : sans elle, de quoi l'ouvrir ici.
+            if store.subAdFree, (store.twitchWebToken ?? "").isEmpty {
+                Button { startWebLogin() } label: {
+                    Label(store.t("sub_adfree_connect"), systemImage: "person.crop.circle.badge.plus")
+                        .font(.tLabel)
+                        .foregroundColor(.tPrimary)
+                }
+                .buttonStyle(.plain)
+            }
+            Divider().background(Color.tBorder)
             VStack(alignment: .leading, spacing: 2) {
                 Text(store.t("live_source_order"))
                     .font(.tCardTitle)
@@ -1250,10 +1391,9 @@ struct SettingsView: View {
                             .replacingOccurrences(of: "{a}", with: store.twitchLogin ?? "?"))
                         .font(.tMeta).foregroundColor(.tMuted)
                         .fixedSize(horizontal: false, vertical: true)
-                    TPrimaryButton(title: store.t("web_reconnect")) {
-                        store.webSessionMismatch = nil
-                        startWebLogin()
-                    }
+                    // Le bandeau reste tant que la bonne session n'est pas
+                    // là (adoptWebToken l'efface) : annuler ne le perd pas.
+                    TPrimaryButton(title: store.t("web_reconnect")) { startWebLogin() }
                 }
             }
         }
@@ -1269,10 +1409,7 @@ struct SettingsView: View {
                     Text(store.t("web_expired_sub"))
                         .font(.tMeta).foregroundColor(.tMuted)
                         .fixedSize(horizontal: false, vertical: true)
-                    TPrimaryButton(title: store.t("web_reconnect")) {
-                        store.webSessionExpired = false
-                        startWebLogin()
-                    }
+                    TPrimaryButton(title: store.t("web_reconnect")) { startWebLogin() }
                 }
             }
         }
@@ -1395,11 +1532,16 @@ struct SettingsView: View {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url),
-                  let added = try? Backup.importData(data, store: store) else {
+                  let result = try? Backup.importData(data, store: store) else {
                 backupMessage = store.t("import_bad"); return
             }
-            backupMessage = String(format: store.t("import_done"), added)
-            logger.info("SAUVEGARDE", "Import : \(added) chaîne(s) ajoutée(s)", nil)
+            var message = String(format: store.t("import_done"), result.added)
+            // Au-delà de 300 suivis sur l'appareil, le reste n'est pas pris :
+            // dit, plutôt que compté comme ajouté.
+            if result.skipped > 0 { message += " " + String(format: store.t("import_capped"), result.skipped) }
+            backupMessage = message
+            logger.info("SAUVEGARDE", "Import : \(result.added) chaîne(s) ajoutée(s)",
+                        result.skipped > 0 ? "\(result.skipped) ignorée(s) (limite de 300)" : nil)
         }
     }
 
@@ -1553,8 +1695,8 @@ struct SettingsView: View {
                 Button {
                     ntfyResult = nil
                     Task {
-                        let ok = await NtfyNotifier.sendTest(lang: store.lang)
-                        await MainActor.run { ntfyResult = store.t(ok ? "ntfy_test_sent" : "ntfy_failed") }
+                        let result = await NtfyNotifier.sendTest(lang: store.lang)
+                        await MainActor.run { ntfyResult = store.t(result.textKey) }
                     }
                 } label: {
                     ntfyPill(store.t("notif_test"), icon: "bell.badge.fill")
@@ -1866,10 +2008,15 @@ struct SettingsView: View {
         let previous = store.twitchUserId
         guard let token = await TwitchAuthManager.shared.login(chooseAccount: true) else { return }
         let user = await getTwitchUser(token: token)
-        // Autre compte : la session web (points de chaîne) était celle de l'ancien.
-        if user == nil || user?.id != previous, store.twitchWebToken != nil {
-            store.twitchWebToken = nil
-            await TwitchWebSession.clear()
+        // Autre compte : la session web (points de chaîne) était celle de
+        // l'ancien, et ses bandeaux (expirée, autre compte) avec elle.
+        if user == nil || user?.id != previous {
+            if store.twitchWebToken != nil {
+                store.twitchWebToken = nil
+                await TwitchWebSession.clear()
+            }
+            store.webSessionExpired = false
+            store.webSessionMismatch = nil
         }
         store.adoptToken(token)
         if let user {
@@ -1881,8 +2028,10 @@ struct SettingsView: View {
     }
 
     private func startWebLogin() {
-        // Re-login forcé seulement si un token existe déjà mais est invalide.
-        webLoginClear = false
+        // Session refusée par Twitch ou d'un autre compte : cookies twitch.tv
+        // effacés d'abord, sinon la page reprenait aussitôt l'ancienne
+        // session au lieu de demander une connexion.
+        webLoginClear = store.webSessionExpired || store.webSessionMismatch != nil
         showWebLogin = true
     }
 

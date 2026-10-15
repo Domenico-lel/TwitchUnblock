@@ -3,10 +3,13 @@ import SwiftUI
 
 // MARK: – Chat de VOD (relecture des commentaires, synchronisée à la lecture)
 //
-// On interroge `video.comments` en GraphQL brut : une position (en secondes)
-// pour la première page, puis un curseur pour la suite. On garde une file tampon
-// triée par offset et on libère les messages au fur et à mesure que la lecture
-// avance, ce qui reproduit le défilement du chat d'origine.
+// On interroge `video.comments` par position (en secondes). La pagination par
+// curseur (`after:`) est refusée par Twitch (« failed integrity check ») : le
+// chat se figeait après la première page. Comme le site (chat/vod.js), chaque
+// page repart du dernier instant reçu ; les pages se chevauchent et les
+// doublons sont écartés par identifiant. On garde une file tampon triée par
+// offset et on libère les messages au fur et à mesure que la lecture avance,
+// ce qui reproduit le défilement du chat d'origine.
 @MainActor
 final class VodChatService: ObservableObject {
 
@@ -17,18 +20,26 @@ final class VodChatService: ObservableObject {
     @Published var errorMsg: String? = nil
 
     private var videoId   = ""
-    private var channelId: String? = nil
+    /// Chaîne de la VOD (badges d'abonné de la fiche d'un badge touché).
+    private(set) var channelId: String? = nil
 
     /// Tampon des commentaires à venir, trié par offset croissant.
     private var buffer: [(offset: Double, msg: ChatMessage)] = []
-    private var seen   = Set<String>()
-    private var cursor: String? = nil
+    /// Identifiants déjà reçus → instant (les pages se chevauchent).
+    private var seen: [String: Double] = [:]
+    /// Plus grand instant reçu depuis le dernier saut (−1 : rien encore).
+    private var fetchedUntil: Double = -1
     private var hasNext    = true
     private var lastOffset: Double = -1
     private var fetching   = false
+    /// Change à chaque saut : une page arrivée trop tard est ignorée.
+    private var generation = 0
+    /// Après un échec, pas de nouvel essai avant cette date (3 s, puis jusqu'à 30 s).
+    private var retryAt = Date.distantPast
+    private var failures = 0
 
-    private let maxMessages   = 200
-    private let prefetchBelow = 30     // recharge quand le tampon descend sous ce seuil
+    private let maxMessages = 200
+    private let lookahead: Double = 30  // charge la suite tant qu'on a moins de 30 s d'avance
 
     /// Hash de la persisted query utilisée par le site (capturé au cartographe).
     /// Si Twitch le fait tourner, on bascule automatiquement sur du GraphQL brut.
@@ -53,8 +64,9 @@ final class VodChatService: ObservableObject {
 
     func stop() {
         videoId = ""; channelId = nil; channelLogin = ""
-        messages = []; buffer = []; seen = []
-        cursor = nil; hasNext = true; lastOffset = -1
+        messages = []; buffer = []; seen = [:]
+        fetchedUntil = -1; hasNext = true; lastOffset = -1
+        generation += 1; retryAt = .distantPast; failures = 0
         fetching = false; isLoading = false; ready = false; errorMsg = nil
         offline = nil; offlineFolder = nil; offlineNext = 0
     }
@@ -89,30 +101,34 @@ final class VodChatService: ObservableObject {
         }
         lastOffset = offset
         release(upTo: offset)
-        if buffer.count < prefetchBelow, hasNext, !fetching { await fetchMore() }
+        if hasNext, !fetching, fetchedUntil < offset + lookahead, Date() >= retryAt {
+            // Rien encore reçu depuis le saut (première page en échec) : on
+            // repart de la position de lecture, pas du début de la vidéo.
+            // Pas de sablier pour un nouvel essai : seule la page du saut
+            // l'affiche (sinon il alternerait avec le message d'erreur).
+            let first = fetchedUntil < 0
+            await load(offset: Int(max(0, first ? offset : fetchedUntil)), firstPage: false)
+        }
     }
 
     // MARK: Chargement
     private func seek(to offset: Double) async {
-        buffer = []; seen = []; cursor = nil; hasNext = true; messages = []
-        await load(offset: Int(offset), cursor: nil, firstPage: true)
-        release(upTo: offset)
+        generation += 1
+        let gen = generation
+        buffer = []; seen = [:]; fetchedUntil = -1; hasNext = true; messages = []
+        retryAt = .distantPast; failures = 0; errorMsg = nil
+        await load(offset: Int(offset), firstPage: true)
+        guard gen == generation else { return }
+        release(upTo: lastOffset)
     }
 
-    private func fetchMore() async {
-        guard let c = cursor else { hasNext = false; return }
-        await load(offset: nil, cursor: c, firstPage: false)
-    }
-
-    /// Requête des commentaires : par position (première page) ou par curseur (suite).
-    private static func commentsQuery(videoId: String, offset: Int?, cursor: String?) -> String {
-        let arg = cursor.map { "after: \"\(gqlStr($0))\"" } ?? "contentOffsetSeconds: \(offset ?? 0)"
+    /// Requête des commentaires à partir d'une position (GraphQL brut).
+    private static func commentsQuery(videoId: String, offset: Int) -> String {
         return """
         query {
           video(id: "\(gqlStr(videoId))") {
-            comments(\(arg)) {
+            comments(contentOffsetSeconds: \(offset)) {
               edges {
-                cursor
                 node {
                   id
                   contentOffsetSeconds
@@ -131,75 +147,107 @@ final class VodChatService: ObservableObject {
         """
     }
 
-    private func load(offset: Int?, cursor: String?, firstPage: Bool) async {
+    private func load(offset: Int, firstPage: Bool) async {
+        let gen = generation
+        let id = videoId
         fetching = true
         if firstPage { isLoading = true }
-        defer { fetching = false; isLoading = false }
+        // Après un saut, c'est la page du saut qui tient les drapeaux :
+        // une page partie avant ne les touche plus.
+        defer { if gen == generation { fetching = false; isLoading = false } }
 
         // 1) Persisted query (exactement ce que fait le site).
-        var vars: [String: Any] = ["videoID": videoId]
-        if let c = cursor { vars["cursor"] = c }
-        else { vars["contentOffsetSeconds"] = offset ?? 0 }
         var response = await TwitchGQL.shared.query("VideoCommentsByOffsetOrCursor",
-                                                    variables: vars,
+                                                    variables: ["videoID": id, "contentOffsetSeconds": offset],
                                                     sha256: Self.commentsHash,
                                                     token: nil)
         // 2) Repli : si le hash a tourné côté Twitch, on repasse en GraphQL brut.
         if Self.isPersistedMiss(response) {
             logger.warn("VODCHAT", "Hash périmé → repli GraphQL brut", nil)
-            response = await Self.rawGQL(Self.commentsQuery(videoId: videoId, offset: offset, cursor: cursor))
+            response = await Self.rawGQL(Self.commentsQuery(videoId: id, offset: offset))
         }
+        guard gen == generation else { return }
         guard let res = response else {
-            errorMsg = "network"
+            failed("network")
             logger.warn("VODCHAT", "Requête commentaires échouée", nil)
             return
         }
         if let errs = res["errors"] as? [[String: Any]], !errs.isEmpty {
             let msgs = errs.compactMap { $0["message"] as? String }.joined(separator: " · ")
-            errorMsg = msgs
+            failed(msgs)
             logger.error("VODCHAT", "Erreur GQL commentaires", msgs)
-            hasNext = false
             return
         }
-        guard let data     = res["data"]       as? [String: Any],
-              let video    = data["video"]     as? [String: Any],
+        guard let data = res["data"] as? [String: Any] else {
+            failed(nil)
+            logger.warn("VODCHAT", "Structure de réponse inattendue", "\(res.keys.sorted())")
+            return
+        }
+        guard let video    = data["video"]     as? [String: Any],
               let comments = video["comments"] as? [String: Any],
               let edges    = comments["edges"] as? [[String: Any]] else {
-            logger.warn("VODCHAT", "Structure de réponse inattendue", "\(res.keys.sorted())")
+            // Réponse sans erreur mais sans commentaires (VOD supprimée, chat
+            // indisponible) : rien à charger, comme le site. Un nouvel essai
+            // toutes les 30 s n'y changerait rien.
             hasNext = false
+            logger.warn("VODCHAT", "Pas de commentaires pour cette VOD", nil)
             return
         }
+        failures = 0; retryAt = .distantPast; errorMsg = nil
+        let more = (comments["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? false
 
-        hasNext = (comments["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? false
-        // self. explicite : le parametre `cursor` masque la propriete.
-        if let last = edges.last?["cursor"] as? String { self.cursor = last }
-
-        var added = 0
+        // La page chevauche la précédente : on ne garde que les nouveaux.
+        var fresh = 0, added = 0
+        var newest = fetchedUntil
         for e in edges {
-            guard let node = e["node"] as? [String: Any] else { continue }
-            guard let built = await build(node) else { continue }
-            buffer.append(built); added += 1
+            guard let node = e["node"] as? [String: Any],
+                  let cid = node["id"] as? String, seen[cid] == nil else { continue }
+            let at = Self.offset(of: node)
+            seen[cid] = at
+            fresh += 1
+            newest = max(newest, at)
+            let built = await build(node)
+            // Saut pendant la mise en forme : cette page ne sert plus.
+            guard gen == generation else { return }
+            if let built { buffer.append(built); added += 1 }
         }
         buffer.sort { $0.offset < $1.offset }
+        // Une page sans rien de neuf ferait reboucler sur la même position :
+        // on force l'avance de quelques secondes.
+        fetchedUntil = fresh > 0 ? newest : max(fetchedUntil, Double(offset)) + 5
+        hasNext = more || fresh > 0
+        // Longue VOD : les pages ne reviennent que d'une ou deux minutes en
+        // arrière, les identifiants plus anciens ne servent plus.
+        if seen.count > 20_000 { seen = seen.filter { $0.value >= fetchedUntil - 600 } }
         logger.debug("VODCHAT", "Page chargée",
-                     "+\(added) · tampon:\(buffer.count) · suite:\(hasNext)")
+                     "@\(offset) · +\(added) · tampon:\(buffer.count) · jusqu'à:\(Int(fetchedUntil)) · suite:\(hasNext)")
     }
 
-    /// Une page de commentaires (par position, ou par curseur pour la suite) :
-    /// sert au chat gardé avec une VOD téléchargée (VodChatArchive).
-    static func commentsPage(videoId: String, offset: Int?, cursor: String?)
-        async -> (nodes: [[String: Any]], cursor: String?, hasNext: Bool)? {
-        var vars: [String: Any] = ["videoID": videoId]
-        if let c = cursor { vars["cursor"] = c } else { vars["contentOffsetSeconds"] = offset ?? 0 }
-        var response = await TwitchGQL.shared.query("VideoCommentsByOffsetOrCursor", variables: vars,
+    /// Échec d'une page : nouvel essai au prochain tick après un délai
+    /// (3 s, 6 s, 12 s… jusqu'à 30 s), au lieu de couper le chat pour de bon.
+    private func failed(_ msg: String?) {
+        if let msg { errorMsg = msg }
+        failures += 1
+        retryAt = Date().addingTimeInterval(min(30, 3 * Double(1 << min(failures - 1, 4))))
+    }
+
+    private static func offset(of node: [String: Any]) -> Double {
+        (node["contentOffsetSeconds"] as? Double) ?? Double(node["contentOffsetSeconds"] as? Int ?? 0)
+    }
+
+    /// Une page de commentaires à partir d'une position : sert au chat gardé
+    /// avec une VOD téléchargée (VodChatArchive).
+    static func commentsPage(videoId: String, offset: Int) async -> (nodes: [[String: Any]], hasNext: Bool)? {
+        var response = await TwitchGQL.shared.query("VideoCommentsByOffsetOrCursor",
+                                                    variables: ["videoID": videoId, "contentOffsetSeconds": offset],
                                                     sha256: commentsHash, token: nil)
         if isPersistedMiss(response) {
-            response = await rawGQL(commentsQuery(videoId: videoId, offset: offset, cursor: cursor))
+            response = await rawGQL(commentsQuery(videoId: videoId, offset: offset))
         }
         guard let comments = ((response?["data"] as? [String: Any])?["video"] as? [String: Any])?["comments"] as? [String: Any],
               let edges = comments["edges"] as? [[String: Any]] else { return nil }
         let hasNext = (comments["pageInfo"] as? [String: Any])?["hasNextPage"] as? Bool ?? false
-        return (edges.compactMap { $0["node"] as? [String: Any] }, edges.last?["cursor"] as? String, hasNext)
+        return (edges.compactMap { $0["node"] as? [String: Any] }, hasNext)
     }
 
     /// La persisted query a-t-elle été rejetée (hash inconnu de Twitch) ?
@@ -283,13 +331,10 @@ final class VodChatService: ObservableObject {
     }
 
     // MARK: Construction d'un message
+    /// Les doublons sont écartés avant, dans load().
     private func build(_ node: [String: Any]) async -> (offset: Double, msg: ChatMessage)? {
         let id = node["id"] as? String ?? UUID().uuidString
-        guard !seen.contains(id) else { return nil }
-        seen.insert(id)
-
-        let offset = (node["contentOffsetSeconds"] as? Double)
-                  ?? Double(node["contentOffsetSeconds"] as? Int ?? 0)
+        let offset = Self.offset(of: node)
 
         let commenter = node["commenter"] as? [String: Any]
         let login   = commenter?["login"] as? String ?? "inconnu"

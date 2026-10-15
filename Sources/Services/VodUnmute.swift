@@ -13,6 +13,10 @@ import AVFoundation
 //  remplace ceux dont l'original répond. Les segments, eux, viennent toujours
 //  du CDN en direct (adresses absolues) : rien ne transite par nos serveurs.
 //
+//  VODs en fMP4 : « N-unmuted.mp4 » est servi, lui, et AVEC le son (c'est
+//  « N-muted.mp4 » qui est silencieux, et « N.mp4 » est refusé). On le laisse
+//  tel quel : seul « -unmuted.ts » est remplacé.
+//
 //  AirPlay ne sait pas lire ces adresses : quand la lecture part sur un autre
 //  écran, on revient à la playlist du CDN (`fallBackForAirPlay`).
 // ═══════════════════════════════════════════════════════════════════════════
@@ -24,8 +28,19 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     static let resultNotification = Notification.Name("VodUnmuteResult")
 
     private let queue = DispatchQueue(label: "twitchunblock.unmute")
-    /// Playlists déjà réécrites (changement de qualité, retour en arrière).
-    private var cache: [String: Data] = [:]
+    /// Annonce d'une playlist réécrite (voir `resultNotification`).
+    private struct Outcome { let restored: Int; let remaining: [MutedRange] }
+    /// Playlists terminées déjà réécrites (changement de qualité, retour en
+    /// arrière), avec leur annonce (nil : rien de coupé, pas d'annonce). Une
+    /// VOD encore en cours d'enregistrement (rembobinage d'un direct) n'y
+    /// entre pas : AVPlayer relit sa playlist, qui grandit, et la copie du
+    /// premier chargement arrêtait la lecture là où elle finissait alors.
+    private var cache: [String: (data: Data, outcome: Outcome?)] = [:]
+    /// Originaux des passages coupés déjà sondés (adresse → servi ou non) : une
+    /// playlist en cours, réécrite à chaque relecture, ne refait pas ses HEAD.
+    private var probed: [String: Bool] = [:]
+    /// Dernier bilan écrit au journal, par playlist.
+    private var summaries: [String: String] = [:]
     private let lock = NSLock()
 
     // MARK: Adresses
@@ -73,34 +88,71 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         }
         // Réglage « Audio spatial » : tous les lecteurs passent par ici.
         SpatialAudio.apply(to: item)
+        keepPitch(item)
+        // Pauses pub cousues par Twitch dans un direct (AdBreakMonitor) ; une
+        // VOD n'en annonce pas, le collecteur n'y fait rien.
+        AdBreakMonitor.attach(to: item)
         return item
     }
 
-    /// AirPlay en cours : on repasse sur la playlist du CDN, à la même position.
-    static func fallBackForAirPlay(_ player: AVPlayer) {
+    /// Vitesse ≠ 1× (VODs) : voix à la bonne hauteur. C'est le défaut documenté
+    /// sur iPhone depuis iOS 15 ; l'écrire le fige, tvOS compris. Ni
+    /// `.varispeed` (voix aiguë), ni `.lowQualityZeroLatency` (vitesses
+    /// arrondies).
+    static func keepPitch(_ item: AVPlayerItem) {
+        item.audioTimePitchAlgorithm = .timeDomain
+    }
+
+    /// AirPlay en cours : on repasse sur la playlist du CDN, à la même position
+    /// — sauf un direct (`tulive://`) : la nouvelle playlist part au bord, et
+    /// l'ancienne position n'a pas de sens dans sa fenêtre. Une VOD, même en
+    /// cours d'enregistrement (`tuunmute://`), garde sa base de temps. La
+    /// lecture ne repart que si elle tournait : une VOD en pause repartait.
+    /// `keepPosition` faux : le lecteur a encore un départ en attente (reprise
+    /// d'une VOD) qu'il appliquera lui-même au nouvel élément. Rend ce nouvel
+    /// élément, nil s'il n'y avait rien à changer.
+    @discardableResult
+    static func fallBackForAirPlay(_ player: AVPlayer, keepPosition: Bool = true) -> AVPlayerItem? {
         guard player.isExternalPlaybackActive,
-              let asset = player.currentItem?.asset as? AVURLAsset else { return }
+              let asset = player.currentItem?.asset as? AVURLAsset else { return nil }
         let plain: URL?
         switch asset.url.scheme {
         case scheme:                  plain = unwrap(asset.url)
         case LivePlaylistLoader.scheme: plain = LivePlaylistLoader.unwrap(asset.url)
         default:                      plain = nil
         }
-        guard let plain else { return }
+        guard let plain else { return nil }
         logger.info("UNMUTE", "AirPlay : retour à la playlist d'origine", nil)
+        let live = asset.url.scheme == LivePlaylistLoader.scheme
         let t = player.currentTime()
+        let playing = player.rate != 0
         let item = AVPlayerItem(url: plain)
         SpatialAudio.apply(to: item)
+        keepPitch(item)
+        AdBreakMonitor.attach(to: item)
+        if keepPosition, !live, t.isNumeric, t.seconds > 0 { seek(player, to: t, whenReady: item) }
+        player.replaceCurrentItem(with: item)
+        if playing { player.play() }
+        return item
+    }
+
+    /// Recherche faite une fois `item` prêt (avant, la playlist n'est pas
+    /// chargée et la recherche se perd), s'il est encore celui du lecteur.
+    /// L'observation se défait d'elle-même, élément prêt ou en échec, et ne
+    /// retient pas le lecteur : elle se gardait elle-même, lecteur compris,
+    /// tant que l'élément n'était pas prêt (échec du CDN).
+    static func seek(_ player: AVPlayer, to time: CMTime, whenReady item: AVPlayerItem) {
         var obs: NSKeyValueObservation?
-        obs = item.observe(\.status, options: [.new]) { item, _ in
-            guard item.status == .readyToPlay else { return }
+        obs = item.observe(\.status, options: [.new]) { [weak player] item, _ in
+            guard item.status != .unknown else { return }
             DispatchQueue.main.async {
-                player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-                obs?.invalidate(); obs = nil
+                if item.status == .readyToPlay, let player, player.currentItem === item {
+                    player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero)
+                }
+                obs?.invalidate()
+                obs = nil
             }
         }
-        player.replaceCurrentItem(with: item)
-        player.play()
     }
 
     // MARK: Chargement
@@ -119,34 +171,68 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         return true
     }
 
-    private func cached(_ key: String) -> Data? {
+    private func cached(_ key: String) -> (data: Data, outcome: Outcome?)? {
         lock.lock(); defer { lock.unlock() }
         return cache[key]
     }
 
-    private func store(_ data: Data, for key: String) {
+    private func store(_ data: Data, outcome: Outcome?, for key: String) {
         lock.lock(); defer { lock.unlock() }
         if cache.count > 20 { cache.removeAll() }
-        cache[key] = data
+        cache[key] = (data, outcome)
+    }
+
+    /// Résultat déjà connu pour cet original (nil : jamais sondé).
+    private func probeResult(_ url: URL) -> Bool? {
+        lock.lock(); defer { lock.unlock() }
+        return probed[url.absoluteString]
+    }
+
+    private func rememberProbes(_ results: [(URL, Bool)]) {
+        lock.lock(); defer { lock.unlock() }
+        if probed.count > 10_000 { probed.removeAll() }
+        for (url, ok) in results { probed[url.absoluteString] = ok }
+    }
+
+    /// Bilan pas encore écrit au journal pour cette playlist.
+    private func isNewSummary(_ summary: String, for key: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard summaries[key] != summary else { return false }
+        if summaries.count > 50 { summaries.removeAll() }
+        summaries[key] = summary
+        return true
     }
 
     private func playlist(_ url: URL) async -> Data? {
-        if let hit = cached(url.absoluteString) { return hit }
+        // Playlist déjà réécrite : on refait l'annonce. Le lecteur remet la
+        // barre aux passages coupés de GQL à chaque ouverture : sans elle, une
+        // VOD rouverte montrerait muets des passages qui ont le son.
+        if let hit = cached(url.absoluteString) {
+            if let outcome = hit.outcome { await announce(outcome, for: url.absoluteString) }
+            return hit.data
+        }
         guard let (data, resp) = try? await URLSession.shared.data(from: url),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         let text = String(decoding: data, as: UTF8.self)
         guard text.hasPrefix("#EXTM3U") else { return nil }
-        let out = Data(await rewrite(text, base: url).utf8)
-        store(out, for: url.absoluteString)
+        let (rewritten, outcome) = await rewrite(text, base: url)
+        let out = Data(rewritten.utf8)
+        // Seulement une playlist terminée : celle d'un enregistrement en cours
+        // est réécrite à chaque relecture (ses sondes, elles, sont gardées).
+        if text.contains("#EXT-X-ENDLIST") { store(out, outcome: outcome, for: url.absoluteString) }
+        if let outcome { await announce(outcome, for: url.absoluteString) }
         return out
     }
 
     /// Adresses rendues absolues (la base n'est plus celle du CDN), passages
     /// coupés remplacés par leur original quand le CDN l'a encore.
-    private func rewrite(_ text: String, base: URL) async -> String {
+    /// Avec l'annonce à faire (nil : rien de coupé).
+    private func rewrite(_ text: String, base: URL) async -> (String, Outcome?) {
         var lines = text.components(separatedBy: "\n")
         struct Muted { let index: Int; let original: URL; let start: Double; let duration: Double }
         var muted: [Muted] = []
+        // Passages coupés déjà servis avec le son (« -unmuted.mp4 »).
+        var kept = 0
         var clock = 0.0, pending = 0.0
         for (i, raw) in lines.enumerated() {
             let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -162,10 +248,20 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
             }
             guard !line.isEmpty, let abs = URL(string: line, relativeTo: base)?.absoluteURL else { continue }
             var segment = abs.absoluteString
-            // « N-muted.ts », ou « N-muted.mp4 » pour les VODs en fMP4.
+            // « N-unmuted.mp4 » (VODs en fMP4) : le CDN le sert, AVEC le son
+            // (sondé : piste audio pleine, « N-muted.mp4 » est silencieux et
+            // « N.mp4 » refusé). Surtout pas de version muette : on le garde.
+            if segment.contains("-unmuted.mp4") {
+                kept += 1
+                lines[i] = segment
+                clock += pending
+                pending = 0
+                continue
+            }
+            // « N-muted.ts » / « N-unmuted.ts », ou « N-muted.mp4 » en fMP4.
             if let r = segment.range(of: #"-(un)?muted\.(ts|mp4)"#, options: .regularExpression) {
                 let ext = segment[r].hasSuffix(".mp4") ? "mp4" : "ts"
-                // « -unmuted » n'existe pas sur le CDN : la version muette sert de repli.
+                // « -unmuted.ts » est refusé par le CDN : la version muette sert de repli.
                 let original = segment.replacingCharacters(in: r, with: ".\(ext)")
                 segment = segment.replacingCharacters(in: r, with: "-muted.\(ext)")
                 if let o = URL(string: original) {
@@ -176,19 +272,41 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
             clock += pending
             pending = 0
         }
-        guard !muted.isEmpty else { return lines.joined(separator: "\n") }
+        // Rien de coupé : pas d'annonce. Que des « -unmuted.mp4 » : annonce
+        // quand même, la barre ne doit plus montrer ces passages comme muets
+        // (`exist([])` rend [] sans requête).
+        guard !muted.isEmpty || kept > 0 else { return (lines.joined(separator: "\n"), nil) }
 
-        // Quatre premiers d'abord : tous refusés, les originaux sont effacés
-        // (VOD trop ancienne) — inutile d'interroger les centaines suivants.
+        // Originaux déjà sondés (relecture d'un enregistrement en cours) : pas
+        // de nouvelle requête, seuls les nouveaux passages sont interrogés.
         var available = Set<Int>()
-        let probe = Array(muted.prefix(4))
-        let first = await exist(probe.map(\.original))
-        for (k, ok) in first.enumerated() where ok { available.insert(probe[k].index) }
-        if !available.isEmpty, muted.count > probe.count {
-            let rest = Array(muted.dropFirst(probe.count))
-            let others = await exist(rest.map(\.original))
-            for (k, ok) in others.enumerated() where ok { available.insert(rest[k].index) }
+        var unknown: [Muted] = []
+        for m in muted {
+            switch probeResult(m.original) {
+            case true?:  available.insert(m.index)
+            case false?: break
+            case nil:    unknown.append(m)
+            }
         }
+        // Quatre premiers d'abord (si aucun original connu n'est servi) : tous
+        // refusés, les originaux sont effacés (VOD trop ancienne) — inutile
+        // d'interroger les centaines suivants, comptés refusés eux aussi.
+        var results: [(URL, Bool)] = []
+        let probe = available.isEmpty ? Array(unknown.prefix(4)) : unknown
+        let first = await exist(probe.map(\.original))
+        for (k, ok) in first.enumerated() { results.append((probe[k].original, ok)) }
+        if unknown.count > probe.count {
+            let rest = Array(unknown.dropFirst(probe.count))
+            if first.contains(true) {
+                let others = await exist(rest.map(\.original))
+                for (k, ok) in others.enumerated() { results.append((rest[k].original, ok)) }
+            } else {
+                for m in rest { results.append((m.original, false)) }
+            }
+        }
+        // `results` suit l'ordre de `unknown`.
+        for (k, m) in unknown.enumerated() where results[k].1 { available.insert(m.index) }
+        rememberProbes(results)
         for m in muted where available.contains(m.index) { lines[m.index] = m.original.absoluteString }
 
         // Passages encore muets, fusionnés, pour la barre de lecture.
@@ -200,17 +318,25 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
                 remaining.append(MutedRange(start: m.start, end: m.start + m.duration))
             }
         }
-        logger.info("UNMUTE", "Passages coupés : \(available.count)/\(muted.count) segments rétablis",
-                    base.deletingLastPathComponent().lastPathComponent)
-        let restored = available.count
-        let playlistURL = base.absoluteString
-        let stillMuted = remaining
+        let summary = "\(available.count)/\(muted.count) segments rétablis, \(kept) déjà avec le son (-unmuted.mp4)"
+        // Une fois par bilan : un enregistrement en cours est réécrit à
+        // chaque relecture, toutes les quelques secondes.
+        if isNewSummary(summary, for: base.absoluteString) {
+            logger.info("UNMUTE", "Passages coupés : " + summary,
+                        base.deletingLastPathComponent().lastPathComponent)
+        }
+        // Les « -unmuted.mp4 » comptent comme rétablis : ils se lisent avec le son.
+        let outcome = Outcome(restored: available.count + kept, remaining: remaining)
+        return (lines.joined(separator: "\n"), outcome)
+    }
+
+    /// `resultNotification` pour la playlist `url` (adresse du CDN).
+    private func announce(_ outcome: Outcome, for url: String) async {
         await MainActor.run {
             NotificationCenter.default.post(name: Self.resultNotification, object: nil, userInfo: [
-                "url": playlistURL, "restored": restored, "remaining": stillMuted,
+                "url": url, "restored": outcome.restored, "remaining": outcome.remaining,
             ])
         }
-        return lines.joined(separator: "\n")
     }
 
     /// Le CDN sert-il ces fichiers ? HEAD en parallèle, huit à la fois.

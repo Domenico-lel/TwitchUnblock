@@ -31,6 +31,15 @@ struct TwitchWebLoginSheet: View {
     @State private var isLoading = true
     /// Pseudo du compte refusé (bandeau en haut de la feuille).
     @State private var wrongAccount: String? = nil
+    /// Page de connexion impossible à charger (hors ligne, réseau coupé).
+    @State private var loadFailed = false
+    /// « Réessayer » : la page de connexion est rechargée à chaque hausse.
+    @State private var reloadCount = 0
+
+    /// Langue de l'app (la feuille est présentée sans le store).
+    private var lang: Lang {
+        Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+    }
 
     var body: some View {
         NavigationView {
@@ -40,8 +49,13 @@ struct TwitchWebLoginSheet: View {
                 TwitchWebLogin(
                     clearSession: clearSession,
                     expectedLogin: expectedLogin,
+                    reloadCount: reloadCount,
                     onComplete: onComplete,
-                    onLoadingChange: { isLoading = $0 },
+                    onLoadingChange: {
+                        isLoading = $0
+                        if $0 { loadFailed = false }
+                    },
+                    onLoadFailed: { loadFailed = true },
                     onWrongAccount: { wrongAccount = $0 }
                 )
                 .ignoresSafeArea(edges: .bottom)
@@ -61,10 +75,33 @@ struct TwitchWebLoginSheet: View {
                     }
                 }
 
-                if isLoading {
+                if loadFailed {
+                    // Sans réseau, le chargement ne finissait jamais : la roue
+                    // tournait sans fin, seule sortie « Annuler ».
+                    VStack(spacing: 14) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .font(.system(size: 30))
+                            .foregroundColor(.tMuted)
+                        Text(translate("web_load_failed", lang))
+                            .font(.system(size: 14))
+                            .foregroundColor(.tText)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button(translate("retry", lang)) {
+                            loadFailed = false
+                            isLoading = true
+                            reloadCount += 1
+                        }
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.tPrimary)
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.tDark)
+                } else if isLoading {
                     VStack(spacing: 12) {
                         ProgressView().tint(.tPrimary).scaleEffect(1.3)
-                        Text("Chargement de Twitch…")
+                        Text(translate("web_loading", lang))
                             .font(.system(size: 13))
                             .foregroundColor(.tMuted)
                     }
@@ -74,16 +111,16 @@ struct TwitchWebLoginSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     VStack(spacing: 1) {
-                        Text("Connexion Twitch")
+                        Text(translate("account_web", lang))
                             .font(.system(size: 15, weight: .bold))
                             .foregroundColor(.tText)
-                        Text("Requis pour les points de chaîne")
+                        Text(translate("web_login_sub", lang))
                             .font(.system(size: 10))
                             .foregroundColor(.tMuted)
                     }
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Annuler") { onCancel() }
+                    Button(translate("cancel", lang)) { onCancel() }
                         .foregroundColor(.tPrimary)
                 }
             }
@@ -93,8 +130,7 @@ struct TwitchWebLoginSheet: View {
 
 extension TwitchWebLoginSheet {
     fileprivate func wrongAccountText(_ wrong: String) -> String {
-        let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
-        return translate("web_wrong_account", lang)
+        translate("web_wrong_account", lang)
             .replacingOccurrences(of: "{w}", with: wrong)
             .replacingOccurrences(of: "{a}", with: expectedLogin ?? "?")
     }
@@ -104,8 +140,11 @@ extension TwitchWebLoginSheet {
 private struct TwitchWebLogin: UIViewRepresentable {
     let clearSession: Bool
     let expectedLogin: String?
+    /// Hausse = la page de connexion est rechargée (« Réessayer »).
+    let reloadCount: Int
     let onComplete: (_ token: String, _ login: String?) -> Void
     let onLoadingChange: (Bool) -> Void
+    let onLoadFailed: () -> Void
     let onWrongAccount: (String) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -144,7 +183,14 @@ private struct TwitchWebLogin: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        // « Réessayer » après un échec de chargement.
+        guard context.coordinator.reloadCount != reloadCount else { return }
+        context.coordinator.reloadCount = reloadCount
+        if let url = URL(string: "https://www.twitch.tv/login") {
+            uiView.load(URLRequest(url: url))
+        }
+    }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
         coordinator.stop()
@@ -158,6 +204,8 @@ private struct TwitchWebLogin: UIViewRepresentable {
         private var done = false
         /// Mauvais compte en cours d'effacement : pas de capture entre-temps.
         private var resetting = false
+        /// Dernier « Réessayer » traité (updateUIView).
+        var reloadCount = 0
 
         init(_ parent: TwitchWebLogin) { self.parent = parent }
 
@@ -185,6 +233,20 @@ private struct TwitchWebLogin: UIViewRepresentable {
         }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             parent.onLoadingChange(false)
+        }
+        /// Échec avant tout affichage (hors ligne, réseau coupé, wifi qui ne
+        /// répond pas) : passait inaperçu, la roue tournait sans fin.
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                     withError error: Error) {
+            parent.onLoadingChange(false)
+            let e = error as NSError
+            // Seulement une panne réseau : un chargement remplacé par un autre
+            // (redirection de la page de connexion, « Réessayer ») ou un lien
+            // que la page ne sait pas ouvrir n'en sont pas.
+            guard e.domain == NSURLErrorDomain,
+                  e.code != NSURLErrorCancelled, e.code != NSURLErrorUnsupportedURL else { return }
+            logger.warn("AUTH/WEB", "Page de connexion indisponible", e.localizedDescription)
+            parent.onLoadFailed()
         }
 
         // MARK: Capture

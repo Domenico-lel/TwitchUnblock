@@ -162,7 +162,7 @@ struct AdminFeedbackList: View {
                 .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 10) {
-                Text("\(f.platform == "ios" ? "iOS" : "Web") · \(f.version)")
+                Text("\(f.platformLabel(long: false)) · \(f.version)")
                 if f.count > 1 { Label("\(f.count)", systemImage: "bubble.left.and.bubble.right") }
                 if f.photos > 0 { Label("\(f.photos)", systemImage: "photo") }
                 if let c = f.contact, !c.isEmpty { Text(c).lineLimit(1) }
@@ -262,7 +262,7 @@ struct AdminFeedbackThread: View {
     @ViewBuilder
     private func header(_ f: AdminFeedbackItem) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("\(f.platform == "ios" ? "App iOS" : "Site") · \(f.version) · \(f.date.formatted(date: .abbreviated, time: .shortened))")
+            Text("\(f.platformLabel(long: true)) · \(f.version) · \(f.date.formatted(date: .abbreviated, time: .shortened))")
                 .font(.tMeta).foregroundColor(.tMuted)
             if let c = f.contact, !c.isEmpty {
                 Text("\(store.t("adm_contact")) : \(c)")
@@ -428,6 +428,18 @@ private struct AdminPhoto: View {
                 TIconButton(icon: "xmark") { zoom = false }
                     .padding(TSpace.lg)
             }
+        }
+    }
+}
+
+extension AdminFeedbackItem {
+    /// Origine du retour, comme /stats. « Discord » : les réponses partent en
+    /// MP à la personne, par le bot du relais.
+    func platformLabel(long: Bool) -> String {
+        switch platform {
+        case "ios":     return long ? "App iOS" : "iOS"
+        case "discord": return "Discord"
+        default:        return long ? "Site" : "Web"
         }
     }
 }

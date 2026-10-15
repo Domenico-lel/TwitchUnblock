@@ -15,6 +15,8 @@ struct LibraryView: View {
     @ObservedObject private var downloads = VodDownloads.shared
 
     @State private var confirmClear = false
+    /// Téléchargement touché, mais le serveur local de lecture n'a pas démarré.
+    @State private var offlineFailed = false
 
     private var vods: [HistoryItem] { store.history.filter { $0.type == .vod } }
 
@@ -59,6 +61,12 @@ struct LibraryView: View {
                         Spacer(minLength: 40)
                     }
                 }
+                // Sur la liste, pas sur le Group : une seule alerte par vue.
+                .alert(store.t("offline_play_failed"), isPresented: $offlineFailed) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(store.t("offline_play_failed_msg"))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -66,7 +74,8 @@ struct LibraryView: View {
         .alert(store.t("btn_clear"), isPresented: $confirmClear) {
             Button(store.t("cancel"), role: .cancel) {}
             Button(store.t("erase"), role: .destructive) {
-                store.history = store.history.filter { $0.type != .vod }
+                // Positions de reprise comprises, et envoyé tout de suite.
+                store.clearVodHistory()
             }
         } message: {
             Text(store.t("confirm"))
@@ -74,8 +83,13 @@ struct LibraryView: View {
     }
 
     private func playOffline(_ item: VodDownload) {
-        Task {
-            if let rec = await downloads.playback(item) { onPlayOffline(rec) }
+        Task { @MainActor in
+            // Serveur local pas prêt (port pris, app relancée en arrière-plan) :
+            // une seconde demande le relance, sur un autre port au besoin ;
+            // sinon un message, au lieu d'un toucher sans effet.
+            var rec = await downloads.playback(item)
+            if rec == nil { rec = await downloads.playback(item) }
+            if let rec { onPlayOffline(rec) } else { offlineFailed = true }
         }
     }
 
@@ -131,6 +145,12 @@ struct LibraryView: View {
             .contentShape(Rectangle())
             .onTapGesture {
                 onPlayVod(item.term, item.display, item.thumb, item.streamer)
+            }
+            // Appui long : le multi-live. `streamer` peut être un nom affiché :
+            // la chaîne est complétée au démarrage de la tuile.
+            .contextMenu {
+                MultiVodMenuButton(vodId: item.term, title: item.display, thumb: item.thumb,
+                                   name: item.streamer ?? "", login: "")
             }
 
             TIconButton(icon: "trash", tint: .tDanger) {

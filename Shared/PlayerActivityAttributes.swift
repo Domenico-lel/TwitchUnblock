@@ -25,11 +25,38 @@ struct PlayerActivityAttributes: ActivityAttributes {
         var position: Double
         /// VOD : durée totale ; 0 pour un direct.
         var duration: Double
+        /// VOD lue à une autre vitesse que 1× (nil sinon). Facultatif : une
+        /// activité lancée par une version précédente doit encore se décoder.
+        var rate: Double? = nil
+        /// Activité reprise pour une autre chaîne pendant que l'app était en
+        /// arrière-plan (raid suivi écran verrouillé, par exemple) : iOS n'y
+        /// laisse pas en démarrer une nouvelle. Chaîne, nature et libellé du
+        /// direct à afficher à la place de ceux du départ ; nil sinon.
+        var shownChannel: String? = nil
+        var shownIsLive: Bool? = nil
+        var shownLiveLabel: String? = nil
+
+        /// Vitesse de lecture effective (1 par défaut).
+        var playbackRate: Double {
+            guard let rate, rate.isFinite, rate > 0 else { return 1 }
+            return rate
+        }
     }
 
-    /// Chaîne regardée. Changer de chaîne crée une nouvelle activité.
+    /// Chaîne regardée. Changer de chaîne crée une nouvelle activité (app au
+    /// premier plan ; sinon celle-ci est reprise, voir `shownChannel`).
     var channel: String
     var isLive: Bool
     /// « EN DIRECT », « LIVE NOW »… dans la langue choisie dans l'app.
     var liveLabel: String
+}
+
+@available(iOS 16.1, *)
+extension PlayerActivityAttributes {
+    /// Ce qu'affiche l'activité dans l'état `s` : la chaîne, la nature et le
+    /// libellé du direct de l'état quand elle a été reprise pour une autre
+    /// chaîne, sinon ceux du départ.
+    func channel(in s: ContentState) -> String { s.shownChannel ?? channel }
+    func isLive(in s: ContentState) -> Bool { s.shownIsLive ?? isLive }
+    func liveLabel(in s: ContentState) -> String { s.shownLiveLabel ?? liveLabel }
 }
