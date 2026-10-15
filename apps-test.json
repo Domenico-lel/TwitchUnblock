@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.3.63",
+          "buildVersion": "292",
+          "date": "2026-10-15",
+          "localizedDescription": "- Settings → Channel points tracks, like drops, the time you watched and the points you earned by watching: right now, in total and per channel\n- Predictions show, like the Twitch app, the points bet on each outcome, its return ratio, how many people bet and the biggest bet, plus what your bet would win\n- The Home live list refreshes on its own when you come back to the app and every 3 minutes while it's on screen",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-292/TwitchUnblock.ipa",
+          "size": 3571863,
+          "commit": "c6a87db981f2d11b1720fc7a9b7341b1819454c8"
+        },
+        {
           "version": "1.3.60",
           "buildVersion": "291",
           "date": "2026-10-15",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-260/TwitchUnblock.ipa",
           "size": 2598048,
           "commit": "f0ede2e4b435a6c29be078d563ab8a3619f96e27"
-        },
-        {
-          "version": "1.2.34",
-          "buildVersion": "259",
-          "date": "2026-10-11",
-          "localizedDescription": "- Multi-live: watch up to four streams side by side. Long-press a live card (or use the player's ⋯ menu) to add it, then tap Watch in the bar at the bottom; tap a stream to hear it.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-259/TwitchUnblock.ipa",
-          "size": 2596972,
-          "commit": "eaaf0d39e0ead64052b8bc59fdd320872d99eb91"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.3.60",
+      "version": "1.3.63",
       "versionDate": "2026-10-15",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-291/TwitchUnblock.ipa",
-      "size": 3522836
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-292/TwitchUnblock.ipa",
+      "size": 3571863
     }
   ],
   "news": []
