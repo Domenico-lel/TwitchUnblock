@@ -367,7 +367,8 @@ no key to paste. The backend is already hosted and shared by every install.
   the app's account: another account is refused at sign-in (and disconnected
   if found later), so points, drops and predictions never go to the wrong
   account — when the session changes, drop progress stops or carries on with
-  the new one.
+  the new one, and a live playing through your account (ad-free with your sub)
+  reloads with the new session or without one.
 * 📊 **Usage count** — logged in, your Twitch account (counted once across the
   app and the website); logged out, a random install ID. Plus the app version,
   the app language, iPhone or iPad, the iOS version and how many lives and

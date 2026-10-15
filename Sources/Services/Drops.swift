@@ -126,6 +126,11 @@ final class DropsService: ObservableObject {
     /// Sessions web remplacées : une lecture encore en route pour l'une
     /// d'elles n'affiche plus rien.
     private var endedTokens: [String] = []
+    /// Session dont les campagnes ouvertes sont en cours de lecture. Une
+    /// lecture pour une autre session (changement en plein chargement) part
+    /// tout de suite : l'ancienne, qui n'affichera rien, ne la bloque plus,
+    /// et « Chargement… » ne reste plus affiché sans fin.
+    private var availableLoadingFor: String?
 
     /// Session web remplacée (déconnexion, expiration, autre compte, nouvelle
     /// connexion) : ce qu'on affichait était à l'ancienne, son jeton
@@ -225,17 +230,24 @@ final class DropsService: ObservableObject {
     /// Campagnes ouvertes ou à venir, de tous les jeux. Sans jeton d'intégrité
     /// d'abord ; avec si Twitch en demande un (WebView éphémère, ~5 s).
     func refreshAvailable(token: String) async {
-        guard !availableLoading else { return }
+        guard availableLoadingFor != token else { return }
+        availableLoadingFor = token
         availableLoading = true
-        defer { availableLoading = false }
+        defer {
+            if availableLoadingFor == token {
+                availableLoadingFor = nil
+                availableLoading = false
+            }
+        }
         let body: [String: Any] = ["query": Self.dashboardQuery]
         var json = await webGQL(body, token: token)
         if gqlErrors(json).lowercased().contains("integrity"),
            let it = await validIntegrity(token: token) {
             json = await webGQL(body, token: token, integrity: it)
             if gqlErrors(json).lowercased().contains("integrity") {
-                // Jeton refusé : un neuf, une seule fois.
-                integrity = nil
+                // Jeton refusé : un neuf, une seule fois (celui d'une autre
+                // session, lu en même temps, n'est pas en cause).
+                if integrityToken == token { integrity = nil }
                 if let fresh = await validIntegrity(token: token) {
                     json = await webGQL(body, token: token, integrity: fresh)
                 }

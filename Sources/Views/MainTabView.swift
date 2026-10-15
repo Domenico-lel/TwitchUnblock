@@ -540,6 +540,21 @@ struct MainTabView: View {
         // Session web : vérifiée une fois au lancement. Sans ça on ne s'aperçoit
         // de son expiration que quand les points cessent de répondre.
         .task { await store.validateWebSession() }
+        // Session web changée (déconnexion, expiration, autre compte) pendant
+        // un direct lu par le compte (abonné sans pub) : sa liste de lecture
+        // est signée pour l'ancienne session, que Twitch continuerait de
+        // compter (spectateur, drops) jusqu'à la fermeture. Le direct est
+        // relu tout de suite, avec la nouvelle session ou le jeton anonyme,
+        // sans bouger le lecteur (réduit, chat seul).
+        .onChange(of: store.twitchWebToken) { _ in
+            guard case .live(let channel)? = playerMode, dvrSourceChannel == nil,
+                  liveSourceUsed == "account", !closingPlayer else { return }
+            logger.info("LECTEUR", "Session web changée : direct relu", channel)
+            let visible = playerVisible, onlyChat = chatOnly
+            playLive(channel, soft: true)
+            playerVisible = visible
+            chatOnly = onlyChat
+        }
         // Minuteur de veille écoulé → on coupe la lecture.
         .onChange(of: sleepTimer.fireCount) { _ in
             guard playerMode != nil else { return }

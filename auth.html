@@ -54,12 +54,19 @@
   if (token && /^[a-z0-9]+$/i.test(token)) {
     window.location.href = withState('twitchunblock://auth?access_token=' + encodeURIComponent(token));
     show(T.ok, T.back);
-  } else if (error) {
+  } else if (error && state) {
     // Refus (« Annuler » sur Twitch) ou erreur : retour à l'app, qui ferme
     // cette page. Avant, on restait bloqué ici sur un message en français.
+    // Seulement pour une app qui envoie un state (1.0.185 et après, qui lit
+    // les paramètres un par un) : les versions d'avant découpaient
+    // l'adresse de retour et prenaient « twitchunblock://auth?error=… »
+    // pour un jeton, rangé à la place du vrai.
     const desc = params.get('error_description') || '';
     window.location.href = withState('twitchunblock://auth?error=' + encodeURIComponent(error) +
       (desc ? '&error_description=' + encodeURIComponent(desc) : ''));
+    show(T.fail, T.failSub);
+  } else if (error) {
+    // Ancienne app : pas de retour, comme avant ; « Annuler » ferme la page.
     show(T.fail, T.failSub);
   } else {
     show('TwitchUnblock', T.back);
