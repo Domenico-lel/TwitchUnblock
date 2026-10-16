@@ -1144,11 +1144,15 @@ struct ChatMessageRow: View {
         return false
     }
 
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    /// Heure du message, 12 h ou 24 h (Réglages → Chat, « auto » : l'appareil).
+    private static let time24: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = ClockFormat.pattern(twelve: false); return f
+    }()
+    private static let time12: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = ClockFormat.pattern(twelve: true); return f
     }()
     private var timeString: String {
-        message.vodOffsetLabel ?? Self.timeFormatter.string(from: message.timestamp)
+        message.vodOffsetLabel ?? (store.clock12h ? Self.time12 : Self.time24).string(from: message.timestamp)
     }
 
     var body: some View {

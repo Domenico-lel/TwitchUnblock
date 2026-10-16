@@ -277,7 +277,8 @@ no key to paste. The backend is already hosted and shared by every install.
   picture, or folded away. The player's buttons shift with the chat's width so
   nothing is ever covered.
 * 🔠 **Sizing** — font size, message spacing, badge and emote scale,
-  timestamps, with a live preview.
+  timestamps, with a live preview. The time shows in 12 h or 24 h: Auto
+  follows the device, or pick one (Settings → Chat; the log follows it too).
 
 ### Finding things
 

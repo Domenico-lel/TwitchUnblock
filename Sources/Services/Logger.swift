@@ -1,6 +1,32 @@
 import Foundation
 import Combine
 
+// MARK: – Heure affichée (12 h / 24 h)
+/// Format de l'heure du chat et du journal : réglage `cfg_time_format`
+/// (« auto », « 12 », « 24 ») ; « auto » suit l'appareil (Réglages iOS →
+/// Général → Date et heure, ou la région).
+enum ClockFormat {
+    static let key = "cfg_time_format"
+    /// Format de l'appareil, lu une fois : 12 h si son modèle d'heure a AM/PM.
+    static let device12h: Bool =
+        (DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? "").contains("a")
+
+    static func uses12h(_ pref: String? = UserDefaults.standard.string(forKey: ClockFormat.key)) -> Bool {
+        switch pref ?? "auto" {
+        case "12": return true
+        case "24": return false
+        default:   return device12h
+        }
+    }
+
+    /// « 8:05 PM » ou « 20:05 » ; le journal ajoute secondes et millièmes.
+    static func pattern(seconds: Bool = false, twelve: Bool = ClockFormat.uses12h()) -> String {
+        let time = twelve ? "h:mm" : "HH:mm"
+        let rest = seconds ? ":ss.SSS" : ""
+        return twelve ? "\(time)\(rest) a" : "\(time)\(rest)"
+    }
+}
+
 final class AppLogger: ObservableObject {
     static let shared = AppLogger()
     private init() {}
@@ -13,9 +39,9 @@ final class AppLogger: ObservableObject {
     private func add(_ level: LogLevel, _ category: String, _ message: String, _ detail: String? = nil) {
         let now = Date()
         let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        let ms = Calendar.current.component(.nanosecond, from: now) / 1_000_000
-        let timestamp = formatter.string(from: now) + String(format: ".%03d", ms)
+        // 12 h ou 24 h selon le réglage (millièmes compris).
+        formatter.dateFormat = ClockFormat.pattern(seconds: true)
+        let timestamp = formatter.string(from: now)
         // Identifiant attribué sur le fil principal : incrémenté depuis
         // plusieurs fils, le compteur pouvait donner deux fois le même id.
         DispatchQueue.main.async {

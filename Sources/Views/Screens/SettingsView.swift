@@ -1093,6 +1093,20 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_timestamps"), store.t("cfg_timestamps_sub"),
                           $store.chatTimestamps, log: "Horodatage du chat")
+                // 12 h ou 24 h : « Auto » suit le réglage de l'appareil.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(store.t("cfg_time_format")).font(.tBody).foregroundColor(.tText)
+                    Text(store.t("cfg_time_format_sub"))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Picker("", selection: $store.timeFormat) {
+                        Text(store.t("time_auto")).tag("auto")
+                        Text("12 h").tag("12")
+                        Text("24 h").tag("24")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
                 Divider().background(Color.tBorder)
 
                 // Mêmes bornes que l'import d'une sauvegarde (AppStore).

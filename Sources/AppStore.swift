@@ -354,6 +354,11 @@ final class AppStore: ObservableObject {
     @Published var chatTimestamps: Bool = true {
         didSet { UserDefaults.standard.set(chatTimestamps, forKey: "cfg_chat_time") }
     }
+    /// Heure du chat et du journal : « auto » (celle de l'appareil), « 12 » ou « 24 ».
+    @Published var timeFormat: String = "auto" {
+        didSet { UserDefaults.standard.set(timeFormat, forKey: ClockFormat.key) }
+    }
+    var clock12h: Bool { ClockFormat.uses12h(timeFormat) }
     /// Part de la largeur prise par le chat en paysage (colonne ou calque).
     @Published var chatWidthRatio: Double = 0.32 {
         didSet { UserDefaults.standard.set(chatWidthRatio, forKey: "cfg_chat_width") }
@@ -704,6 +709,7 @@ final class AppStore: ObservableObject {
         chatBadgeScale     = Self.clamped(ud.object(forKey: "cfg_chat_badge")   as? Double ?? 1, to: Self.chatScaleRange)
         chatEmoteScale     = Self.clamped(ud.object(forKey: "cfg_chat_emote")   as? Double ?? 1, to: Self.chatScaleRange)
         chatTimestamps     = ud.object(forKey: "cfg_chat_time")    as? Bool   ?? true
+        timeFormat         = ["auto", "12", "24"].contains(ud.string(forKey: ClockFormat.key) ?? "") ? ud.string(forKey: ClockFormat.key)! : "auto"
         chatWidthRatio     = Self.clamped(ud.object(forKey: "cfg_chat_width")   as? Double ?? 0.32, to: Self.chatWidthRange)
         chatLoadRecent     = ud.object(forKey: "cfg_chat_recent")       as? Bool ?? true
         chatAutocomplete   = ud.object(forKey: "cfg_chat_autocomplete") as? Bool ?? true
