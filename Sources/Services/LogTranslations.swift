@@ -1,7 +1,7 @@
 import Foundation
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Journal traduit — FICHIER GÉNÉRÉ (retours-14/logs/make-log-translations.mjs,
+//  Journal traduit — FICHIER GÉNÉRÉ (tools/log-translations, voir son README.md,
 //  depuis les appels au journal) : ne pas le modifier à la main.
 //  Le journal reste écrit en français ; à l'affichage, ses morceaux français
 //  sont remplacés par leur traduction dans la langue de l'app. Les nombres,
