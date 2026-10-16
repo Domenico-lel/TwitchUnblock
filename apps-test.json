@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.3",
+          "buildVersion": "300",
+          "date": "2026-10-16",
+          "localizedDescription": "- Chat and log times show in 12-hour or 24-hour format like your device, or the way you pick in Settings → Chat → Time format",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-300/TwitchUnblock.ipa",
+          "size": 3618606,
+          "commit": "19b8f81311f8f2e73d1e205d7ce74e8845f5a8ee"
+        },
+        {
           "version": "1.4.2",
           "buildVersion": "299",
           "date": "2026-10-15",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-263/TwitchUnblock.ipa",
           "size": 2674453,
           "commit": "8abcbb07d9f80b8e6f8de0fde0c610cf3b17bcc3"
-        },
-        {
-          "version": "1.2.37",
-          "buildVersion": "262",
-          "date": "2026-10-11",
-          "localizedDescription": "- Multi-live on iPad: the chat of the stream you hear shows next to the mosaic (button in the mosaic, or Settings → Player).",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-262/TwitchUnblock.ipa",
-          "size": 2655098,
-          "commit": "5875746a6e1c2e7e8ed04539ad7f832ddf970c86"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.2",
-      "versionDate": "2026-10-15",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-299/TwitchUnblock.ipa",
-      "size": 3614249
+      "version": "1.4.3",
+      "versionDate": "2026-10-16",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-300/TwitchUnblock.ipa",
+      "size": 3618606
     }
   ],
   "news": []
