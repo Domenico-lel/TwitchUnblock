@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.4",
+          "buildVersion": "301",
+          "date": "2026-10-16",
+          "localizedDescription": "- The log shows in your language, and can be exported as a .txt file (Files, AirDrop, Mail…)",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-301/TwitchUnblock.ipa",
+          "size": 3654675,
+          "commit": "d1d20b0f53d1df1a1ad7dd863c8f42f05bc9a645"
+        },
+        {
           "version": "1.4.3",
           "buildVersion": "300",
           "date": "2026-10-16",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-264/TwitchUnblock.ipa",
           "size": 3448728,
           "commit": "3c5ebbec3724b599665c8838b8dd4de2626ca927"
-        },
-        {
-          "version": "1.2.38",
-          "buildVersion": "263",
-          "date": "2026-10-11",
-          "localizedDescription": "- Instant live notifications, even with the app closed, through the free ntfy app (Settings → Features in testing): add the topic shown there in ntfy, and tapping a notification opens the stream.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-263/TwitchUnblock.ipa",
-          "size": 2674453,
-          "commit": "8abcbb07d9f80b8e6f8de0fde0c610cf3b17bcc3"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.3",
+      "version": "1.4.4",
       "versionDate": "2026-10-16",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-300/TwitchUnblock.ipa",
-      "size": 3618606
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-301/TwitchUnblock.ipa",
+      "size": 3654675
     }
   ],
   "news": []
