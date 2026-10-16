@@ -413,7 +413,10 @@ no key to paste. The backend is already hosted and shared by every install.
   at most once an hour. No channels watched, no IP address. Switching it off
   erases it server-side. Public numbers: [/stats](https://twitchunblock.vercel.app/stats). See
   [`Sources/Services/UsageService.swift`](Sources/Services/UsageService.swift).
-* 🪵 **System logs** — everything the app does, visible in Settings.
+* 🪵 **System logs** — everything the app does, visible in Settings, in the
+  app's language (written in French, translated when shown: numbers and names
+  stay as they are). Share them as text or export them as a `.txt` file
+  (Files, AirDrop, Mail…).
 
 ---
 
