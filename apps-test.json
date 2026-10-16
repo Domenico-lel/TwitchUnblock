@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.5",
+          "buildVersion": "302",
+          "date": "2026-10-16",
+          "localizedDescription": "- Other improvements and fixes",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-302/TwitchUnblock.ipa",
+          "size": 3654884,
+          "commit": "3f7cb7ea286c5bcd4f12cd90f9716063fe0de367"
+        },
+        {
           "version": "1.4.4",
           "buildVersion": "301",
           "date": "2026-10-16",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-265/TwitchUnblock.ipa",
           "size": 3451957,
           "commit": "5143e8d1852e4f978047e9dafa7f756ddc5cffed"
-        },
-        {
-          "version": "1.2.39",
-          "buildVersion": "264",
-          "date": "2026-10-11",
-          "localizedDescription": "- Pick an app icon in Settings → General → Appearance: Classic, Purple, Night, Light, Contrast or Neon, each with dark and tinted versions — “Contrast” stays sharp with iOS 26's clear icons.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-264/TwitchUnblock.ipa",
-          "size": 3448728,
-          "commit": "3c5ebbec3724b599665c8838b8dd4de2626ca927"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.4",
+      "version": "1.4.5",
       "versionDate": "2026-10-16",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-301/TwitchUnblock.ipa",
-      "size": 3654675
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-302/TwitchUnblock.ipa",
+      "size": 3654884
     }
   ],
   "news": []
