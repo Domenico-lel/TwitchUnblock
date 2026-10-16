@@ -1,0 +1,43 @@
+{
+  "name": "TwitchUnblock TV",
+  "subtitle": "Apple TV test builds of TwitchUnblock",
+  "description": "Unsigned test builds of the TwitchUnblock Apple TV app, from the test-17d298 branch. Add this source in ATVLoadly (or any tool that reads AltStore sources) to get updates automatically.",
+  "iconURL": "https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/assets/icon.png",
+  "website": "https://github.com/MXFia19/TwitchUnblock",
+  "tintColor": "#9146ff",
+  "featuredApps": [
+    "com.mxfia19.TwitchUnblockTV"
+  ],
+  "apps": [
+    {
+      "name": "TwitchUnblock TV",
+      "bundleIdentifier": "com.mxfia19.TwitchUnblockTV",
+      "developerName": "MXFia19",
+      "subtitle": "Twitch lives and VODs on Apple TV (test)",
+      "localizedDescription": "Followed channels, top streams, categories and search, lives and VODs with the chat on the picture.",
+      "iconURL": "https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/assets/icon.png",
+      "tintColor": "#9146ff",
+      "category": "entertainment",
+      "screenshots": [],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      },
+      "versions": [
+        {
+          "version": "0.1.10",
+          "buildVersion": "10",
+          "date": "2026-10-16",
+          "localizedDescription": "- The Following tab also lists the channels you follow that are offline (most recently live first); open one to see its videos\n- Move the chat left or right, full height or into a corner from the player's Chat menu, remembered per channel; the Account tab no longer traps the remote's focus\n- Other improvements and fixes",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-10/TwitchUnblockTV.ipa",
+          "size": 2309056,
+          "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
+        }
+      ],
+      "version": "0.1.10",
+      "versionDate": "2026-10-16",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-10/TwitchUnblockTV.ipa",
+      "size": 2309056
+    }
+  ]
+}
