@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.14",
+          "buildVersion": "14",
+          "date": "2026-10-17",
+          "localizedDescription": "- Showing or hiding the chat is now remembered per channel, like its position (handy for streamers who already show their chat on screen); Account → Chat by default sets it for the others",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-14/TwitchUnblockTV.ipa",
+          "size": 2327050,
+          "commit": "b3af975cfe7f313f986080298b834c5f03299fd2"
+        },
+        {
           "version": "0.1.13",
           "buildVersion": "13",
           "date": "2026-10-17",
@@ -52,10 +61,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.13",
+      "version": "0.1.14",
       "versionDate": "2026-10-17",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-13/TwitchUnblockTV.ipa",
-      "size": 2324379
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-14/TwitchUnblockTV.ipa",
+      "size": 2327050
     }
   ]
 }
