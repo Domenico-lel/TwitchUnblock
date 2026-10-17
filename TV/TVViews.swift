@@ -34,6 +34,7 @@ struct TVChannelRoute: Identifiable {
 
 struct TVRootView: View {
     @EnvironmentObject private var session: TVSession
+    @Environment(\.scenePhase) private var scenePhase
     @State private var playing: TVPlayback?
     /// « Chaîne » touché dans le lecteur : sa page s'ouvre une fois celui-ci fermé.
     @State private var pendingChannel: String?
@@ -63,7 +64,15 @@ struct TVRootView: View {
             TVChannelCover(login: route.login)
                 .environmentObject(session)
         }
-        .task { await session.restore() }
+        .task {
+            await session.restore()
+            await TVUsage.ping(token: session.token, lang: session.lang)
+        }
+        // Retour dans l'app : signal d'utilisation (/stats), un par heure au plus.
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            Task { await TVUsage.ping(token: session.token, lang: session.lang) }
+        }
     }
 
     private func play(_ item: TVPlayback) { playing = item }
@@ -437,6 +446,10 @@ struct TVChannelView: View {
                         }
                     }
                 }
+                // Toute la largeur reçoit le focus : « Regarder le live », à
+                // droite, n'était atteint en montant que depuis la vidéo
+                // juste dessous (tvOS cherche ce qui est au-dessus).
+                .focusSection()
 
                 Text(session.t("tv_videos")).font(.title3.bold())
                 if videos.isEmpty {
@@ -473,6 +486,8 @@ struct TVChannelView: View {
 // MARK: – Compte et réglages
 struct TVAccountTab: View {
     @EnvironmentObject private var session: TVSession
+    /// Signal d'utilisation pour /stats (TVUsage) : coupé, le serveur oublie tout.
+    @AppStorage(TVUsage.enabledKey) private var shareUsage = true
     @State private var code: TVSession.DeviceCode?
     @State private var failed = false
     @State private var loginTask: Task<Void, Never>?
@@ -542,6 +557,19 @@ struct TVAccountTab: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focusSection()
                     }
+                    TVChoiceRow(title: session.t("usage_share"),
+                                options: [("on", session.t("tv_on")), ("off", session.t("tv_off"))],
+                                selection: Binding(get: { shareUsage ? "on" : "off" }, set: { value in
+                                    let on = value == "on"
+                                    guard on != shareUsage else { return }
+                                    shareUsage = on
+                                    let token = session.token, lang = session.lang
+                                    Task {
+                                        if on { await TVUsage.ping(token: token, lang: lang) }
+                                        else { await TVUsage.forget(token: token) }
+                                    }
+                                }))
+                    Text(session.t("tv_usage_sub")).foregroundColor(.secondary)
                 }
 
                 hiddenSection

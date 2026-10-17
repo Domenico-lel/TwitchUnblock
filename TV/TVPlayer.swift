@@ -96,9 +96,12 @@ final class TVPlayerModel: ObservableObject {
             vodId = nil
             let data = await getLive(channelName: login)
             guard let raw = data.links, !raw.isEmpty else {
+                // Santé du direct (/stats) : hors ligne n'est pas un échec.
+                if data.error != "offline" { TVUsage.count("live_fail") }
                 error = session.t(data.error == "offline" ? "tv_offline" : "tv_error_live")
                 return
             }
+            TVUsage.count("live_\(data.source ?? "unknown")")
             subtitle = data.title
             // Playlists réécrites avec la vraie durée des segments (2 s) : le
             // lecteur tient le bord du direct au lieu de rester ~20 s derrière.
@@ -113,10 +116,12 @@ final class TVPlayerModel: ObservableObject {
             let data = await getM3U8(vodId: id)
             let markers = await markersTask
             guard !data.links.isEmpty else {
+                TVUsage.count("vod_fail")
                 // Code d'erreur (getM3U8) traduit : le texte venait en français.
                 error = session.t(data.error.map(apiErrorKey) ?? "tv_error_vod")
                 return
             }
+            TVUsage.count("vod")
             // VOD récente avec des passages coupés : le son d'origine est
             // peut-être encore sur le CDN (VodUnmuteLoader).
             links = VodUnmuteLoader.worthTrying(markers) ? VodUnmuteLoader.wrap(data.links) : data.links

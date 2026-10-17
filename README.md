@@ -483,6 +483,10 @@ unsigned `tv-test-N` pre-release:
 * **View channel** in the player's bar opens the channel's page, with its
   past broadcasts; a video started there plays on top of it, and Menu goes
   back.
+* Usage count, like the iPhone (Account → Share my usage): a random install ID,
+  or your Twitch account when signed in, the version, the language and how many
+  lives and VODs started (which source, failures), at most once an hour; never
+  the channels. It waits until the backend counts the Apple TV on its own.
 * Account's settings move one row at a time with the remote, land on the
   ticked option, and always lead back up to the tab bar.
 * A preferred quality (Account → Settings), same rule as the iPhone: the
