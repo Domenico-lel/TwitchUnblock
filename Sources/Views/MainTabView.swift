@@ -602,9 +602,13 @@ struct MainTabView: View {
         }
         .onChange(of: keepScreenOn) { ScreenAwake.set("player", $0) }
         // Lecteur réduit (ou fermé) après le bouton de rotation : sur iPhone,
-        // le reste de l'app revient au portrait au lieu de rester couché.
+        // le reste de l'app revient au portrait au lieu de rester couché. Le
+        // clavier du chat se ferme aussi : il restait par-dessus l'app.
         .onChange(of: playerVisible) { visible in
-            if !visible { PlayerOrientation.restorePortraitIfForced() }
+            guard !visible else { return }
+            PlayerOrientation.restorePortraitIfForced()
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
         }
     }
 

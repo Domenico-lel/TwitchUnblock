@@ -411,7 +411,30 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
             }
             return
         }
+        // VOD lue telle quelle : un passage coupé listé « -unmuted.ts », que
+        // le CDN refuse, l'arrête net. Relancée une fois au même endroit,
+        // réécrite sur l'appareil (une adresse déjà réécrite ne change plus :
+        // pas de seconde relance).
+        if !isLive, let asset = item.asset as? AVURLAsset {
+            let safe = VodUnmuteLoader.mutedSafe(asset.url)
+            if safe != asset.url {
+                let at = position
+                logger.warn("LECTEUR", "VOD interrompue", "\(reason) · relance, passages coupés réécrits")
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.tornDown, self.player.currentItem === item else { return }
+                    self.load(url: safe, seek: at)
+                }
+                return
+            }
+        }
         showFailure(isLive && pausedByUser ? reason + " · en pause, pas de relance" : reason)
+    }
+
+    /// « Passer » un passage coupé alors que la lecture s'est arrêtée : un
+    /// élément en échec ne cherche plus. Relu juste après, réécrit sur l'appareil.
+    func reload(at t: Double) {
+        guard let asset = (player.currentItem ?? loadedItem)?.asset as? AVURLAsset else { return }
+        load(url: VodUnmuteLoader.mutedSafe(asset.url), seek: t)
     }
 
     /// La lecture s'est arrêtée : la carte « Réessayer » s'affiche.
@@ -1847,7 +1870,10 @@ struct ImmersivePlayer: View {
                 .font(.system(size: 12, weight: .semibold))
                 .lineLimit(1)
             Button {
-                model.seek(to: min(r.end + 0.5, model.endTime))
+                let after = model.endTime > 0 ? min(r.end + 0.5, model.endTime) : r.end + 0.5
+                // Lecture arrêtée (élément en échec) : chercher ne fait plus
+                // rien, on relit juste après le passage.
+                if model.failed { model.reload(at: after) } else { model.seek(to: after) }
                 scheduleAutoHide()
             } label: {
                 HStack(spacing: 3) {

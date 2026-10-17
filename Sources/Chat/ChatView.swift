@@ -473,6 +473,13 @@ struct ChatView: View {
                                     }
                                     .onEnded { _ in isDragging = false }
                             )
+                            // Clavier ouvert : faire glisser le chat vers le bas ou
+                            // le toucher le referme, sans envoyer (Entrée était le
+                            // seul moyen, au risque d'envoyer un brouillon).
+                            .scrollDismissesKeyboard(.interactively)
+                            .simultaneousGesture(TapGesture().onEnded {
+                                if isInputFocused { isInputFocused = false }
+                            })
                             .onChange(of: chat.messages.first?.id) { _ in
                                 // Suit les nouveaux messages seulement si en bas et hors défilement
                                 // manuel. Sans animation → re-cale instantané, la sentinelle reste
@@ -915,7 +922,9 @@ struct ChatView: View {
                         text: $messageText
                     )
                     .focused($isInputFocused)
-                    .autocorrectionDisabled()
+                    // Suggestions et correction d'iOS : la barre de mots
+                    // proposés n'apparaît qu'avec elles (réglage du chat).
+                    .autocorrectionDisabled(!store.chatKeyboardSuggestions)
                     .autocapitalization(.sentences)
                     .foregroundColor(.tText)
                     .submitLabel(.send)

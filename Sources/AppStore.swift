@@ -396,6 +396,11 @@ final class AppStore: ObservableObject {
     @Published var chatAutocomplete: Bool = true {
         didSet { UserDefaults.standard.set(chatAutocomplete, forKey: "cfg_chat_autocomplete") }
     }
+    /// Suggestions du clavier iOS (mots proposés au-dessus, correction) dans
+    /// le chat. Coupées, iOS ne touche plus aux noms d'emotes.
+    @Published var chatKeyboardSuggestions: Bool = true {
+        didSet { UserDefaults.standard.set(chatKeyboardSuggestions, forKey: "cfg_chat_kbd_suggest") }
+    }
     /// Garder les messages supprimés, barrés, au lieu de les faire disparaître.
     @Published var chatShowDeleted: Bool = false {
         didSet { UserDefaults.standard.set(chatShowDeleted, forKey: "cfg_chat_deleted") }
@@ -723,6 +728,7 @@ final class AppStore: ObservableObject {
         chatWidthRatio     = Self.clamped(ud.object(forKey: "cfg_chat_width")   as? Double ?? 0.32, to: Self.chatWidthRange)
         chatLoadRecent     = ud.object(forKey: "cfg_chat_recent")       as? Bool ?? true
         chatAutocomplete   = ud.object(forKey: "cfg_chat_autocomplete") as? Bool ?? true
+        chatKeyboardSuggestions = ud.object(forKey: "cfg_chat_kbd_suggest") as? Bool ?? true
         chatShowDeleted    = ud.object(forKey: "cfg_chat_deleted")      as? Bool ?? false
         shareUsage         = ud.object(forKey: "cfg_share_usage") as? Bool ?? true
         // « zh_hk » importé du site par une version d'avant : ramené à « zh-hk ».

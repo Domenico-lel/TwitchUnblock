@@ -1001,6 +1001,9 @@ struct SettingsView: View {
                 toggleRow(store.t("cfg_autocomplete"), store.t("cfg_autocomplete_sub"),
                           $store.chatAutocomplete, log: "Autocomplétion")
                 Divider().background(Color.tBorder)
+                toggleRow(store.t("cfg_kbd_suggest"), store.t("cfg_kbd_suggest_sub"),
+                          $store.chatKeyboardSuggestions, log: "Suggestions du clavier")
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_deleted"), store.t("cfg_deleted_sub"),
                           $store.chatShowDeleted, log: "Messages supprimés")
                 Divider().background(Color.tBorder)

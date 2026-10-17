@@ -191,7 +191,7 @@ struct MessageSheet: View {
                       text: $replyText)
                 .focused($focused)
                 .foregroundColor(.tText)
-                .autocorrectionDisabled()
+                .autocorrectionDisabled(!store.chatKeyboardSuggestions)
                 .padding(.horizontal, TSpace.md).padding(.vertical, 10)
                 .background(Color.tSurface).cornerRadius(TRadius.control)
                 .overlay(RoundedRectangle(cornerRadius: TRadius.control)

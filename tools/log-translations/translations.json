@@ -405,5 +405,8 @@
  "Worker indisponible (": ["Worker unavailable (", "Worker no disponible (", "Worker недоступен ("],
  "Worker injoignable": ["Worker unreachable", "Worker inaccesible", "Worker недоступен"],
  "Worker personnel refusé (": ["Personal Worker refused (", "Worker personal rechazado (", "Личный Worker отклонён ("],
- "Worker personnel sans base D1": ["Personal Worker without a D1 database", "Worker personal sin base D1", "Личный Worker без базы D1"]
+ "Worker personnel sans base D1": ["Personal Worker without a D1 database", "Worker personal sin base D1", "Личный Worker без базы D1"],
+ "Passages coupés : aucun Worker, playlists réécrites sur l'appareil": ["Muted parts: no Worker, playlists rewritten on the device", "Partes silenciadas: ningún Worker, listas reescritas en el dispositivo", "Заглушённые фрагменты: Worker недоступен, плейлисты переписаны на устройстве"],
+ "· relance, passages coupés réécrits": ["· restarting, muted parts rewritten", "· reinicio, partes silenciadas reescritas", "· перезапуск, заглушённые фрагменты переписаны"],
+ "VOD interrompue": ["VOD stopped", "VOD interrumpido", "VOD прервано"]
 }

@@ -375,8 +375,15 @@ private func workerJSON(_ path: String) async -> [String: Any]? {
 func playableMutedLinks(_ links: QualityLinks) async -> QualityLinks {
     guard let source = links["Source"] ?? links.values.first, let url = URL(string: source),
           let (data, _) = try? await URLSession.shared.data(from: url),
-          String(decoding: data, as: UTF8.self).contains("-unmuted.ts"),
-          let base = await workingProxyBase(for: source) else { return links }
+          String(decoding: data, as: UTF8.self).contains("-unmuted.ts") else { return links }
+    // Aucun Worker ne répond (quota du jour, panne) : réécrites sur l'appareil
+    // (VodUnmuteLoader, sans chercher le son d'origine). Les playlists brutes
+    // arrêtaient la lecture au premier passage coupé ; AirPlay, qui ne lit pas
+    // ces adresses, retombe alors sur le CDN.
+    guard let base = await workingProxyBase(for: source) else {
+        logger.warn("M3U8", "Passages coupés : aucun Worker, playlists réécrites sur l'appareil")
+        return VodUnmuteLoader.wrapMuted(links)
+    }
     var out: QualityLinks = [:]
     for (label, link) in links { out[label] = proxiedPlaylistURL(link, base: base) }
     logger.info("M3U8", "Passages coupés : playlists réécrites par le Worker", base)
@@ -454,7 +461,9 @@ func getM3U8(vodId: String) async -> M3U8Data {
     if let json = await workerJSON("/api/get-m3u8?id=\(vodId)&proxy=false"),
        let links = json["links"] as? QualityLinks, !links.isEmpty {
         logger.success("M3U8", "[3/3] ✅ Worker \(links.count) qualités")
-        return M3U8Data(links: links, error: nil, variants: workerVariants(json["variants"]))
+        // Playlists du CDN (proxy=false) : mêmes passages coupés que le storyboard.
+        return M3U8Data(links: await playableMutedLinks(links), error: nil,
+                        variants: workerVariants(json["variants"]))
     }
 
     logger.error("M3U8", "❌ Toutes les tentatives ont échoué pour VOD \(vodId)")

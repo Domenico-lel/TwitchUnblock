@@ -145,7 +145,9 @@ no key to paste. The backend is already hosted and shared by every install.
   back automatically (Settings → Player; not over AirPlay). On VODs in the newer
   MP4 format, Twitch often still serves muted parts with their sound: the app
   plays and downloads them as they are instead of swapping in the silent
-  version.
+  version. Muted parts that Twitch lists under a name its CDN refuses are
+  fixed on the device when the backend can’t do it, and a VOD that stops on one
+  starts again at the same place on its own; **Skip** works even then.
 * 🗂 **Unlisted & deleted broadcasts** — streams whose VOD is hidden or was
   deleted show up among the channel's VODs as "Unlisted VOD", rebuilt from
   Twitch's CDN as long as it still has them (stream IDs from `vodvod.top`,
@@ -214,7 +216,11 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🕘 **Recent messages** — Twitch sends nothing from before you join, so the
   last messages are fetched from `recent-messages.robotty.de` (third party) and
   marked with a clock.
-* ⌨️ **Autocomplete** — emotes and names suggested as you type.
+* ⌨️ **Autocomplete** — emotes and names suggested as you type. The iOS
+  keyboard’s predicted words and autocorrect are on (Settings → Chat →
+  Keyboard suggestions, to turn off if iOS corrects your emotes). Swipe the
+  chat down or tap it to hide the keyboard without sending; reducing the
+  player hides it too.
 * 🗑 **Deleted messages** — optionally kept struck through instead of vanishing.
 * 🎨 **Username colour** — changed through Helix (needs a re-login after the
   permission was added).

@@ -23,6 +23,11 @@ import AVFoundation
 final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     static let shared = VodUnmuteLoader()
     static let scheme = "tuunmute"
+    /// Même réécriture sans chercher les originaux : « -unmuted.ts » (refusé)
+    /// devient seulement « -muted.ts ». Quand aucun Worker ne peut réécrire la
+    /// playlist (playableMutedLinks), et pour relancer une VOD arrêtée sur un
+    /// passage coupé (`mutedSafe`).
+    static let mutedScheme = "tumuted"
     /// Résultat d'une playlist réécrite : `url` (adresse du CDN), `restored`
     /// (passages rétablis), `remaining` ([MutedRange] encore muets).
     static let resultNotification = Notification.Name("VodUnmuteResult")
@@ -55,19 +60,48 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     static func wrap(_ links: QualityLinks) -> QualityLinks {
         links.mapValues { link in
             // L'audio seul n'a jamais d'original : rien à gagner, autant
-            // garder la lecture directe (et AirPlay).
-            guard link.hasPrefix("https://"), !link.contains("/audio_only/") else { return link }
-            return scheme + "://" + link.dropFirst("https://".count)
+            // garder la lecture d'avant (directe, et AirPlay).
+            let plain = unwrap(link)
+            return plain.contains("/audio_only/") ? link : wrapped(plain, scheme)
         }
     }
 
+    /// Passages coupés seulement rendus lisibles (`mutedScheme`), audio seul compris.
+    static func wrapMuted(_ links: QualityLinks) -> QualityLinks {
+        links.mapValues { wrapped(unwrap($0), mutedScheme) }
+    }
+
+    private static func wrapped(_ link: String, _ scheme: String) -> String {
+        guard link.hasPrefix("https://") else { return link }
+        return scheme + "://" + link.dropFirst("https://".count)
+    }
+
+    /// VOD relancée après un arrêt : réécrite sur l'appareil, sans Worker (une
+    /// adresse de son proxy redevient celle du CDN). Déjà réécrite, ou pas une
+    /// playlist (clip MP4, fichier téléchargé) : telle quelle.
+    static func mutedSafe(_ url: URL) -> URL {
+        guard url.scheme == "https",
+              url.path.hasSuffix(".m3u8") || url.path.hasSuffix("/api/proxy") else { return url }
+        var plain = url
+        if url.path.hasSuffix("/api/proxy"),
+           let inner = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+               .queryItems?.first(where: { $0.name == "url" })?.value,
+           let cdn = URL(string: inner), cdn.scheme == "https" {
+            plain = cdn
+        }
+        return URL(string: wrapped(plain.absoluteString, mutedScheme)) ?? url
+    }
+
     static func unwrap(_ url: URL) -> URL? {
-        guard url.scheme == scheme else { return url }
-        return URL(string: "https://" + url.absoluteString.dropFirst(scheme.count + 3))
+        guard let s = url.scheme, s == scheme || s == mutedScheme else { return url }
+        return URL(string: "https://" + url.absoluteString.dropFirst(s.count + 3))
     }
 
     static func unwrap(_ link: String) -> String {
-        link.hasPrefix(scheme + "://") ? "https://" + link.dropFirst(scheme.count + 3) : link
+        for s in [scheme, mutedScheme] where link.hasPrefix(s + "://") {
+            return "https://" + link.dropFirst(s.count + 3)
+        }
+        return link
     }
 
     /// Élément de lecture : passe par le bon chargeur pour une adresse maison
@@ -75,7 +109,7 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     static func playerItem(url: URL) -> AVPlayerItem {
         let item: AVPlayerItem
         switch url.scheme {
-        case scheme:
+        case scheme, mutedScheme:
             let asset = AVURLAsset(url: url)
             asset.resourceLoader.setDelegate(shared, queue: shared.queue)
             item = AVPlayerItem(asset: asset)
@@ -117,7 +151,7 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
               let asset = player.currentItem?.asset as? AVURLAsset else { return nil }
         let plain: URL?
         switch asset.url.scheme {
-        case scheme:                  plain = unwrap(asset.url)
+        case scheme, mutedScheme:     plain = unwrap(asset.url)
         case LivePlaylistLoader.scheme: plain = LivePlaylistLoader.unwrap(asset.url)
         default:                      plain = nil
         }
@@ -158,10 +192,12 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     // MARK: Chargement
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader,
                         shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest) -> Bool {
-        guard let url = loadingRequest.request.url, url.scheme == Self.scheme,
+        guard let url = loadingRequest.request.url,
+              url.scheme == Self.scheme || url.scheme == Self.mutedScheme,
               let real = Self.unwrap(url) else { return false }
+        let probe = url.scheme == Self.scheme
         Task {
-            if let data = await self.playlist(real) {
+            if let data = await self.playlist(real, probe: probe) {
                 loadingRequest.dataRequest?.respond(with: data)
                 loadingRequest.finishLoading()
             } else {
@@ -203,11 +239,14 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         return true
     }
 
-    private func playlist(_ url: URL) async -> Data? {
+    /// `probe` faux (`mutedScheme`) : rien n'est sondé, les passages coupés
+    /// restent muets — mais lisibles.
+    private func playlist(_ url: URL, probe: Bool) async -> Data? {
+        let key = (probe ? "" : "muted|") + url.absoluteString
         // Playlist déjà réécrite : on refait l'annonce. Le lecteur remet la
         // barre aux passages coupés de GQL à chaque ouverture : sans elle, une
         // VOD rouverte montrerait muets des passages qui ont le son.
-        if let hit = cached(url.absoluteString) {
+        if let hit = cached(key) {
             if let outcome = hit.outcome { await announce(outcome, for: url.absoluteString) }
             return hit.data
         }
@@ -215,11 +254,11 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         let text = String(decoding: data, as: UTF8.self)
         guard text.hasPrefix("#EXTM3U") else { return nil }
-        let (rewritten, outcome) = await rewrite(text, base: url)
+        let (rewritten, outcome) = await rewrite(text, base: url, probe: probe)
         let out = Data(rewritten.utf8)
         // Seulement une playlist terminée : celle d'un enregistrement en cours
         // est réécrite à chaque relecture (ses sondes, elles, sont gardées).
-        if text.contains("#EXT-X-ENDLIST") { store(out, outcome: outcome, for: url.absoluteString) }
+        if text.contains("#EXT-X-ENDLIST") { store(out, outcome: outcome, for: key) }
         if let outcome { await announce(outcome, for: url.absoluteString) }
         return out
     }
@@ -227,7 +266,7 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     /// Adresses rendues absolues (la base n'est plus celle du CDN), passages
     /// coupés remplacés par leur original quand le CDN l'a encore.
     /// Avec l'annonce à faire (nil : rien de coupé).
-    private func rewrite(_ text: String, base: URL) async -> (String, Outcome?) {
+    private func rewrite(_ text: String, base: URL, probe: Bool) async -> (String, Outcome?) {
         var lines = text.components(separatedBy: "\n")
         struct Muted { let index: Int; let original: URL; let start: Double; let duration: Double }
         var muted: [Muted] = []
@@ -281,7 +320,8 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         // de nouvelle requête, seuls les nouveaux passages sont interrogés.
         var available = Set<Int>()
         var unknown: [Muted] = []
-        for m in muted {
+        // Sans sonde (`mutedScheme`) : tous restent muets, aucun HEAD.
+        for m in muted where probe {
             switch probeResult(m.original) {
             case true?:  available.insert(m.index)
             case false?: break
@@ -292,11 +332,11 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
         // refusés, les originaux sont effacés (VOD trop ancienne) — inutile
         // d'interroger les centaines suivants, comptés refusés eux aussi.
         var results: [(URL, Bool)] = []
-        let probe = available.isEmpty ? Array(unknown.prefix(4)) : unknown
-        let first = await exist(probe.map(\.original))
-        for (k, ok) in first.enumerated() { results.append((probe[k].original, ok)) }
-        if unknown.count > probe.count {
-            let rest = Array(unknown.dropFirst(probe.count))
+        let batch = available.isEmpty ? Array(unknown.prefix(4)) : unknown
+        let first = await exist(batch.map(\.original))
+        for (k, ok) in first.enumerated() { results.append((batch[k].original, ok)) }
+        if unknown.count > batch.count {
+            let rest = Array(unknown.dropFirst(batch.count))
             if first.contains(true) {
                 let others = await exist(rest.map(\.original))
                 for (k, ok) in others.enumerated() { results.append((rest[k].original, ok)) }
