@@ -93,6 +93,9 @@ struct TVChannelCover: View {
                     TVChannelView(login: other, play: { playing = $0 })
                 }
         }
+        // Fond opaque : la feuille plein écran de tvOS n'en a pas, l'onglet
+        // d'où l'on venait se voyait à travers la page.
+        .background(Color.black.ignoresSafeArea())
         // « Chaîne » dans ce lecteur-ci : la page est juste dessous.
         .fullScreenCover(item: $playing) { item in
             TVPlayerScreen(item: item, onChannel: { _ in playing = nil })
