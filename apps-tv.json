@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.12",
+          "buildVersion": "12",
+          "date": "2026-10-17",
+          "localizedDescription": "- View channel in the player's bar opens the channel's page with its past broadcasts; a video started there plays on top of it, and Menu goes back",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-12/TwitchUnblockTV.ipa",
+          "size": 2320632,
+          "commit": "bc92c3ea5705f0014ed44934588261c3d9c4d979"
+        },
+        {
           "version": "0.1.10",
           "buildVersion": "10",
           "date": "2026-10-16",
@@ -34,10 +43,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.10",
-      "versionDate": "2026-10-16",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-10/TwitchUnblockTV.ipa",
-      "size": 2309056
+      "version": "0.1.12",
+      "versionDate": "2026-10-17",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-12/TwitchUnblockTV.ipa",
+      "size": 2320632
     }
   ]
 }
