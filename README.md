@@ -476,8 +476,10 @@ unsigned `tv-test-N` pre-release:
   bar: the chat (read-only, no account needed) sits on the picture — live, or
   a VOD's chat replayed in sync — with Twitch, BTTV, FFZ and 7TV emotes. The
   Chat menu shows or hides it and places it on the left or the right, full
-  height or in the top or bottom half (any of the four corners); that place is
-  remembered for the channel being watched, Account sets the default one.
+  height or in the top or bottom half (any of the four corners); shown or
+  hidden and its place are remembered for the channel being watched (a
+  streamer who already shows their chat on screen doesn’t need ours), and
+  Account sets the defaults.
 * **View channel** in the player's bar opens the channel's page, with its
   past broadcasts; a video started there plays on top of it, and Menu goes
   back.

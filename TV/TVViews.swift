@@ -522,6 +522,10 @@ struct TVAccountTab: View {
                                          : pref == "audio" ? session.t("tv_audio") : "\(pref)p")
                                 },
                                 selection: $session.qualityPref)
+                    TVChoiceRow(title: session.t("tv_chat_default"),
+                                options: [("on", session.t("tv_chat_on")), ("off", session.t("tv_chat_off"))],
+                                selection: Binding(get: { session.tvChat ? "on" : "off" },
+                                                   set: { session.tvChat = $0 == "on" }))
                     TVChoiceRow(title: session.t("tv_chat_side"),
                                 options: TVChatLayout.Side.allCases.map { ($0.rawValue, session.t("tv_chat_\($0.rawValue)")) },
                                 selection: Binding(get: { session.chatLayout.side.rawValue },
@@ -531,8 +535,8 @@ struct TVAccountTab: View {
                                 selection: Binding(get: { session.chatLayout.height.rawValue },
                                                    set: { session.chatLayout.height = TVChatLayout.Height(rawValue: $0) ?? .full }))
                     Text(session.t("tv_chat_layout_hint")).foregroundColor(.secondary)
-                    if !session.channelChatLayouts.isEmpty {
-                        Button("\(session.t("tv_chat_forget")) (\(session.channelChatLayouts.count))") {
+                    if session.channelsWithOwnChat > 0 {
+                        Button("\(session.t("tv_chat_forget")) (\(session.channelsWithOwnChat))") {
                             session.forgetChannelChatLayouts()
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)

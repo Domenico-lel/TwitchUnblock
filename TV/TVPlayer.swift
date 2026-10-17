@@ -274,7 +274,7 @@ struct TVPlayerController: UIViewControllerRepresentable {
 
     private func showChat(_ context: Context) {
         guard let host = context.coordinator.chatHost else { return }
-        host.view.isHidden = !session.tvChat
+        host.view.isHidden = !session.chatShown(for: channel)
         host.rootView = overlay()
     }
 
@@ -314,19 +314,20 @@ struct TVPlayerController: UIViewControllerRepresentable {
         return items
     }
 
-    /// Menu Chat : affiché ou masqué (gardé pour les prochaines lectures), et
-    /// sa place sur l'image — côté, hauteur — retenue pour cette chaîne.
+    /// Menu Chat : affiché ou masqué, et sa place sur l'image — côté,
+    /// hauteur —, retenus pour cette chaîne.
     private func chatMenu() -> UIMenu {
         let session = self.session
         let channel = self.channel
         let layout = session.chatLayout(for: channel)
+        let shown = session.chatShown(for: channel)
         /// Place changée : chat affiché s'il était masqué, pour la voir.
         func place(_ change: @escaping (inout TVChatLayout) -> Void) {
             Task { @MainActor in
                 var next = session.chatLayout(for: channel)
                 change(&next)
                 session.setChatLayout(next, for: channel)
-                if !session.tvChat { session.tvChat = true }
+                if !session.chatShown(for: channel) { session.setChatShown(true, for: channel) }
             }
         }
         let sides: [UIMenuElement] = TVChatLayout.Side.allCases.map { side in
@@ -340,26 +341,27 @@ struct TVPlayerController: UIViewControllerRepresentable {
             }
         }
         var children: [UIMenuElement] = [
-            UIAction(title: session.t("tv_chat_show"), state: session.tvChat ? .on : .off) { _ in
-                Task { @MainActor in session.tvChat.toggle() }
+            // Pour cette chaîne seulement (son streamer incruste peut-être déjà le sien).
+            UIAction(title: session.t("tv_chat_show"), state: shown ? .on : .off) { _ in
+                Task { @MainActor in session.setChatShown(!shown, for: channel) }
             },
             UIMenu(title: session.t("tv_chat_side"), options: .displayInline, children: sides),
             UIMenu(title: session.t("tv_chat_height"), options: .displayInline, children: heights),
         ]
-        // Place propre à cette chaîne : la garder partout, ou revenir à celle par défaut.
-        if layout != session.chatLayout {
+        // Réglages propres à cette chaîne : les garder partout, ou revenir au défaut.
+        if session.hasOwnChatSettings(channel) {
             children.append(UIMenu(title: "", options: .displayInline, children: [
                 UIAction(title: session.t("tv_chat_all")) { _ in
                     Task { @MainActor in session.makeDefaultChatLayout(from: channel) }
                 },
                 UIAction(title: session.t("tv_chat_reset")) { _ in
-                    Task { @MainActor in session.setChatLayout(session.chatLayout, for: channel) }
+                    Task { @MainActor in session.resetChatSettings(for: channel) }
                 },
             ]))
         }
         return UIMenu(title: session.t("tv_chat"),
-                      image: UIImage(systemName: session.tvChat ? "bubble.left.and.bubble.right.fill"
-                                                                : "bubble.left.and.bubble.right"),
+                      image: UIImage(systemName: shown ? "bubble.left.and.bubble.right.fill"
+                                                       : "bubble.left.and.bubble.right"),
                       children: children)
     }
 

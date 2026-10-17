@@ -24,9 +24,17 @@ final class TVSession: ObservableObject {
     @Published var liveSource: String {
         didSet { UserDefaults.standard.set(liveSource, forKey: "liveSource") }
     }
-    /// Chat des directs affiché sur l'image (bouton « Chat » du lecteur).
+    /// Chat affiché sur l'image par défaut (Compte, ou « Garder pour toutes
+    /// les chaînes » dans le lecteur).
     @Published var tvChat: Bool {
         didSet { UserDefaults.standard.set(tvChat, forKey: "tv_chat") }
+    }
+    /// Chat affiché ou masqué dans le lecteur pour une chaîne (login →
+    /// affiché) : prime sur le réglage par défaut — un streamer qui incruste
+    /// déjà son chat n'a pas besoin du nôtre, les autres si. Disparaît quand
+    /// il redevient égal au défaut.
+    @Published private(set) var channelChatShown: [String: Bool] {
+        didSet { UserDefaults.standard.set(channelChatShown, forKey: "tv_chat_shown") }
     }
     /// Place du chat par défaut (Compte, ou « Garder pour toutes les chaînes »
     /// dans le lecteur).
@@ -65,6 +73,7 @@ final class TVSession: ObservableObject {
         let source = ud.string(forKey: "liveSource") ?? "auto"
         liveSource = kLiveSourceChoices.contains(source) ? source : "auto"
         tvChat = ud.object(forKey: "tv_chat") as? Bool ?? true
+        channelChatShown = ud.dictionary(forKey: "tv_chat_shown") as? [String: Bool] ?? [:]
         chatLayout = TVChatLayout(raw: ud.string(forKey: "tv_chat_layout") ?? "") ?? TVChatLayout()
         channelChatLayouts = ud.dictionary(forKey: "tv_chat_layouts") as? [String: String] ?? [:]
         // Avant : le nom exact de la dernière qualité choisie (« 720p60 »),
@@ -102,16 +111,52 @@ final class TVSession: ObservableObject {
         if all != channelChatLayouts { channelChatLayouts = all }
     }
 
-    /// « Garder pour toutes les chaînes » : la place de cette chaîne devient
-    /// celle par défaut.
-    func makeDefaultChatLayout(from channel: String) {
-        let layout = chatLayout(for: channel)
-        channelChatLayouts.removeValue(forKey: channel)
-        chatLayout = layout
+    /// Chat affiché pour une chaîne : son choix dans le lecteur, sinon le défaut.
+    func chatShown(for channel: String) -> Bool { channelChatShown[channel] ?? tvChat }
+
+    /// « Afficher le chat » dans le lecteur : retenu pour cette chaîne seulement.
+    func setChatShown(_ shown: Bool, for channel: String) {
+        guard !channel.isEmpty else { return }
+        var all = channelChatShown
+        if shown == tvChat {
+            all.removeValue(forKey: channel)
+        } else {
+            all[channel] = shown
+            if all.count > 200, let any = all.keys.first(where: { $0 != channel }) { all.removeValue(forKey: any) }
+        }
+        if all != channelChatShown { channelChatShown = all }
     }
 
-    /// Compte : toutes les chaînes reprennent la place par défaut.
-    func forgetChannelChatLayouts() { channelChatLayouts = [:] }
+    /// Chaîne avec ses propres réglages du chat (place ou affichage).
+    func hasOwnChatSettings(_ channel: String) -> Bool {
+        channelChatLayouts[channel] != nil || channelChatShown[channel] != nil
+    }
+
+    /// Nombre de chaînes avec leurs propres réglages du chat.
+    var channelsWithOwnChat: Int { Set(channelChatLayouts.keys).union(channelChatShown.keys).count }
+
+    /// « Garder pour toutes les chaînes » : place et affichage du chat de
+    /// cette chaîne deviennent ceux par défaut.
+    func makeDefaultChatLayout(from channel: String) {
+        let layout = chatLayout(for: channel)
+        let shown = chatShown(for: channel)
+        channelChatLayouts.removeValue(forKey: channel)
+        channelChatShown.removeValue(forKey: channel)
+        chatLayout = layout
+        tvChat = shown
+    }
+
+    /// « Revenir au réglage par défaut » : place et affichage par défaut.
+    func resetChatSettings(for channel: String) {
+        channelChatLayouts.removeValue(forKey: channel)
+        channelChatShown.removeValue(forKey: channel)
+    }
+
+    /// Compte : toutes les chaînes reprennent les réglages par défaut.
+    func forgetChannelChatLayouts() {
+        channelChatLayouts = [:]
+        channelChatShown = [:]
+    }
 
     // MARK: Session
     /// Au lancement : jeton vérifié, renouvelé s'il a expiré, compte chargé.
