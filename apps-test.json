@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.7",
+          "buildVersion": "305",
+          "date": "2026-10-17",
+          "localizedDescription": "- VODs no longer stop at a muted part when the server can't fix its playlist: the app fixes it on the device, a VOD that stops on one restarts at the same place on its own, and Skip works even after a stop\n- Chat: the iOS keyboard shows its predicted words again (Settings → Chat → Keyboard suggestions, to turn off if iOS corrects your emotes)\n- Chat: swipe the chat down or tap it to hide the keyboard without sending; reducing the player hides it too",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-305/TwitchUnblock.ipa",
+          "size": 3705760,
+          "commit": "72768902721d2757415c11d83e2398c4e0ae814e"
+        },
+        {
           "version": "1.4.6",
           "buildVersion": "304",
           "date": "2026-10-17",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-267/TwitchUnblock.ipa",
           "size": 2842732,
           "commit": "f35ce49eeb1ab0f978a2b6624bb43103bf1e9852"
-        },
-        {
-          "version": "1.2.41",
-          "buildVersion": "266",
-          "date": "2026-10-11",
-          "localizedDescription": "- Icônes au choix en fichiers séparés, comme Feather",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-266/TwitchUnblock.ipa",
-          "size": 2841757,
-          "commit": "3e3b6f8587d6b2eeb443cbb757cf5c0b3cd01873"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.6",
+      "version": "1.4.7",
       "versionDate": "2026-10-17",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-304/TwitchUnblock.ipa",
-      "size": 3699000
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-305/TwitchUnblock.ipa",
+      "size": 3705760
     }
   ],
   "news": []
