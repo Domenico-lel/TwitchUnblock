@@ -326,6 +326,12 @@ jobs:
         continue-on-error: true
         run: |
           git fetch origin master
+          # Seulement une fois cette étape passée en prod (présente sur master) :
+          # avant le « push sur main », la source publique ne bouge pas.
+          if ! git show origin/master:.github/workflows/build.yml | grep -q "Mirror test build into the main source"; then
+            echo "Étape pas encore sur master : apps.json laissé tel quel."
+            exit 0
+          fi
           git worktree add --detach ../main-source origin/master
           python3 - <<'PY'
           import json
