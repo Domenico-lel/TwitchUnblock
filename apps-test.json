@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.6",
+          "buildVersion": "304",
+          "date": "2026-10-17",
+          "localizedDescription": "- Settings → Player → Live Activity turns off the player's activity on the Lock Screen and in the Dynamic Island if you don't need it\n- Multi-live: the ⇄ button on a tile swaps its place with another video (with three, the first one is the big one)\n- Tapping the latency (Settings → Player → Show latency) brings a live back to the edge after a pause or a trip out of the app, without reloading the stream\n- Tap the title at the top of the player to read it in full, with the category, viewers, uptime and a shortcut to the channel\n- Live notifications: pick which followed channels notify you (Settings → Features in testing → Notified channels), for background checks and ntfy\n- The AltStore / SideStore / Feather source now also lists TU Test, the test builds, installed next to the normal app",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-304/TwitchUnblock.ipa",
+          "size": 3699000,
+          "commit": "e1fa50d408d11687d3fb5d67bcc3929abf8e46a2"
+        },
+        {
           "version": "1.4.5",
           "buildVersion": "302",
           "date": "2026-10-16",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-266/TwitchUnblock.ipa",
           "size": 2841757,
           "commit": "3e3b6f8587d6b2eeb443cbb757cf5c0b3cd01873"
-        },
-        {
-          "version": "1.2.40",
-          "buildVersion": "265",
-          "date": "2026-10-11",
-          "localizedDescription": "- Icône de l'app : un refus d'iOS se voit, nouvel essai",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-265/TwitchUnblock.ipa",
-          "size": 3451957,
-          "commit": "5143e8d1852e4f978047e9dafa7f756ddc5cffed"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.5",
-      "versionDate": "2026-10-16",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-302/TwitchUnblock.ipa",
-      "size": 3654884
+      "version": "1.4.6",
+      "versionDate": "2026-10-17",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-304/TwitchUnblock.ipa",
+      "size": 3699000
     }
   ],
   "news": []
