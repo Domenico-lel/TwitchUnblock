@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var liveNotif       = LiveNotifier.isEnabled
     @State private var notifTestResult: String? = nil
     @State private var ntfyOn          = NtfyNotifier.isEnabled
+    @State private var showNotifChannels = false
     @State private var ntfyResult: String? = nil
     @State private var ntfyCopied      = false
     @State private var ntfySynced      = !NtfyNotifier.isPending
@@ -1166,6 +1167,11 @@ struct SettingsView: View {
                           $store.multiLiveChat, log: "Chat dans le multi-live")
                 Divider().background(Color.tBorder)
                 spatialAudioRow
+                if #available(iOS 16.2, *) {
+                    Divider().background(Color.tBorder)
+                    toggleRow(store.t("live_activity"), store.t("live_activity_sub"),
+                              $store.liveActivity, log: "Activité en direct")
+                }
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
                           $store.showLatency, log: "Afficher la latence")
@@ -1666,8 +1672,39 @@ struct SettingsView: View {
                               }
                           }), log: "Notifications ntfy")
                 if ntfyOn { ntfyTools }
+                // Lesquelles des chaînes suivies préviennent (les deux modes).
+                if liveNotif || ntfyOn {
+                    Divider().background(Color.tBorder)
+                    notifChannelsRow
+                }
             }
         }
+        .sheet(isPresented: $showNotifChannels) {
+            NotifChannelsView().environmentObject(store)
+        }
+    }
+
+    private var notifChannelsRow: some View {
+        let muted = NotifChannels.muted.count
+        return Button { showNotifChannels = true } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.t("notif_channels"))
+                        .font(.tCardTitle)
+                        .foregroundColor(.tText)
+                    Text(muted == 0 ? store.t("notif_channels_all")
+                         : store.t("notif_channels_muted").replacingOccurrences(of: "{n}", with: "\(muted)"))
+                        .font(.tMeta)
+                        .foregroundColor(.tMuted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.tMuted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Activé, mais pas encore accepté par le serveur : pourquoi, et la suite.

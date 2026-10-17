@@ -242,6 +242,15 @@ final class AppStore: ObservableObject {
         didSet { UserDefaults.standard.set(immersivePlayer, forKey: "cfg_immersive") }
     }
 
+    /// Activité en direct du lecteur (écran verrouillé, Dynamic Island).
+    /// Coupée, celle en cours disparaît aussitôt et aucune autre ne démarre.
+    @Published var liveActivity: Bool = true {
+        didSet {
+            UserDefaults.standard.set(liveActivity, forKey: PlayerActivity.key)
+            if !liveActivity { PlayerActivity.end() }
+        }
+    }
+
     /// Ordre des sources du direct (« as », « al », « eu », « twitch ») :
     /// getLive les essaie l'une après l'autre (liveSourceSteps, même clé).
     @Published var liveSourceOrder: [String] = kLiveSources {
@@ -689,6 +698,7 @@ final class AppStore: ObservableObject {
         vodSpeed           = VodSpeed.nearest(ud.object(forKey: "cfg_vod_speed") as? Double ?? 1)
         multiLiveChat      = ud.object(forKey: "cfg_multi_chat") as? Bool ?? true
         immersivePlayer    = ud.object(forKey: "cfg_immersive")   as? Bool ?? true
+        liveActivity       = PlayerActivity.enabled
         // Ordre des sources ; avant lui, une seule source préférée
         // (« liveSource »), mise en tête. Réécrit pour getLive.
         liveSourceOrder    = liveSourceSteps().filter { $0 != "worker" }

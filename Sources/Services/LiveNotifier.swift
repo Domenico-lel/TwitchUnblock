@@ -130,7 +130,11 @@ enum LiveNotifier {
         // ntfy actif : c'est lui qui prévient (sans doublon, et plus vite).
         if notify && !NtfyNotifier.isEnabled {
             let lang = Lang(rawValue: ud.string(forKey: "lang") ?? "en") ?? .en
-            for s in streams where !known.contains(s.userLogin.lowercased()) {
+            // Chaînes coupées dans « Chaînes notifiées » : connues quand même,
+            // pour ne pas notifier un live en cours le jour où on les rallume.
+            let muted = NotifChannels.muted
+            for s in streams where !known.contains(s.userLogin.lowercased())
+                                && !muted.contains(s.userLogin.lowercased()) {
                 let content = UNMutableNotificationContent()
                 content.title = translate("notif_live_title", lang).replacingOccurrences(of: "{u}", with: s.userName)
                 content.body = s.title.isEmpty ? s.gameName : "\(s.title)\(s.gameName.isEmpty ? "" : " · \(s.gameName)")"

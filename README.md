@@ -50,11 +50,18 @@ no key to paste. The backend is already hosted and shared by every install.
   ahead to: in landscape, double-tap shows or hides the chat instead, and once
   you fall behind (pause, network drop) a red **Live** button with the delay
   brings you back to the edge. Double-tapping works with the controls shown
-  too.
+  too. With **Show latency** on (Settings → Player), tapping the delay brings
+  you back to live as well, without reloading the stream.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps, or the
   rest of the app with the player reduced. Closing the player, opening another
   video or switching to chat only ends it, along with its chat connection and
   lock screen activity.
+* 🔒 **Lock Screen and Dynamic Island** — the live or VOD you're watching
+  (channel, title, playback) as a Live Activity; turn it off in Settings →
+  Player → Live Activity if you don't need it.
+* 🏷️ **Full title** — tap the title at the top of the player (often cut off)
+  to read it in full, with the category, viewers, uptime and a shortcut to the
+  channel.
 * 🎵 **Leaves your music alone** — opening the app no longer stops music
   playing in another app: the sound switches over only when a video starts,
   and goes back to that app when you close the player (not when the sleep
@@ -165,7 +172,9 @@ no key to paste. The backend is already hosted and shared by every install.
   tile resumes where you left off; the one you hear has play/pause, ±10 s
   and a seek bar, the others a thin progress line, and “Watch again” at the
   end. Its progress is saved and synced, and it joins your VOD history.
-  Side by side in landscape, stacked in portrait. On iPad (or a large iPhone
+  Side by side in landscape, stacked in portrait; the ⇄ button on a tile
+  swaps its place with another video (with three, the first one is the big
+  one). On iPad (or a large iPhone
   in landscape), the chat of the video you hear shows on the right (the
   replayed chat for a VOD) — a button in the mosaic and Settings → Player
   turn it on or off. Each tile plays 1080p alone, 720p with two, 480p
@@ -342,7 +351,8 @@ no key to paste. The backend is already hosted and shared by every install.
   the stream in TwitchUnblock. ntfy.sh counts free messages per address and
   turns away the backend's shared Cloudflare addresses, so they leave from the
   project's own server (the video relay); **Test** tells you when ntfy.sh is
-  refusing messages for now (sending limit reached).
+  refusing messages for now (sending limit reached). **Notified channels**
+  (same place) picks which followed channels notify you, for both.
 
 ### Look & feel
 
@@ -436,6 +446,9 @@ Automatic nightly builds, straight from your sideloader:
    ```
 4. Install **TwitchUnblock** from there.
 
+The same source also lists **TU Test**, the test builds (newest features,
+may be unstable), installed next to the normal app.
+
 ### Manual
 
 Download the latest `TwitchUnblock.ipa` from the
@@ -459,6 +472,9 @@ unsigned `tv-test-N` pre-release:
   Chat menu shows or hides it and places it on the left or the right, full
   height or in the top or bottom half (any of the four corners); that place is
   remembered for the channel being watched, Account sets the default one.
+* **View channel** in the player's bar opens the channel's page, with its
+  past broadcasts; a video started there plays on top of it, and Menu goes
+  back.
 * Account's settings move one row at a time with the remote, land on the
   ticked option, and always lead back up to the tab bar.
 * A preferred quality (Account → Settings), same rule as the iPhone: the

@@ -109,6 +109,15 @@ final class MultiLive: ObservableObject {
         save()
     }
 
+    /// Échange deux vidéos de place (la première est la grande, à trois) ;
+    /// les lectures continuent, seule la disposition change.
+    func swap(_ a: String, _ b: String) {
+        guard let i = entries.firstIndex(where: { $0.id == a }),
+              let j = entries.firstIndex(where: { $0.id == b }), i != j else { return }
+        entries.swapAt(i, j)
+        save()
+    }
+
     /// Ce que la tuile a appris de la VOD à son démarrage (chaîne, titre…) ;
     /// une valeur vide ne remplace rien.
     func updateVod(id: String, login: String, name: String, title: String, thumb: String) {

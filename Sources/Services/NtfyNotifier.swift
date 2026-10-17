@@ -78,7 +78,10 @@ enum NtfyNotifier {
             }
             channels += account
         }
-        let list = Array(Set(channels.map { $0.lowercased() })).sorted()
+        // Moins celles coupées dans « Chaînes notifiées » (le hachage change :
+        // la nouvelle liste part au prochain appel).
+        let muted = NotifChannels.muted
+        let list = Array(Set(channels.map { $0.lowercased() })).filter { !muted.contains($0) }.sorted()
         let hash = list.joined(separator: ",")
         let last = ud.double(forKey: syncedKey)
         if !force, hash == ud.string(forKey: hashKey), Date().timeIntervalSince1970 - last < 86400,

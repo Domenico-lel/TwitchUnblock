@@ -1012,9 +1012,16 @@ struct MainTabView: View {
                         if liveViewerCount > 0 {
                             TMeta(icon: "eye.fill", text: formatViewers(liveViewerCount))
                         }
+                        // Un appui ramène au bord du direct, sans recharger.
                         if store.showLatency, liveLatency > 0 {
-                            TMeta(icon: "waveform.path.ecg",
-                                  text: String(format: "%.0f s", liveLatency))
+                            Button {
+                                NotificationCenter.default.post(name: .tuGoLive, object: nil)
+                            } label: {
+                                TMeta(icon: "waveform.path.ecg",
+                                      text: String(format: "%.0f s", liveLatency))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(store.t("back_to_live"))
                         }
                     } else {
                         Text(statusTitle).font(.tMeta).foregroundColor(.tMuted).lineLimit(1)

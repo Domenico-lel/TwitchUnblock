@@ -305,6 +305,20 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
                            settled: Date().timeIntervalSince(lastCatchUp) > 4)
         }
 
+        /// Appui sur la latence : au bord du direct par un saut, au même recul
+        /// que la tenue du direct, sans recharger le flux ; relancé s'il était
+        /// en pause.
+        private func goLive() {
+            guard isLive, let player = playerRef, let item = player.currentItem,
+                  let edge = item.seekableTimeRanges.last?.timeRangeValue.end,
+                  edge.isValid, edge.isNumeric else { return }
+            let target = max(0, edge.seconds - latency.minBehind(for: item))
+            player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                        toleranceBefore: .positiveInfinity, toleranceAfter: .zero)
+            latency.hold(false)
+            if player.rate == 0 { player.play() }
+        }
+
         /// Les commandes d'AVPlayerViewController (−15 s, barre) ne passent pas
         /// par notre code : un saut loin du bord est un recul voulu, que la
         /// tenue du direct ne doit pas défaire. Les sauts du contrôleur, eux,
@@ -357,12 +371,16 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         /// pas, il restait un observateur par lecteur ouvert.
         private var stopObserver: NSObjectProtocol?
         private var spatialObserver: NSObjectProtocol?
+        private var goLiveObserver: NSObjectProtocol?
 
         override init() {
             super.init()
             spatialObserver = NotificationCenter.default.addObserver(
                 forName: .tuSpatialAudioChanged, object: nil, queue: .main
             ) { [weak self] _ in self?.reloadForSpatialAudio() }
+            goLiveObserver = NotificationCenter.default.addObserver(
+                forName: .tuGoLive, object: nil, queue: .main
+            ) { [weak self] _ in self?.goLive() }
             // Coupe instantanément le son si on reçoit le signal "ForceStopVideo" depuis la croix
             stopObserver = NotificationCenter.default.addObserver(forName: NSNotification.Name("ForceStopVideo"), object: nil, queue: .main) { [weak self] _ in
                 self?.playerVC?.player?.pause()
@@ -397,11 +415,12 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         /// Observateurs à bloc (audio spatial compris : il n'était jamais
         /// retiré, un par lecteur ouvert restait appelé à chaque changement).
         private func removeObservers() {
-            for token in [stopObserver, spatialObserver, jumpObserver, rateObserver] {
+            for token in [stopObserver, spatialObserver, goLiveObserver, jumpObserver, rateObserver] {
                 if let token { NotificationCenter.default.removeObserver(token) }
             }
             stopObserver = nil
             spatialObserver = nil
+            goLiveObserver = nil
             jumpObserver = nil
             rateObserver = nil
         }
@@ -885,8 +904,16 @@ struct VideoPlayerView: View {
         .aspectRatio(16/9, contentMode: .fit)
         .background(Color.black)
         .overlay(alignment: .topLeading) {
+            // Un appui ramène au bord du direct, sans recharger.
             if store.showLatency, isLive {
-                latencyChip.padding(8)
+                Button {
+                    NotificationCenter.default.post(name: .tuGoLive, object: nil)
+                } label: {
+                    latencyChip
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(store.t("back_to_live"))
+                .padding(8)
             }
         }
         .overlay(alignment: .top) {

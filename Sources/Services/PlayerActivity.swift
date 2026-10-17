@@ -15,11 +15,17 @@ import UIKit
 //  iOS 16.2 minimum : en dessous, ces appels ne font rien.
 // ═══════════════════════════════════════════════════════════════════════════
 enum PlayerActivity {
+    /// Réglage « Activité en direct » (Réglages → Lecteur) : coupé, aucune ne
+    /// démarre (AppStore termine celle en cours).
+    static let key = "cfg_live_activity"
+    static var enabled: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+
     /// Démarre l'activité, ou met à jour celle en cours.
     /// `rate` : vitesse de lecture d'une VOD (la barre et le compteur avancent
     /// seuls, à ce rythme).
     static func update(_ meta: NowPlayingMeta, isLive: Bool, isPlaying: Bool,
                        position: Double = 0, duration: Double = 0, rate: Double = 1) {
+        guard enabled else { return }
         guard #available(iOS 16.2, *) else { return }
         PlayerActivityController.shared.update(meta, isLive: isLive, isPlaying: isPlaying,
                                                position: position, duration: duration, rate: rate)

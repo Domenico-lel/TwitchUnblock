@@ -293,3 +293,9 @@ struct LiveSyncEstimator {
         return max(0, latency - freshest)
     }
 }
+
+extension Notification.Name {
+    /// Appui sur la latence affichée : le lecteur ouvert revient au bord du
+    /// direct par un saut, sans recharger le flux (comme le bouton « Direct »).
+    static let tuGoLive = Notification.Name("TUGoLive")
+}

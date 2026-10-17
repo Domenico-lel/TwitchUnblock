@@ -316,3 +316,33 @@ jobs:
               git pull --rebase origin $BRANCH && git push origin HEAD:$BRANCH
             }
           fi
+
+      - name: Mirror test build into the main source (apps.json on master)
+        # Une seule source pour tout : apps.json (master) liste aussi « TU Test »
+        # (installée à côté de l'app normale), pour essayer les builds de test
+        # sans ajouter apps-test.json. Seul ce fichier change sur master, avec
+        # [skip ci] ; l'app normale lit toujours apps[0], qui reste la sienne.
+        if: github.ref_name == 'test-17d298'
+        continue-on-error: true
+        run: |
+          git fetch origin master
+          git worktree add --detach ../main-source origin/master
+          python3 - <<'PY'
+          import json
+          test = json.load(open('apps-test.json'))['apps'][0]
+          path = '../main-source/apps.json'
+          d = json.load(open(path))
+          entry = dict(test, versions=test.get('versions', [])[:10])
+          d['apps'] = [a for a in d['apps'] if a.get('bundleIdentifier') != entry['bundleIdentifier']] + [entry]
+          json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
+          open(path, 'a').write('\n')
+          PY
+          cd ../main-source
+          git add apps.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore: TU Test ${{ steps.vars.outputs.version }} dans la source principale [skip ci]"
+          for attempt in 1 2 3; do
+            git push origin HEAD:master && exit 0
+            git pull --rebase origin master || exit 1
+          done
+          exit 1

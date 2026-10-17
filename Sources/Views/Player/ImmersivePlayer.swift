@@ -180,6 +180,8 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// Durée de VOD déjà envoyée à la Live Activity.
     private var activityDuration: Double = 0
     private var spatialObs: NSObjectProtocol?
+    /// Appui sur la latence sous le lecteur (.tuGoLive) : retour au direct.
+    private var goLiveObs: NSObjectProtocol?
     /// Appel, Siri, autre app qui prend le son : la lecture repart à la fin
     /// (PlaybackInterruptions).
     private var interruptions: PlaybackInterruptions?
@@ -252,6 +254,12 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         spatialObs = NotificationCenter.default.addObserver(
             forName: .tuSpatialAudioChanged, object: nil, queue: .main
         ) { [weak self] _ in self?.reloadForSpatialAudio() }
+        goLiveObs = NotificationCenter.default.addObserver(
+            forName: .tuGoLive, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isLive else { return }
+            self.goLive()
+        }
         interruptions = PlaybackInterruptions(name: "lecteur") { [weak self] since in
             self?.resumeAfterInterruption(since: since)
         }
@@ -720,6 +728,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         pip = nil
         holdSessionForPiP(false)
         if let o = spatialObs { NotificationCenter.default.removeObserver(o); spatialObs = nil }
+        if let o = goLiveObs { NotificationCenter.default.removeObserver(o); goLiveObs = nil }
         if let o = rateObs { NotificationCenter.default.removeObserver(o); rateObs = nil }
         if let o = failObs { NotificationCenter.default.removeObserver(o); failObs = nil }
         mutedObs = nil
@@ -729,6 +738,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     deinit {
         if let o = timeObs { player.removeTimeObserver(o) }
         if let o = spatialObs { NotificationCenter.default.removeObserver(o) }
+        if let o = goLiveObs { NotificationCenter.default.removeObserver(o) }
         if let o = rateObs { NotificationCenter.default.removeObserver(o) }
         if let o = failObs { NotificationCenter.default.removeObserver(o) }
         for (command, target) in remoteTargets { command.removeTarget(target) }
@@ -972,6 +982,10 @@ struct ImmersivePlayer: View {
     @State private var seekResetTask: Task<Void, Never>? = nil
     /// Liste des chapitres ouverte (feuille : ne se referme pas toute seule).
     @State private var showChapters = false
+    /// Fiche du direct ou de la VOD (titre en entier, catégorie…), ouverte en
+    /// touchant le titre ; « Voir la chaîne » l'ouvre une fois la fiche fermée.
+    @State private var showInfo = false
+    @State private var channelAfterInfo = false
     /// Largeur de la bulle du temps visé, mesurée : elle la garde dans la barre
     /// près des bords.
     @State private var bubbleWidth: CGFloat = 0
@@ -1290,6 +1304,71 @@ struct ImmersivePlayer: View {
         .sheet(isPresented: $showChapters, onDismiss: { scheduleAutoHide() }) {
             chaptersSheet
         }
+        .sheet(isPresented: $showInfo, onDismiss: {
+            let openChannel = channelAfterInfo
+            channelAfterInfo = false
+            if openChannel { onChannel?() } else { scheduleAutoHide() }
+        }) {
+            infoSheet
+        }
+    }
+
+    // ── Fiche : le titre en entier (coupé dans la barre du haut) ──────
+    @ViewBuilder private var infoSheet: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text(info.title.isEmpty ? info.channel : info.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.tText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                .listRowBackground(Color.tCard)
+                if !info.game.isEmpty || info.viewers > 0 || !info.uptime.isEmpty {
+                    Section {
+                        if !info.game.isEmpty { infoRow("gamecontroller.fill", info.game) }
+                        if info.viewers > 0 {
+                            infoRow("eye.fill", "\(formatViewers(info.viewers)) \(store.t("viewers"))")
+                        }
+                        if !info.uptime.isEmpty { infoRow("clock.fill", info.uptime) }
+                    }
+                    .listRowBackground(Color.tCard)
+                }
+                if onChannel != nil {
+                    Section {
+                        Button {
+                            channelAfterInfo = true
+                            showInfo = false
+                        } label: {
+                            Label(store.t("see_channel"), systemImage: "person.crop.square")
+                                .foregroundColor(.tPrimary)
+                        }
+                    }
+                    .listRowBackground(Color.tCard)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Color.tDark)
+            .navigationTitle(info.channel)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(store.t("close")) { showInfo = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .preferredColorScheme(.dark)
+    }
+
+    private func infoRow(_ icon: String, _ text: String) -> some View {
+        Label {
+            Text(text).foregroundColor(.tText)
+        } icon: {
+            Image(systemName: icon).foregroundColor(.tMuted)
+        }
+        .font(.system(size: 15))
     }
 
     // ── Liste des chapitres ───────────────────────────────────────────
@@ -1411,17 +1490,35 @@ struct ImmersivePlayer: View {
                 .frame(width: 26, height: 26)
                 .clipShape(Circle())
 
-                // Nom en clair, titre estompé : le nom prime.
-                (
+                // Nom en clair, titre estompé : le nom prime. Toucher le nom
+                // ouvre la chaîne ; le titre (souvent coupé), sa fiche.
+                if info.title.isEmpty {
                     Text(info.channel).font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
-                    + Text("  \(info.title)").font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.65))
-                )
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture { onChannel?() }
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture { onChannel?() }
+                } else {
+                    HStack(spacing: 0) {
+                        Text(info.channel).font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                            .contentShape(Rectangle())
+                            .onTapGesture { onChannel?() }
+                        Text("  \(info.title)").font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.65))
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                hideTask?.cancel()
+                                showInfo = true
+                            }
+                            .accessibilityAddTraits(.isButton)
+                    }
+                }
 
                 // AirPlay : envoyer la vidéo vers une Apple TV ou une TV compatible.
                 AirPlayButton()
@@ -1616,9 +1713,14 @@ struct ImmersivePlayer: View {
                     if info.viewers > 0 {
                         overlayMeta(icon: "eye.fill", text: formatViewers(info.viewers))
                     }
+                    // Un appui sur la latence ramène au bord, comme « Direct ».
                     if store.showLatency, let l = info.latency {
-                        overlayMeta(icon: "waveform.path.ecg",
-                                    text: String(format: "%.0f s", max(0, l)))
+                        Button { model.goLive(); scheduleAutoHide() } label: {
+                            overlayMeta(icon: "waveform.path.ecg",
+                                        text: String(format: "%.0f s", max(0, l)))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(store.t("back_to_live"))
                     }
                 } else {
                     // Pendant un glissement, l'instant visé plutôt que la
