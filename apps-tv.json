@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.15",
+          "buildVersion": "15",
+          "date": "2026-10-17",
+          "localizedDescription": "- On a channel page, the Watch live button can now be reached by pressing up from any video in the first row\n- Anonymous usage count for the stats page, like the iPhone app (Account → Share my usage to turn it off and erase it)",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-15/TwitchUnblockTV.ipa",
+          "size": 2342832,
+          "commit": "739946f10ca39ecd829c77525f47cffdf61e14d0"
+        },
+        {
           "version": "0.1.14",
           "buildVersion": "14",
           "date": "2026-10-17",
@@ -61,10 +70,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.14",
+      "version": "0.1.15",
       "versionDate": "2026-10-17",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-14/TwitchUnblockTV.ipa",
-      "size": 2327050
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-15/TwitchUnblockTV.ipa",
+      "size": 2342832
     }
   ]
 }
