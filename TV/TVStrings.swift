@@ -50,6 +50,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat_layout_hint": "Place par défaut. Dans le lecteur, le menu Chat déplace le chat pour la chaîne regardée, et l'app s'en souvient pour cette chaîne.",
         "tv_chat_forget": "Oublier les places propres aux chaînes",
         "tv_offline_channels": "Hors ligne",
+        "tv_open_channel": "Voir la chaîne",
     ],
     .en: [
         "tv_following": "Following",
@@ -98,6 +99,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat_layout_hint": "Default layout. In the player, the Chat menu moves the chat for the channel you're watching, and the app remembers it for that channel.",
         "tv_chat_forget": "Forget per-channel layouts",
         "tv_offline_channels": "Offline",
+        "tv_open_channel": "View channel",
     ],
     .es: [
         "tv_following": "Seguidos",
@@ -146,6 +148,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat_layout_hint": "Posición predeterminada. En el reproductor, el menú Chat mueve el chat para el canal que estás viendo, y la app lo recuerda para ese canal.",
         "tv_chat_forget": "Olvidar las posiciones de cada canal",
         "tv_offline_channels": "Desconectados",
+        "tv_open_channel": "Ver canal",
     ],
     .ru: [
         "tv_following": "Подписки",
@@ -194,6 +197,7 @@ private let tvStrings: [Lang: [String: String]] = [
         "tv_chat_layout_hint": "Положение по умолчанию. В плеере меню «Чат» перемещает чат для текущего канала, и приложение запоминает его для этого канала.",
         "tv_chat_forget": "Сбросить положения для каналов",
         "tv_offline_channels": "Не в сети",
+        "tv_open_channel": "Открыть канал",
     ],
 ]
 

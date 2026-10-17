@@ -13,6 +13,9 @@ import AVFoundation
 
 struct TVPlayerScreen: View {
     let item: TVPlayback
+    /// Bouton « Chaîne » de la barre de lecture : la page de la chaîne (ses
+    /// vidéos), que l'appelant ouvre une fois le lecteur fermé.
+    var onChannel: ((String) -> Void)? = nil
     @EnvironmentObject private var session: TVSession
     @Environment(\.dismiss) private var dismiss
     @StateObject private var model = TVPlayerModel()
@@ -23,7 +26,7 @@ struct TVPlayerScreen: View {
             Color.black.ignoresSafeArea()
             if let player = model.player {
                 TVPlayerController(player: player, model: model, session: session, chat: chat,
-                                   channel: item.channel)
+                                   channel: item.channel, onChannel: openChannel)
                     .ignoresSafeArea()
             } else if let error = model.error {
                 VStack(spacing: 40) {
@@ -52,6 +55,14 @@ struct TVPlayerScreen: View {
             chat.stop()
         }
         .onExitCommand { dismiss() }
+    }
+
+    /// « Chaîne » dans la barre de lecture : seulement si on sait laquelle
+    /// (une VOD ouverte sans sa chaîne n'en a pas).
+    private var openChannel: (() -> Void)? {
+        guard let onChannel, !item.channel.isEmpty else { return nil }
+        let login = item.channel
+        return { onChannel(login) }
     }
 }
 
@@ -216,6 +227,8 @@ struct TVPlayerController: UIViewControllerRepresentable {
     let chat: TVChatModel
     /// Chaîne regardée : le chat y garde la place choisie dans le menu Chat.
     let channel: String
+    /// Bouton « Chaîne » : sa page, pour voir ses vidéos sans passer par Recherche.
+    let onChannel: (() -> Void)?
 
     final class Coordinator {
         var chatHost: UIHostingController<TVChatOverlay>?
@@ -292,6 +305,12 @@ struct TVPlayerController: UIViewControllerRepresentable {
                                 children: sources))
         }
         items.append(chatMenu())
+        if let onChannel {
+            items.append(UIAction(title: session.t("tv_open_channel"),
+                                  image: UIImage(systemName: "person.crop.rectangle")) { _ in
+                Task { @MainActor in onChannel() }
+            })
+        }
         return items
     }
 

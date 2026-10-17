@@ -26,9 +26,18 @@ enum TVPlayback: Identifiable, Hashable {
     }
 }
 
+/// Page d'une chaîne ouverte depuis le lecteur (bouton « Chaîne »).
+struct TVChannelRoute: Identifiable {
+    let login: String
+    var id: String { login }
+}
+
 struct TVRootView: View {
     @EnvironmentObject private var session: TVSession
     @State private var playing: TVPlayback?
+    /// « Chaîne » touché dans le lecteur : sa page s'ouvre une fois celui-ci fermé.
+    @State private var pendingChannel: String?
+    @State private var channelPage: TVChannelRoute?
 
     var body: some View {
         TabView {
@@ -43,14 +52,53 @@ struct TVRootView: View {
             TVAccountTab()
                 .tabItem { Text(session.t("tv_account")) }
         }
-        .fullScreenCover(item: $playing) { item in
-            TVPlayerScreen(item: item)
+        .fullScreenCover(item: $playing, onDismiss: openPendingChannel) { item in
+            TVPlayerScreen(item: item, onChannel: { login in
+                pendingChannel = login
+                playing = nil
+            })
+            .environmentObject(session)
+        }
+        .fullScreenCover(item: $channelPage) { route in
+            TVChannelCover(login: route.login)
                 .environmentObject(session)
         }
         .task { await session.restore() }
     }
 
     private func play(_ item: TVPlayback) { playing = item }
+
+    private func openPendingChannel() {
+        guard let login = pendingChannel else { return }
+        pendingChannel = nil
+        channelPage = TVChannelRoute(login: login)
+    }
+}
+
+/// Page d'une chaîne par-dessus les onglets, avec son propre lecteur : une
+/// vidéo lancée d'ici s'ouvre au-dessus, Menu ramène à la page puis aux onglets.
+struct TVChannelCover: View {
+    let login: String
+    @EnvironmentObject private var session: TVSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var playing: TVPlayback?
+
+    var body: some View {
+        NavigationStack {
+            TVChannelView(login: login, play: { playing = $0 })
+                // Sur la page elle-même (pas une page ouverte depuis) : Menu
+                // referme et rend les onglets.
+                .onExitCommand { dismiss() }
+                .navigationDestination(for: String.self) { other in
+                    TVChannelView(login: other, play: { playing = $0 })
+                }
+        }
+        // « Chaîne » dans ce lecteur-ci : la page est juste dessous.
+        .fullScreenCover(item: $playing) { item in
+            TVPlayerScreen(item: item, onChannel: { _ in playing = nil })
+                .environmentObject(session)
+        }
+    }
 }
 
 // MARK: – Suivies
