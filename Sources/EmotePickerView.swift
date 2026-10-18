@@ -152,16 +152,27 @@ struct EmotePickerView: View {
         }
         .background(Color.tCard)
         .task {
-            let loaded = await EmoteService.shared.groupedEmotes(channelId: channelId)
-            // Index bâti une seule fois, trié ici plutôt qu'à chaque frappe.
-            var seen = Set<String>()
-            let index = loaded.flatMap { $0.emotes }
-                .filter { seen.insert($0.id).inserted }
-                .map { (emote: $0, lower: $0.name.lowercased()) }
-                .sorted { $0.lower < $1.lower }
-            groups      = loaded
-            searchIndex = index
-            isLoading   = false
+            // Chargements encore en cours à l'ouverture (direct tout juste
+            // ouvert, « Recharger ») : relu à 2, 5 et 10 s tant que la liste
+            // grandit — elle restait vide, ou sans l'onglet de la chaîne.
+            var lastCount = -1
+            for delay in [0, 2, 5, 10] as [UInt64] {
+                if delay > 0 { try? await Task.sleep(nanoseconds: delay * 1_000_000_000) }
+                if Task.isCancelled { return }
+                let loaded = await EmoteService.shared.groupedEmotes(channelId: channelId)
+                let count = loaded.reduce(0) { $0 + $1.emotes.count }
+                if count == lastCount { continue }
+                lastCount = count
+                // Index trié ici plutôt qu'à chaque frappe.
+                var seen = Set<String>()
+                let index = loaded.flatMap { $0.emotes }
+                    .filter { seen.insert($0.id).inserted }
+                    .map { (emote: $0, lower: $0.name.lowercased()) }
+                    .sorted { $0.lower < $1.lower }
+                groups      = loaded
+                searchIndex = index
+                isLoading   = false
+            }
         }
     }
 

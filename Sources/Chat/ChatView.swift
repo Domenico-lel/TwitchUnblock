@@ -12,7 +12,9 @@ struct ChatView: View {
     @Binding var chatOnly: Bool
     /// Présentation : plein cadre, colonne étroite, ou calque sur l'image.
     var style: ChatStyle = .standard
-    var onJoinChannel: (String) -> Void = { _ in }   // raid → bascule vers une autre chaîne
+    /// Raid → bascule vers une autre chaîne. nil (multi-live) : pas de bascule,
+    /// et la détection des raids continue (elle se coupait avant un no-op).
+    var onJoinChannel: ((String) -> Void)? = nil
     /// « Voir la chaîne » dans la fiche d'une emote. Faux en multi-live : la
     /// mosaïque est plein écran, la page s'ouvrirait dessous.
     var opensChannelPages = true
@@ -257,7 +259,7 @@ struct ChatView: View {
             // ── Raid sortant ────────────────────────────────────────
             if store.enableRaids, let r = raidService.raid {
                 Button {
-                    onJoinChannel(r.targetLogin)
+                    onJoinChannel?(r.targetLogin)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "figure.run").font(.system(size: 13, weight: .bold))
@@ -439,7 +441,7 @@ struct ChatView: View {
                                             message: msg,
                                             availableWidth: geo.size.width,
                                             style: style,
-                                            onOpenChannel: onJoinChannel
+                                            onOpenChannel: onJoinChannel ?? { _ in }
                                         )
                                         .id(msg.id)
                                         .contentShape(Rectangle())
@@ -505,6 +507,12 @@ struct ChatView: View {
                                 guard autoScroll else { return }
                                 DispatchQueue.main.async { proxy.scrollTo(bottomAnchor, anchor: .bottom) }
                             }
+                            // Recréée à la fermeture du sélecteur d'emotes : elle
+                            // repartait du haut (les plus vieux messages).
+                            .onAppear {
+                                guard autoScroll else { return }
+                                DispatchQueue.main.async { proxy.scrollTo(bottomAnchor, anchor: .bottom) }
+                            }
 
                             if !autoScroll {
                                 Button {
@@ -534,7 +542,7 @@ struct ChatView: View {
 
             // ── Barre d'envoi ───────────────────────────────────────
             // Compte banni de ce chat : un bandeau à la place du champ.
-            if chat.readOnly { readOnlyBar } else if canSendMessages { inputBar }
+            if chat.readOnly { readOnlyBar } else if canSendMessages { inputBar } else { anonymousBar }
         }
         .task(id: messageText) { await refreshEmoteSuggestions() }
         // Superposé à l'image : pas de fond opaque, mais un dégradé qui assombrit
@@ -654,20 +662,28 @@ struct ChatView: View {
         // Événements masqués ou réaffichés pendant le live : le relevé du
         // hype train (toutes les 5 s pendant une approche) suit.
         .onChange(of: store.showLiveEvents) { events.setHypeEnabled($0) }
-        // ── Token OAuth mis à jour → reconnecte uniquement l'IRC ──────
-        .onChange(of: store.twitchToken) { newToken in
-            guard let tok = newToken else { return }
+        // ── Compte changé → reconnecte uniquement l'IRC ───────────────
+        // Jeton et login arrivent l'un après l'autre : on attend les deux
+        // (la reconnexion partait sans login, en anonyme, champ grisé). À la
+        // déconnexion, retour en anonyme (il restait sous l'ancien pseudo).
+        .onChange(of: "\(store.twitchToken ?? "")|\(store.twitchLogin ?? "")") { _ in
+            guard let tok = store.twitchToken else {
+                logger.info("CHAT", "Compte déconnecté → chat en anonyme", nil)
+                chat.connect(channel: channelName, token: nil, login: nil)
+                return
+            }
+            guard let login = store.twitchLogin, !login.isEmpty else { return }
             logger.info("CHAT", "Token OAuth mis à jour → reconnexion IRC",
                         String(tok.prefix(8)) + "…")
-            chat.connect(channel: channelName, token: tok, login: store.twitchLogin)
+            chat.connect(channel: channelName, token: tok, login: login)
         }
         .onChange(of: store.autoClaimChest) { pointsService.autoClaim = $0 }
         .onChange(of: chatDelay) { chat.displayDelay = $0 }
         .onChange(of: raidService.joinTarget) { target in
             // Raid parti → on suit automatiquement vers la chaîne raidée.
-            guard let target = target, store.enableRaids else { return }
+            guard let target = target, store.enableRaids, let join = onJoinChannel else { return }
             raidService.disconnect()
-            onJoinChannel(target)
+            join(target)
         }
         .onAppear {
             // Annule un éventuel teardown différé (retour de plein écran).
@@ -915,6 +931,26 @@ struct ChatView: View {
 
     // MARK: – Input bar
     @ViewBuilder
+    /// Sans compte : une fine barre avec le menu ⋯ (chat seul, recharger les
+    /// emotes, reconnecter, commandes) — il n'existait qu'avec un compte.
+    private var anonymousBar: some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            Button {
+                showChatMenu = true
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.tMuted)
+                    .frame(width: 44, height: 36)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 6)
+        .background(style.translucent ? Color.black.opacity(0.45) : Color.tCard)
+    }
+
     private var inputBar: some View {
         VStack(spacing: 0) {
             autocompleteBar
@@ -937,6 +973,8 @@ struct ChatView: View {
                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                             if showEmotePicker {
                                 showEmotePicker = false
+                                // Retour au clavier, comme l'icône le promet.
+                                isInputFocused = true
                             } else {
                                 isInputFocused  = false
                                 showEmotePicker = true
@@ -1173,19 +1211,44 @@ struct ChatMessageRow: View {
         guard message.userName.lowercased() != me || me.isEmpty else { return false }
         let words = store.chatHighlightWords
         guard !me.isEmpty || !words.isEmpty else { return false }
-        for token in message.tokens {
-            switch token {
-            case .mention(let m):
-                // « @pseudo, » : la ponctuation collée restait dans le nom.
-                let w = m.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@.,!?:;"))
-                if (!me.isEmpty && w == me) || words.contains(w) { return true }
-            case .text(let t):
-                let w = t.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@.,!?:;"))
-                if (!me.isEmpty && w == me) || words.contains(w) { return true }
-            default: break
+        if !me.isEmpty {
+            for token in message.tokens {
+                switch token {
+                case .mention(let m):
+                    // « @pseudo, » : la ponctuation collée restait dans le nom.
+                    let w = m.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@.,!?:;"))
+                    if w == me { return true }
+                case .text(let t):
+                    let w = t.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@.,!?:;"))
+                    if w == me { return true }
+                default: break
+                }
             }
         }
-        return false
+        guard !words.isEmpty else { return false }
+        // Mots surveillés : cherchés dans tout le message, noms d'emotes
+        // compris, entre frontières de mots — un mot de plusieurs mots
+        // (« giveaway gratuit ») ou une emote (« KEKW ») ne déclenchait jamais.
+        let flat = Self.normalized(message.tokens.map { token -> String in
+            switch token {
+            case .text(let t):    return t
+            case .emote(let e):   return e.name
+            case .mention(let m): return m
+            case .link(let l):    return l
+            case .gif:            return ""
+            }
+        }.joined(separator: " "))
+        return words.contains { w in
+            let n = Self.normalized(w)
+            return !n.isEmpty && " \(flat) ".contains(" \(n) ")
+        }
+    }
+
+    /// Minuscules, ponctuation changée en espaces, espaces simples :
+    /// « Giveaway, GRATUIT ! » → « giveaway gratuit ».
+    private static func normalized(_ s: String) -> String {
+        let mapped = String(s.lowercased().map { $0.isLetter || $0.isNumber ? $0 : " " })
+        return mapped.split(separator: " ").joined(separator: " ")
     }
 
     /// Heure du message, 12 h ou 24 h (Réglages → Chat, « auto » : l'appareil).

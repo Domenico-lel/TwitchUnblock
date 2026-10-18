@@ -443,5 +443,11 @@
  "Connexion : données mobiles": ["Connection: mobile data", "Conexión: datos móviles", "Подключение: мобильная сеть"],
  "Connexion : hors ligne": ["Connection: offline", "Conexión: sin conexión", "Подключение: офлайн"],
  "Connexion : Wi-Fi ou filaire": ["Connection: Wi-Fi or wired", "Conexión: Wi-Fi o por cable", "Подключение: Wi-Fi или кабель"],
- "mode données réduites": ["Low Data Mode", "modo de datos reducidos", "режим экономии данных"]
+ "mode données réduites": ["Low Data Mode", "modo de datos reducidos", "режим экономии данных"],
+ "chat pas connecté avec un compte": ["chat not connected with an account", "chat no conectado con una cuenta", "чат не подключён к аккаунту"],
+ "Compte déconnecté → chat en anonyme": ["Account logged out → anonymous chat", "Cuenta desconectada → chat anónimo", "Выход из аккаунта → анонимный чат"],
+ "Message non envoyé": ["Message not sent", "Mensaje no enviado", "Сообщение не отправлено"],
+ "plus de 500 caractères": ["more than 500 characters", "más de 500 caracteres", "более 500 символов"],
+ "Tuile sans image depuis 20 s : relance": ["Tile without picture for 20 s: restarting", "Mosaico sin imagen desde hace 20 s: reinicio", "Плитка без изображения 20 с: перезапуск"],
+ "Session web refusée pour les événements : lecture sans elle": ["Web session refused for live events: reading without it", "Sesión web rechazada para los eventos: lectura sin ella", "Веб-сессия отклонена для событий: чтение без неё"]
 }

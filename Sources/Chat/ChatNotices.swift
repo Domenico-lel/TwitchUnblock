@@ -127,7 +127,7 @@ struct DropsNoticeCard: View {
                 HStack(spacing: 10) {
                     if let end = campaign.endsAt {
                         Text(store.t("drops_notice_ends").replacingOccurrences(
-                            of: "{d}", with: end.formatted(.dateTime.day().month(.abbreviated).hour().minute())))
+                            of: "{d}", with: end.formatted(.dateTime.day().month(.abbreviated).hour().minute().locale(Locale(identifier: store.lang.rawValue)))))
                             .font(.system(size: 10)).foregroundColor(.tMuted)
                     }
                     if let url = campaign.detailsURL {

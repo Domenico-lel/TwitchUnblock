@@ -31,9 +31,13 @@ final class ChatService: NSObject, ObservableObject {
     /// 0 = affichage immédiat. Piloté par la synchro auto du chat.
     var displayDelay: Double = 0
 
-    /// Incrémenté à chaque (re)connexion : les messages en attente d'une session
-    /// précédente sont abandonnés au lieu d'atterrir dans le nouveau canal.
+    /// Incrémenté à chaque (re)connexion : les tâches d'une session précédente
+    /// (lecture, délai, reconnexion) s'arrêtent.
     private var generation = 0
+    /// Messages en attente du délai de synchro : abandonnés seulement si la
+    /// chaîne change (ou si on quitte le chat). Une reconnexion à la même
+    /// chaîne (réseau coupé) jetait jusqu'à 15 s de chat déjà reçu.
+    private var publishGeneration = 0
 
     /// Identifiants de la dernière connexion, pour la reconnexion automatique.
     private var lastToken: String?
@@ -80,10 +84,10 @@ final class ChatService: NSObject, ObservableObject {
     private func publish(_ message: ChatMessage) {
         let delay = displayDelay
         guard delay >= 0.5 else { insert(message); return }
-        let gen = generation
+        let gen = publishGeneration
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard let self, !Task.isCancelled, self.generation == gen else { return }
+            guard let self, !Task.isCancelled, self.publishGeneration == gen else { return }
             self.insert(message)
         }
     }
@@ -133,7 +137,9 @@ final class ChatService: NSObject, ObservableObject {
 
     // MARK: – Connect
     func connect(channel: String, token: String? = nil, login: String? = nil) {
-        disconnect()
+        // Même chaîne (reconnexion, autre compte) : les messages encore en
+        // attente du délai et la modération retenue restent.
+        disconnect(keepPending: channel.lowercased() == channelName)
         channelName = channel.lowercased()
         lastToken = token
         lastLogin = login
@@ -271,9 +277,14 @@ final class ChatService: NSObject, ObservableObject {
     }
 
     // MARK: – Disconnect
-    func disconnect() {
-        generation &+= 1   // abandonne les messages encore en attente de synchro
-        deletedIds = [:]; bannedUsers = [:]; purgedAt = nil
+    /// `keepPending` : reconnexion à la même chaîne — les messages en attente
+    /// du délai de synchro (et la modération à leur appliquer) sont gardés.
+    func disconnect(keepPending: Bool = false) {
+        generation &+= 1
+        if !keepPending {
+            publishGeneration &+= 1   // abandonne les messages encore en attente de synchro
+            deletedIds = [:]; bannedUsers = [:]; purgedAt = nil
+        }
         reconnectTask?.cancel(); reconnectTask = nil
         presentUsers.removeAll()
         presenceSupported = false
@@ -319,13 +330,19 @@ final class ChatService: NSObject, ObservableObject {
     }
 
     // MARK: – Send message
+    /// false si rien n'est parti (vide, plus de 500 caractères, chat pas
+    /// connecté avec un compte) : l'appelant le dit au lieu de tout perdre.
+    @discardableResult
     func sendMessage(_ text: String,
                      replyParentId: String? = nil,
                      replyRootId: String? = nil,
-                     replyToName: String? = nil) async {
+                     replyToName: String? = nil) async -> Bool {
         let sanitized = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !sanitized.isEmpty, sanitized.count <= 500,
-              isAuthenticated, isConnected else { return }
+              isAuthenticated, isConnected else {
+            logger.warn("CHAT", "Message non envoyé", sanitized.count > 500 ? "plus de 500 caractères" : "chat pas connecté avec un compte")
+            return false
+        }
 
         // Identifiant venu des balises IRC : vérifié, un retour à la ligne y
         // ajouterait une commande IRC.
@@ -341,9 +358,16 @@ final class ChatService: NSObject, ObservableObject {
         // autres commandes (« /w », « /ban »…) n'en ont pas — ce ne sont pas
         // des messages, Twitch les exécute ou les refuse.
         let isMe = sanitized.lowercased().hasPrefix("/me ")
-        if sanitized.hasPrefix("/"), !isMe { return }
+        if sanitized.hasPrefix("/"), !isMe { return true }
         let shownText = isMe ? String(sanitized.dropFirst(4)) : sanitized
-        let tokens = await tokenizeText(shownText, channelId: channelId)
+        var tokens = await tokenizeText(shownText, channelId: channelId)
+        // Emotes Twitch de notre propre message : l'écho n'a pas de balises,
+        // elles s'affichaient en texte (« Kappa » choisi dans les suggestions).
+        for i in tokens.indices {
+            if case .text(let word) = tokens[i], let e = await EmoteService.shared.twitchEmote(named: word) {
+                tokens[i] = .emote(e)
+            }
+        }
         let localMsg = ChatMessage(
             id: "local-\(UUID().uuidString)",
             userId: localLogin, userName: localLogin,
@@ -358,6 +382,7 @@ final class ChatService: NSObject, ObservableObject {
         )
         // Message envoyé par nous : affiché tout de suite, jamais retardé.
         insert(localMsg)
+        return true
     }
 
     // MARK: – Fil de discussion (thread)

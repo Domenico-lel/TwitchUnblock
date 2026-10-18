@@ -305,6 +305,13 @@ struct MultiLiveTile: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black.opacity(0.55))
         case .playing:
+            // Lecture bloquée faute de données : une roue légère (la tuile
+            // passait pour « en lecture », image figée).
+            if model.buffering && !model.userPaused {
+                ProgressView().tint(.white)
+                    .scaleEffect(0.8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             // VOD en pause sans le son : rien ne le dirait autrement.
             if model.isVod && model.userPaused && !audible {
                 Image(systemName: "pause.fill")

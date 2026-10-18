@@ -134,6 +134,13 @@ actor EmoteService {
 
     func resolveById(_ id: String) -> TwitchEmote? { twitchById[id] }
 
+    /// Emote Twitch par son nom, parmi celles déjà vues dans ce chat (celles
+    /// que les suggestions proposent) : pour l'écho de nos propres messages,
+    /// qui n'a pas de balises d'emotes.
+    func twitchEmote(named name: String) -> TwitchEmote? {
+        twitchById.values.first { $0.name == name }
+    }
+
     // MARK: – Grouped emotes for the picker
     func groupedEmotes(channelId: String?) -> [(label: String, emotes: [TwitchEmote])] {
         var groups: [(label: String, emotes: [TwitchEmote])] = []

@@ -248,7 +248,7 @@ struct UsernameColorSheet: View {
                             HStack(spacing: TSpace.sm) {
                                 Circle().fill(Color(hex: c.hex))
                                     .frame(width: 14, height: 14)
-                                Text(c.name.replacingOccurrences(of: "_", with: " "))
+                                Text(store.t("color_\(c.name)"))
                                     .font(.tMeta)
                                     .foregroundColor(.tText)
                                     .lineLimit(1)

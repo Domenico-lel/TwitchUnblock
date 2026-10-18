@@ -97,6 +97,12 @@ final class LiveEventsService: ObservableObject {
     /// Une prédiction vient de se terminer : on montre l'issue gagnante une minute.
     private var resultUntil: Date? = nil
     @Published var voting = false
+    /// Vote au sondage refusé (« NO_SESSION » : session web absente, sinon
+    /// « REFUSED ») : la vue le dit — toucher un choix ne faisait rien.
+    @Published var voteError: String? = nil
+    /// Session web refusée par Twitch pour les lectures publiques (expirée) :
+    /// elles se font sans elle jusqu'au prochain démarrage.
+    private var tokenRefused = false
     /// Pari en cours d'envoi, et la dernière erreur (code Twitch, ou
     /// NO_SESSION / NETWORK) traduite par la vue.
     @Published var betting = false
@@ -146,6 +152,7 @@ final class LiveEventsService: ObservableObject {
         stop()
         self.login = login.lowercased(); self.channelId = channelId
         self.token = token; self.viewerId = viewerId
+        tokenRefused = false
         running = true
         Task { await fetchAll() }
         timer = Timer.scheduledCommon(every: interval) { [weak self] _ in
@@ -160,7 +167,7 @@ final class LiveEventsService: ObservableObject {
         running = false; hypeEnabled = false
         stopHype()
         watchStreak = 0; poll = nil; prediction = nil
-        votedChoiceIds = []; voting = false; resultUntil = nil
+        votedChoiceIds = []; voting = false; voteError = nil; resultUntil = nil
         betting = false; betError = nil; localBets = [:]
     }
 
@@ -227,9 +234,11 @@ final class LiveEventsService: ObservableObject {
               p.multichoice || votedChoiceIds.isEmpty else { return }
         guard !viewerId.isEmpty, let tok = token, !tok.isEmpty else {
             logger.warn("EVENTS", "Vote impossible", "session web ou compte manquant")
+            voteError = "NO_SESSION"
             return
         }
         voting = true
+        voteError = nil
         defer { voting = false }
 
         // voteID : identifiant client (UUID sans tirets), comme le site.
@@ -250,8 +259,23 @@ final class LiveEventsService: ObservableObject {
             logger.success("EVENTS", "🗳️ Vote enregistré", p.title)
             await fetchPoll()             // rafraîchit les pourcentages
         } else {
-            logger.warn("EVENTS", "Vote refusé", nil)
+            let msgs = (res?["errors"] as? [[String: Any]] ?? []).compactMap { $0["message"] as? String }
+            voteError = msgs.contains { $0.lowercased().contains("unauthenticated") } ? "NO_SESSION" : "REFUSED"
+            logger.warn("EVENTS", "Vote refusé", msgs.joined(separator: " · "))
         }
+    }
+
+    /// Lecture publique (sondage, prédiction) : avec la session web (champs
+    /// « self »), et sans elle si Twitch la refuse — expirée, elle faisait
+    /// échouer toute la requête, et les bandeaux disparaissaient.
+    private func publicQuery(_ op: String, variables: [String: Any], sha256: String) async -> [String: Any]? {
+        if !tokenRefused, let tok = token, !tok.isEmpty {
+            if let res = await TwitchGQL.shared.query(op, variables: variables, sha256: sha256, token: tok),
+               res["data"] is [String: Any] { return res }
+            tokenRefused = true
+            logger.warn("EVENTS", "Session web refusée pour les événements : lecture sans elle", op)
+        }
+        return await TwitchGQL.shared.query(op, variables: variables, sha256: sha256, token: nil)
     }
 
     private func fetchAll() async {
@@ -279,8 +303,8 @@ final class LiveEventsService: ObservableObject {
 
     // MARK: Sondage
     private func fetchPoll() async {
-        guard let res   = await TwitchGQL.shared.query("ChannelPollContext_GetViewablePoll",
-                                                       variables: ["login": login], sha256: H.poll, token: token),
+        guard let res   = await publicQuery("ChannelPollContext_GetViewablePoll",
+                                            variables: ["login": login], sha256: H.poll),
               let data  = res["data"]    as? [String: Any],
               let chan  = data["channel"] as? [String: Any] else { return }
         guard let p = chan["viewablePoll"] as? [String: Any] else {
@@ -288,7 +312,7 @@ final class LiveEventsService: ObservableObject {
             poll = nil; votedChoiceIds = []; return
         }
         logger.debug("EVENTS", "Sondage brut", "\(p.keys.sorted())")
-        let title = p["title"] as? String ?? "Sondage"
+        let title = p["title"] as? String ?? ""   // vide : « Sondage » traduit par la vue
         let raw = p["choices"] as? [[String: Any]] ?? []
         let choices = raw.map { c -> LivePoll.Choice in
             let v = (c["totalVoters"] as? Int)
@@ -342,9 +366,9 @@ final class LiveEventsService: ObservableObject {
 
     // MARK: Prédiction
     private func fetchPrediction() async {
-        guard let res   = await TwitchGQL.shared.query("ChannelPointsPredictionContext",
-                                                       variables: ["count": 1, "channelLogin": login],
-                                                       sha256: H.prediction, token: token),
+        guard let res   = await publicQuery("ChannelPointsPredictionContext",
+                                            variables: ["count": 1, "channelLogin": login],
+                                            sha256: H.prediction),
               let data  = res["data"]        as? [String: Any],
               let comm  = data["community"]  as? [String: Any],
               let chan  = comm["channel"]    as? [String: Any] else { return }
@@ -375,7 +399,7 @@ final class LiveEventsService: ObservableObject {
             return
         }
         resultUntil = nil
-        let title = ev["title"] as? String ?? "Prédiction"
+        let title = ev["title"] as? String ?? ""   // vide : « Prédiction » traduit par la vue
         let isLocked = active.isEmpty || (ev["status"] as? String) == "LOCKED"
         let outcomes = (ev["outcomes"] as? [[String: Any]] ?? []).map { o -> (id: String, title: String, color: String, points: Int, users: Int) in
             (o["id"] as? String ?? "",
@@ -807,6 +831,11 @@ private struct PollCard: View {
                 }
                 Text("\(poll.choices.reduce(0) { $0 + $1.votes }) \(store.t("poll_votes"))")
                     .font(.system(size: 10)).foregroundColor(.tMuted)
+                if poll.isActive, let e = events.voteError {
+                    Text(store.t(e == "NO_SESSION" ? "pred_need_login" : "poll_vote_failed"))
+                        .font(.system(size: 10)).foregroundColor(.tDanger)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         // Sondage suivant : replié d'office à son tour quand il se termine.
@@ -815,7 +844,7 @@ private struct PollCard: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text("📊 \(poll.title)")
+            Text("📊 \(poll.title.isEmpty ? store.t("poll_default_title") : poll.title)")
                 .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
             Spacer(minLength: 4)
             // Une seule lecture de l'heure : entre deux, la fin pourrait
@@ -927,7 +956,7 @@ private struct PredictionCard: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text("🔮 \(pred.title)\(pred.locked && pred.winnerId == nil ? " 🔒" : "")")
+            Text("🔮 \(pred.title.isEmpty ? store.t("pred_default_title") : pred.title)\(pred.locked && pred.winnerId == nil ? " 🔒" : "")")
                 .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
             Spacer(minLength: 4)
             // Une seule lecture de l'heure : entre deux, la fin pourrait
