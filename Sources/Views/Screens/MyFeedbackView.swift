@@ -206,7 +206,7 @@ struct FeedbackThreadView: View {
                         withAnimation { proxy.scrollTo(n - 1, anchor: .bottom) }
                     }
                 }
-                composer
+                if r.locked { lockedNote(r) } else { composer }
             } else {
                 TEmptyState(icon: "tray", title: store.t("fb_gone"))
                     .frame(maxHeight: .infinity)
@@ -290,6 +290,17 @@ struct FeedbackThreadView: View {
                 if !mine { Spacer(minLength: 40) }
             }
         }
+    }
+
+    /// Discussion fermée par le développeur, ou pleine : la raison, à la
+    /// place du champ de réponse (l'envoi échouait sans dire pourquoi).
+    private func lockedNote(_ r: MyFeedback) -> some View {
+        Text(store.t(r.blocked == true ? "fb_closed_note" : "fb_full_note"))
+            .font(.tMeta).foregroundColor(.tMuted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(TSpace.md)
+            .background(Color.tCard.ignoresSafeArea(edges: .bottom))
     }
 
     private var composer: some View {

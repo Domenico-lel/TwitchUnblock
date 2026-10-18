@@ -39,6 +39,11 @@ struct MyFeedback: Codable, Identifiable, Hashable {
     /// s'y relit, même après être passé par un Worker personnel — qui
     /// répondait « effacé » pour ceux de l'officiel, et l'app les oubliait.
     var base: String? = nil
+    /// Discussion fermée par le développeur, ou pleine (100 messages) : plus
+    /// de champ de réponse (l'envoi échouait sans dire pourquoi).
+    var blocked: Bool? = nil
+    var full: Bool? = nil
+    var locked: Bool { blocked == true || full == true }
 
     /// Réponse (ou nouvel état) du développeur pas encore lue. `seen` est
     /// une date du serveur (celle du dernier état vu) : l'horloge de
@@ -70,9 +75,14 @@ private struct FeedbackState: Decodable {
     var updatedAt: Double? = nil
     var lastFrom: String? = nil
     var thread: [FeedbackMessage]? = nil
+    /// Fermée par le développeur, pleine (absents : ni l'un ni l'autre).
+    var closed: Bool? = nil
+    var full: Bool? = nil
 }
 private struct ThreadsResponse: Decodable { let items: [FeedbackState] }
 private struct ReplyResponse: Decodable { let item: FeedbackState? }
+/// Réponse refusée : discussion fermée (403) ou pleine (409).
+private struct ReplyRefusal: Decodable { var closed: Bool? = nil; var full: Bool? = nil }
 
 @MainActor
 final class FeedbackStore: ObservableObject {
@@ -243,6 +253,8 @@ final class FeedbackStore: ObservableObject {
         if let u = st.updatedAt { r.updatedAt = u }
         if let l = st.lastFrom { r.lastFrom = l }
         if let t = st.thread { r.thread = t }
+        r.blocked = st.closed == true ? true : nil
+        r.full = st.full == true ? true : nil
         return r
     }
 
@@ -251,7 +263,18 @@ final class FeedbackStore: ObservableObject {
         guard let r = reports.first(where: { $0.id == id }) else { return false }
         let body: [String: Any] = ["id": r.id, "token": r.token, "message": message,
                                    "photos": photos.map { $0.base64EncodedString() }]
-        guard let data = await post("/api/feedback/reply", body, base: r.origin),
+        let (answer, status) = await send("/api/feedback/reply", body, base: r.origin)
+        // Fermée par le développeur, ou pleine, entre-temps : gardé avec le
+        // retour, la vue retire le champ de réponse et dit pourquoi.
+        if status == 403 || status == 409, let answer,
+           let refusal = try? JSONDecoder().decode(ReplyRefusal.self, from: answer),
+           refusal.closed == true || refusal.full == true,
+           let i = reports.firstIndex(where: { $0.id == id }) {
+            if refusal.closed == true { reports[i].blocked = true } else { reports[i].full = true }
+            save()
+            return false
+        }
+        guard status == 200, let data = answer,
               let item = try? JSONDecoder().decode(ReplyResponse.self, from: data).item,
               let i = reports.firstIndex(where: { $0.id == id }) else { return false }
         reports[i] = apply(item, to: reports[i])
@@ -262,19 +285,26 @@ final class FeedbackStore: ObservableObject {
     }
 
     private func post(_ path: String, _ body: [String: Any], base: String = APIConfig.base) async -> Data? {
+        let (data, status) = await send(path, body, base: base)
+        return status == 200 ? data : nil
+    }
+
+    /// Corps et code HTTP de la réponse (nil, nil : pas de réponse).
+    private func send(_ path: String, _ body: [String: Any], base: String = APIConfig.base) async -> (Data?, Int?) {
         guard let url = URL(string: base + path),
-              let payload = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+              let payload = try? JSONSerialization.data(withJSONObject: body) else { return (nil, nil) }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.cachePolicy = .reloadIgnoringLocalCacheData
         req.httpBody = payload
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200 else {
-            logger.warn("FEEDBACK", "Requête refusée", path)
-            return nil
+              let status = (resp as? HTTPURLResponse)?.statusCode else {
+            logger.warn("FEEDBACK", "Requête refusée", "\(path) · réseau")
+            return (nil, nil)
         }
-        return data
+        if status != 200 { logger.warn("FEEDBACK", "Requête refusée", "\(path) · HTTP \(status)") }
+        return (data, status)
     }
 }
 
