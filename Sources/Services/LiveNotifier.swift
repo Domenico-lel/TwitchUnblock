@@ -128,7 +128,8 @@ enum LiveNotifier {
         let known = Set(ud.stringArray(forKey: knownKey) ?? [])
         let now = Set(streams.map { $0.userLogin.lowercased() })
         // ntfy actif : c'est lui qui prévient (sans doublon, et plus vite).
-        if notify && !NtfyNotifier.isEnabled {
+        let firstPass = ud.object(forKey: knownKey) == nil
+        if notify && !firstPass && !(NtfyNotifier.isEnabled && !NtfyNotifier.isPending) {
             let lang = Lang(rawValue: ud.string(forKey: "lang") ?? "en") ?? .en
             // Chaînes coupées dans « Chaînes notifiées » : connues quand même,
             // pour ne pas notifier un live en cours le jour où on les rallume.

@@ -52,6 +52,7 @@ final class ChannelPointsService: ObservableObject {
     private var failedClaims: Set<String> = []
     /// Échecs passagers par coffre (voir claimBonus).
     private var claimAttempts: [String: Int] = [:]
+    private var isClaiming = false
 
     // MARK: – Client-Integrity (token minté via WebView éphémère, réutilisé ~1h en natif)
     private var integrityTok:    String? = nil
@@ -124,6 +125,12 @@ final class ChannelPointsService: ObservableObject {
             startWatchPresence()
         }
         isLoading = false
+        // Coffre déjà là à l'ouverture du direct : les sondages l'ignoraient
+        // (il était déjà « en attente ») et il n'était jamais réclamé seul.
+        if autoClaim, pendingClaimId != nil {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await claimBonus()
+        }
     }
 
     // MARK: – Polling
@@ -171,6 +178,8 @@ final class ChannelPointsService: ObservableObject {
             logger.warn("POINTS", "Balance diminuée", "\(formatted(balance)) → \(formatted(b.balance))")
             balance = b.balance
         }
+        // Plus annoncé par Twitch (réclamé ailleurs, expiré) : plus affiché.
+        if b.claimId == nil, pendingClaimId != nil { pendingClaimId = nil }
         if pendingClaimId == nil, let cid = b.claimId, !failedClaims.contains(cid) {
             pendingClaimId = cid
             logger.success("POINTS", "🎁 Coffre détecté", "claimId: \(cid.prefix(8))…")
@@ -324,8 +333,13 @@ final class ChannelPointsService: ObservableObject {
     // Hash de la persisted query `ClaimCommunityPoints` (capturé sur le client web).
     private static let claimQueryHash = "46aaeebe02c99afdf4fc97c7c0cba964124bf6b0af229395f1f6d1feed05b3d0"
 
-    func claimBonus() async {
-        guard let claimId = pendingClaimId else { return }
+    /// Une seule à la fois (minuteries et bouton pouvaient réclamer le même
+    /// coffre en parallèle). Rend true si Twitch l'a accordé.
+    @discardableResult
+    func claimBonus() async -> Bool {
+        guard !isClaiming, let claimId = pendingClaimId else { return false }
+        isClaiming = true
+        defer { isClaiming = false }
         logger.info("POINTS", "Réclamation du coffre…", "claimId: \(claimId.prefix(8))…")
         // Claim en NATIF avec le token integrity (persisted query identique au client web).
         let body: [[String: Any]] = [[
@@ -344,12 +358,12 @@ final class ChannelPointsService: ObservableObject {
             claimAttempts[claimId] = n
             logger.error("POINTS", "Claim coffre échoué", "essai \(n)/4")
             if n >= 4 { failedClaims.insert(claimId); pendingClaimId = nil }
-            return
+            return false
         }
 
         if let err = claim["error"] as? [String: Any], let code = err["code"] as? String {
             logger.error("POINTS", "Claim refusé", "code: \(code)")
-            failedClaims.insert(claimId); pendingClaimId = nil; return
+            failedClaims.insert(claimId); pendingClaimId = nil; return false
         }
         // Pas d'erreur → succès. Le selection-set de la persisted query ne renvoie pas
         // toujours `currentPoints` : on nettoie le coffre et on rafraîchit le solde.
@@ -367,6 +381,7 @@ final class ChannelPointsService: ObservableObject {
             logger.success("POINTS", "🎉 Coffre réclamé !", "rafraîchissement du solde…")
             await refreshBalance()
         }
+        return true
     }
 
     // MARK: – Redeem

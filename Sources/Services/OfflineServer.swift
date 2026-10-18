@@ -139,10 +139,17 @@ final class OfflineServer {
         var body = data
         var headers = ["Content-Type": Self.mime(file.pathExtension), "Accept-Ranges": "bytes"]
         if let line = lines.first(where: { $0.lowercased().hasPrefix("range:") }),
-           let range = Self.byteRange(line, size: data.count) {
-            status = "206 Partial Content"
-            body = data.subdata(in: range)
-            headers["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(data.count)"
+           let asked = Self.byteRange(line, size: data.count) {
+            switch asked {
+            case .range(let range):
+                status = "206 Partial Content"
+                body = data.subdata(in: range)
+                headers["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(data.count)"
+            case .unsatisfiable:
+                status = "416 Range Not Satisfiable"
+                body = Data()
+                headers["Content-Range"] = "bytes */\(data.count)"
+            }
         }
         headers["Content-Length"] = "\(body.count)"
         send(conn, status: status, headers: headers, body: parts[0] == "HEAD" ? Data() : body)
@@ -157,15 +164,25 @@ final class OfflineServer {
         conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
     }
 
-    /// « Range: bytes=début-fin » (fin facultative).
-    private static func byteRange(_ line: String, size: Int) -> Range<Int>? {
-        guard size > 0, let spec = line.split(separator: "=", maxSplits: 1).last else { return nil }
+    private enum ByteRange { case range(Range<Int>), unsatisfiable }
+
+    /// « Range: bytes=début-fin » (fin facultative), ou « bytes=-N » : les N
+    /// derniers octets (servi comme « depuis 0 » avant). Hors du fichier : 416
+    /// (un 200 avec tout le fichier était renvoyé).
+    private static func byteRange(_ line: String, size: Int) -> ByteRange? {
+        guard let spec = line.split(separator: "=", maxSplits: 1).last else { return nil }
         let bounds = spec.split(separator: "-", omittingEmptySubsequences: false)
         guard bounds.count == 2 else { return nil }
-        let start = Int(bounds[0].trimmingCharacters(in: .whitespaces)) ?? 0
-        let end = Int(bounds[1].trimmingCharacters(in: .whitespaces)).map { min($0, size - 1) } ?? size - 1
-        guard start <= end, start < size else { return nil }
-        return start ..< end + 1
+        let first = bounds[0].trimmingCharacters(in: .whitespaces)
+        let last = bounds[1].trimmingCharacters(in: .whitespaces)
+        if first.isEmpty {
+            guard let n = Int(last), n > 0, size > 0 else { return .unsatisfiable }
+            return .range(max(0, size - n) ..< size)
+        }
+        guard let start = Int(first) else { return nil }
+        let end = Int(last).map { min($0, size - 1) } ?? size - 1
+        guard start < size, start <= end else { return .unsatisfiable }
+        return .range(start ..< end + 1)
     }
 
     private static func mime(_ ext: String) -> String {

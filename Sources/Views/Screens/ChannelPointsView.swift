@@ -67,6 +67,7 @@ struct ChannelPointsSheet: View {
     @State private var userInput      = ""
     @State private var isRedeeming    = false
     @State private var redeemResult:  RedeemResult? = nil
+    @State private var resultTask:    Task<Void, Never>? = nil
 
     enum RedeemResult { case success(String); case failure(String) }
 
@@ -213,11 +214,7 @@ struct ChannelPointsSheet: View {
                                     service:   service,
                                     isRedeeming: isRedeeming
                                 ) { result in
-                                    withAnimation { redeemResult = result }
-                                    Task {
-                                        try? await Task.sleep(nanoseconds: 3_000_000_000)
-                                        withAnimation { redeemResult = nil }
-                                    }
+                                    showResult(result)
                                 } onNeedsInput: {
                                     rewardForInput = reward
                                     userInput = ""
@@ -242,15 +239,23 @@ struct ChannelPointsSheet: View {
                     let ok = await service.redeem(reward: reward, userInput: userInput)
                     isRedeeming = false
                     rewardForInput = nil
-                    withAnimation {
-                        redeemResult = ok
-                            ? .success("« \(reward.title) » " + store.t("points_redeemed"))
-                            : .failure(service.errorMsg ?? store.t("points_error"))
-                    }
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    withAnimation { redeemResult = nil }
+                    showResult(ok
+                        ? .success("« \(reward.title) » " + store.t("points_redeemed"))
+                        : .failure(service.errorMsg ?? store.t("points_error")))
                 }
             }
+        }
+    }
+
+    /// Résultat affiché quelques secondes ; un nouveau remplace le précédent
+    /// (la minuterie de l'ancien effaçait le nouveau trop tôt).
+    private func showResult(_ result: RedeemResult, seconds: Double = 3) {
+        resultTask?.cancel()
+        withAnimation { redeemResult = result }
+        resultTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            withAnimation { redeemResult = nil }
         }
     }
 
@@ -259,10 +264,9 @@ struct ChannelPointsSheet: View {
     private var claimBonusButton: some View {
         Button {
             Task {
-                await service.claimBonus()
-                withAnimation { redeemResult = .success(store.t("points_bonus_claimed")) }
-                try? await Task.sleep(nanoseconds: 2_500_000_000)
-                withAnimation { redeemResult = nil }
+                let ok = await service.claimBonus()
+                showResult(ok ? .success(store.t("points_bonus_claimed")) : .failure(store.t("points_error")),
+                           seconds: 2.5)
             }
         } label: {
             HStack(spacing: 10) {

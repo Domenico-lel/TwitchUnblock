@@ -65,7 +65,9 @@ enum VodChatArchive {
         var position = Int(max(0, from))
         var pages = 0
         var failures = 0
-        while pages < 4000, Double(position) <= to {
+        // Plafond de sécurité (la boucle s'arrête sur la fin voulue) : à 4 000
+        // pages, le chat des très longs directs était tronqué en silence.
+        while pages < 20_000, Double(position) <= to {
             if Task.isCancelled { return nil }
             guard let page = await VodChatService.commentsPage(videoId: vodId, offset: position) else {
                 // Coupure passagère : deux nouveaux essais (2 s, puis 4 s)

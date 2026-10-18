@@ -1648,7 +1648,10 @@ struct SettingsView: View {
                           Binding(get: { liveNotif }, set: { on in
                               liveNotif = on
                               if on {
-                                  Task { let ok = await LiveNotifier.enable(); await MainActor.run { liveNotif = ok } }
+                                  Task {
+                                      let ok = await LiveNotifier.enable()
+                                      await MainActor.run { liveNotif = ok && LiveNotifier.isEnabled }
+                                  }
                               } else {
                                   LiveNotifier.disable()
                               }

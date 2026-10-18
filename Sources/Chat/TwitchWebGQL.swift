@@ -27,6 +27,9 @@ final class TwitchWebGQL: NSObject, WKNavigationDelegate {
 
     private var webView: WKWebView?
     private var loadCont: CheckedContinuation<Bool, Never>?
+    /// Génération en cours : le garde-fou de 15 s d'une génération finie ne
+    /// doit pas interrompre la suivante (nouvel essai en chaîne des drops).
+    private var loadGen = 0
     /// Génération en cours, partagée par tous les appelants.
     private var minting: Task<Integrity?, Never>?
 
@@ -69,8 +72,11 @@ final class TwitchWebGQL: NSObject, WKNavigationDelegate {
         // Attend le chargement (avec garde-fou 15s).
         let loaded = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
             loadCont = c
+            loadGen += 1
+            let gen = loadGen
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-                self?.loadCont?.resume(returning: false); self?.loadCont = nil
+                guard let self, self.loadGen == gen else { return }
+                self.loadCont?.resume(returning: false); self.loadCont = nil
             }
         }
         guard loaded else { logger.warn("INTEGRITY", "Page twitch.tv non chargée", nil); return nil }

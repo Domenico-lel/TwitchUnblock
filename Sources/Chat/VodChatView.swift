@@ -60,7 +60,8 @@ struct VodChatView: View {
                     ZStack(alignment: .bottomTrailing) {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(vod.messages.reversed()) { msg in
+                                // Mêmes filtres que le chat du direct (mots, pseudos masqués).
+                                ForEach(vod.messages.reversed().filter { !store.isChatFiltered($0) }) { msg in
                                     ChatMessageRow(message: msg, availableWidth: geo.size.width, style: style)
                                         .id(msg.id)
                                 }
