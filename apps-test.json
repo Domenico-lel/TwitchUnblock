@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.17",
+          "buildVersion": "317",
+          "date": "2026-10-18",
+          "localizedDescription": "- Bug reports now include the latest errors from the logs (shown in the report summary), so problems can be found faster",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-317/TwitchUnblock.ipa",
+          "size": 3769336,
+          "commit": "501fd09de71dcdecbe1bd59c7a16629d6c83bb70"
+        },
+        {
           "version": "1.4.16",
           "buildVersion": "316",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-279/TwitchUnblock.ipa",
           "size": 2932808,
           "commit": "65a50f2c1cc81d12ff323dc32b8a13a53ef52746"
-        },
-        {
-          "version": "1.3.0",
-          "buildVersion": "277",
-          "date": "2026-10-11",
-          "localizedDescription": "- Pick an app icon in Settings → General → Appearance: Classic, Purple, Night, Light, Contrast or Neon; “Contrast” stays the sharpest with iOS 26's clear and tinted icons. An app signed with a certificate's generic identifier can't change its icon: the setting says so.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-277/TwitchUnblock.ipa",
-          "size": 2932361,
-          "commit": "8ee28ab29a6f5243ea60faa14cea2b06430871d5"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.16",
+      "version": "1.4.17",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-316/TwitchUnblock.ipa",
-      "size": 3766749
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-317/TwitchUnblock.ipa",
+      "size": 3769336
     }
   ],
   "news": []
