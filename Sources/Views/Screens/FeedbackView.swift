@@ -61,10 +61,21 @@ struct FeedbackSheet: View {
         return out
     }
 
+    /// Erreurs et alertes récentes du journal (20 au plus), jointes au retour :
+    /// le bug arrive avec sa trace (dite dans le résumé ci-dessous).
+    private var recentErrors: [String] {
+        AppLogger.shared.logs.filter { $0.level == .error || $0.level == .warn }.prefix(20).map { e in
+            "\(e.timestamp) · \(e.category) · \(e.message)" + (e.detail.map { " — \($0)" } ?? "")
+                + (e.repeats > 1 ? " ×\(e.repeats)" : "")
+        }
+    }
+
     private var infoSummary: String {
         let i = info
-        let base = "\(i["device"] ?? "?") · iOS \(i["ios"] ?? "?") · \(UsageService.shared.appVersion) (\(i["build"] ?? "?")) · \(i["lang"] ?? "")"
-        if let watching = i["watching"] { return base + " · " + watching }
+        var base = "\(i["device"] ?? "?") · iOS \(i["ios"] ?? "?") · \(UsageService.shared.appVersion) (\(i["build"] ?? "?")) · \(i["lang"] ?? "")"
+        if let watching = i["watching"] { base += " · " + watching }
+        let errors = recentErrors.count
+        if errors > 0 { base += " · " + store.t("fb_errors_attached").replacingOccurrences(of: "{n}", with: "\(errors)") }
         return base
     }
 
@@ -204,6 +215,7 @@ struct FeedbackSheet: View {
             "platform": "ios",
             "version": UsageService.shared.appVersion,
             "info": info,
+            "errors": recentErrors,
             "photos": images.compactMap { $0.feedbackJPEG()?.base64EncodedString() },
         ]
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)

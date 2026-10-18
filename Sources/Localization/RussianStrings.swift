@@ -75,6 +75,7 @@ let kRussianStrings: [String: String] = [
     "export": "📤 Экспорт",
     "logs_empty": "Логов нет",
     "logs_hint": "Запустите VOD или трансляцию, чтобы увидеть логи",
+    "fb_errors_attached": "Прикреплено недавних ошибок журнала: {n}",
     "logs_title": "Журнал",
     "log_level_info": "Инфо",
     "log_level_success": "Успех",
