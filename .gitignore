@@ -1,0 +1,8 @@
+# Projet Xcode généré par XcodeGen depuis project.yml (xcodegen generate) :
+# l'ancien, commité, était périmé (ni widgets, ni Apple TV, ni la plupart
+# des fichiers).
+*.xcodeproj/
+# Catalogue d'icônes créé par la CI (étape « Create App Icon Folder »).
+Sources/Assets.xcassets/
+build/
+.DS_Store

@@ -546,20 +546,24 @@ site can read. For those, use the app.
 
 ## 🛠️ Building from source
 
-**Requirements:** macOS, Xcode 16+, iOS 16.0 deployment target.
+**Requirements:** macOS, Xcode 16+, iOS 16.0 deployment target, and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```bash
 git clone https://github.com/MXFia19/TwitchUnblock.git
 cd TwitchUnblock
+xcodegen generate
 open TwitchUnblock.xcodeproj
 ```
 
-Pick your development team under *Signing & Capabilities*, then build the
-`TwitchUnblock` scheme onto your device.
-
-The Xcode project is generated from `project.yml` with
-[XcodeGen](https://github.com/yonaskolb/XcodeGen): run `xcodegen` after adding
-files. GitHub Actions builds and publishes nightly IPAs from `master`.
+The Xcode project isn't in the repository: it is generated from
+[`project.yml`](project.yml) (run `xcodegen generate` again after adding files).
+Signing is turned off in `project.yml` because CI builds unsigned IPAs: to run
+the app on your device, pick your development team under *Signing &
+Capabilities* (and a bundle identifier of your own). The app icons are
+assembled by CI (step “Create App Icon Folder” in
+[`build.yml`](.github/workflows/build.yml)): a local build has none unless you
+run that step. GitHub Actions builds and publishes nightly IPAs from `master`.
 
 ### Versioning
 
