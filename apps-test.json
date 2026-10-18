@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.9",
+          "buildVersion": "308",
+          "date": "2026-10-18",
+          "localizedDescription": "- The immersive player's controls now show and hide right away when you tap the video (in landscape they took up to a second); double-tap still skips 10 s on VODs and shows or hides the chat in landscape",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-308/TwitchUnblock.ipa",
+          "size": 3705045,
+          "commit": "6964fac2ba4aed71767d33d384238b95447a5070"
+        },
+        {
           "version": "1.4.8",
           "buildVersion": "307",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-269/TwitchUnblock.ipa",
           "size": 2864582,
           "commit": "85526635a1b31e8ea6d1d8858b5d686e07316215"
-        },
-        {
-          "version": "1.2.43",
-          "buildVersion": "268",
-          "date": "2026-10-11",
-          "localizedDescription": "- Downloads run faster while the app is open, and iOS takes over when you leave it; a stopped download now says why (connection lost, storage full, segments refused by Twitch).",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-268/TwitchUnblock.ipa",
-          "size": 2864633,
-          "commit": "c72a771563d7c54bc1ca54d45e8dbc6f67712f26"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.8",
+      "version": "1.4.9",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-307/TwitchUnblock.ipa",
-      "size": 3705741
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-308/TwitchUnblock.ipa",
+      "size": 3705045
     }
   ],
   "news": []
