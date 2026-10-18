@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.20",
+          "buildVersion": "320",
+          "date": "2026-10-18",
+          "localizedDescription": "- Downloads: original audio is still tried when the first check gets no answer, leaving the app right after tapping Download no longer fails it, a chat that can't be fetched no longer stays \"in progress\" forever, and other apps can no longer read your downloads list through the local server\n- Drops: a short streamer disconnection no longer stops progress for the session, and repeated refusals are shown as failing instead of retrying every 10 seconds\n- ntfy notifications: up to 500 channels kept in a sensible order (no longer cut alphabetically), the last known follow list is used when Twitch doesn't answer, and your subscription stays alive even if you don't open the app\n- Notifications are no longer lost when the app is woken in the background, and in-app notices now show above the player menu, sleep timer and chat sheets",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-320/TwitchUnblock.ipa",
+          "size": 3803685,
+          "commit": "a87a8d04051698137d7fffde5f8e13d2e97836a3"
+        },
+        {
           "version": "1.4.19",
           "buildVersion": "319",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-282/TwitchUnblock.ipa",
           "size": 2999926,
           "commit": "1be4bc2fd48bd874200f4ac91ba05b67000feef1"
-        },
-        {
-          "version": "1.3.3",
-          "buildVersion": "281",
-          "date": "2026-10-12",
-          "localizedDescription": "- Pin your favourite streamers: long-press a followed channel (live or offline) and pick \"Pin to the top of Following\". Pinned channels show first, with a small pin next to their name.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-281/TwitchUnblock.ipa",
-          "size": 2948252,
-          "commit": "cfc094a5846d01b2391195407a087d4df9032d57"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.19",
+      "version": "1.4.20",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-319/TwitchUnblock.ipa",
-      "size": 3797716
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-320/TwitchUnblock.ipa",
+      "size": 3803685
     }
   ],
   "news": []
