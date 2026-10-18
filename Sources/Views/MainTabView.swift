@@ -405,6 +405,7 @@ struct MainTabView: View {
                 multiLiveFull: multi.isFull
             )
             .presentationDetents([.medium])
+            .inAppNoticeHost()
         }
         // Multi-live : jusqu'à quatre vidéos côte à côte, directs et VODs.
         .fullScreenCover(isPresented: $showMultiLive) {
@@ -596,6 +597,7 @@ struct MainTabView: View {
         .sheet(isPresented: $showSleepSheet) {
             SleepTimerSheet()
                 .presentationDetents([.medium, .large])
+                .inAppNoticeHost()
         }
         // Session web : vérifiée une fois au lancement. Sans ça on ne s'aperçoit
         // de son expiration que quand les points cessent de répondre.

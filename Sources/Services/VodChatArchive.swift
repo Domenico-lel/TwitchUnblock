@@ -98,7 +98,11 @@ enum VodChatArchive {
         }
         comments.sort { $0.o < $1.o }
 
+        // Téléchargement supprimé pendant la mise en forme : rien n'est écrit
+        // (le dossier était recréé, invisible et jamais nettoyé).
+        guard !Task.isCancelled, FileManager.default.fileExists(atPath: folder.path) else { return nil }
         let images = await saveImages(of: comments, into: folder.appendingPathComponent(imagesFolder, isDirectory: true))
+        guard !Task.isCancelled, FileManager.default.fileExists(atPath: folder.path) else { return nil }
         let chat = OfflineChat(base: from, channelLogin: owner?.login ?? "", comments: comments, images: images)
         guard let data = try? JSONEncoder().encode(chat),
               (try? data.write(to: folder.appendingPathComponent(fileName), options: .atomic)) != nil else { return nil }
@@ -155,7 +159,9 @@ enum VodChatArchive {
             for b in c.badges { if let u = b.u { urls.insert(u) } }
             for t in c.tokens where t.k == "e" { if let u = t.u { urls.insert(u) } }
         }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Sans dossiers intermédiaires : celui du téléchargement effacé n'est
+        // pas recréé.
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)
         let list = Array(urls)
         var saved: [String: String] = [:]
         await withTaskGroup(of: (String, String?).self) { group in

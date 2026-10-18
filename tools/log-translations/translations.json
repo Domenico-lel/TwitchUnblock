@@ -449,5 +449,8 @@
  "Message non envoyé": ["Message not sent", "Mensaje no enviado", "Сообщение не отправлено"],
  "plus de 500 caractères": ["more than 500 characters", "más de 500 caracteres", "более 500 символов"],
  "Tuile sans image depuis 20 s : relance": ["Tile without picture for 20 s: restarting", "Mosaico sin imagen desde hace 20 s: reinicio", "Плитка без изображения 20 с: перезапуск"],
- "Session web refusée pour les événements : lecture sans elle": ["Web session refused for live events: reading without it", "Sesión web rechazada para los eventos: lectura sin ella", "Веб-сессия отклонена для событий: чтение без неё"]
+ "Session web refusée pour les événements : lecture sans elle": ["Web session refused for live events: reading without it", "Sesión web rechazada para los eventos: lectura sin ella", "Веб-сессия отклонена для событий: чтение без неё"],
+ "Chat du téléchargement indisponible": ["Download chat unavailable", "Chat de la descarga no disponible", "Чат загрузки недоступен"],
+ "Chaînes suivies du compte illisibles : dernière liste connue": ["Account follows unreadable: last known list used", "Canales seguidos de la cuenta ilegibles: última lista conocida", "Отслеживаемые каналы аккаунта не прочитаны: последний известный список"],
+ "Plus de 500 chaînes suivies : les 500 premières seulement": ["More than 500 followed channels: only the first 500", "Más de 500 canales seguidos: solo los 500 primeros", "Более 500 отслеживаемых каналов: только первые 500"]
 }

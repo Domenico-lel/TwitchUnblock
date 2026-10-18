@@ -151,10 +151,12 @@ struct SettingsView: View {
         .sheet(isPresented: $showSleepSheet) {
             SleepTimerSheet()
                 .presentationDetents([.medium, .large])
+                .inAppNoticeHost()
         }
         // ── Chaînes et catégories masquées ───────────────────────────
         .sheet(isPresented: $showHidden) {
             HiddenContentSheet().environmentObject(store)
+                .inAppNoticeHost()
         }
         // ── Logs sheet ───────────────────────────────────────────────
         .sheet(isPresented: $showLogs) {

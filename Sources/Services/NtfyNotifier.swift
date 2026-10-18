@@ -17,6 +17,9 @@ enum NtfyNotifier {
     private static let hashKey = "ntfy_hash"
     static let syncedKey = "ntfy_synced"
     static let countKey = "ntfy_channels"
+    /// Dernière liste des chaînes suivies par le compte (repli si Helix ne
+    /// répond pas).
+    private static let accountCacheKey = "ntfy_account_follows"
     static let appStoreURL = URL(string: "https://apps.apple.com/app/ntfy/id1625396347")!
 
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
@@ -42,6 +45,8 @@ enum NtfyNotifier {
     static func enable(lang: Lang) async -> Bool {
         UserDefaults.standard.set(true, forKey: enabledKey)
         UserDefaults.standard.removeObject(forKey: unsubPendingKey)
+        // Réveils d'iOS : le sujet y est renvoyé au Worker (LiveNotifier).
+        LiveNotifier.schedule()
         return await sync(lang: lang, force: true)
     }
 
@@ -89,17 +94,33 @@ enum NtfyNotifier {
         var channels = ud.stringArray(forKey: "local_follows") ?? []
         if let token = Keychain.loadToken("twitch_token"),
            let userId = ud.string(forKey: "twitch_user_id"), !userId.isEmpty {
-            // Liste du compte illisible : rien n'est envoyé, plutôt qu'une liste amputée.
-            guard let account = await getFollowedLogins(token: token, userId: userId) else {
+            if let account = await getFollowedLogins(token: token, userId: userId) {
+                ud.set(account, forKey: accountCacheKey)
+                channels += account
+            } else if let cached = ud.stringArray(forKey: accountCacheKey) {
+                // Liste du compte illisible (jeton expiré, réseau) : la dernière
+                // connue part à sa place. Rien n'était envoyé, et sans retour
+                // dans l'app le Worker oubliait le sujet au bout de 60 jours.
+                logger.warn("NTFY", "Chaînes suivies du compte illisibles : dernière liste connue", "\(cached.count)")
+                channels += cached
+            } else {
+                // Jamais lue : rien n'est envoyé, plutôt qu'une liste amputée.
                 ud.set("twitch", forKey: errorKey)
                 return false
             }
-            channels += account
         }
         // Moins celles coupées dans « Chaînes notifiées » (le hachage change :
-        // la nouvelle liste part au prochain appel).
+        // la nouvelle liste part au prochain appel). Ordre gardé (suivis de
+        // l'appareil, puis du compte, les plus récents d'abord) et 500 au
+        // plus : le Worker n'en garde pas davantage, et le tri alphabétique
+        // laissait de côté toutes les chaînes de la fin de l'alphabet.
         let muted = NotifChannels.muted
-        let list = Array(Set(channels.map { $0.lowercased() })).filter { !muted.contains($0) }.sorted()
+        var seen = Set<String>()
+        let all = channels.map { $0.lowercased() }.filter { !muted.contains($0) && seen.insert($0).inserted }
+        if all.count > 500 {
+            logger.warn("NTFY", "Plus de 500 chaînes suivies : les 500 premières seulement", "\(all.count)")
+        }
+        let list = Array(all.prefix(500))
         // La langue en fait partie : changée, la liste repart tout de suite
         // (sinon les notifications gardaient l'ancienne langue jusqu'à 24 h).
         let hash = lang.rawValue + "|" + list.joined(separator: ",")

@@ -191,7 +191,9 @@ final class FeedbackStore: ObservableObject {
         // « Mes signalements » est à l'écran : la réponse y est affichée.
         let fresh = reports.filter { $0.unread && $0.updatedAt > (before[$0.id] ?? 0) }
         let inboxOnScreen = inboxViewers > 0 && UIApplication.shared.applicationState == .active
-        if !fresh.isEmpty, !inboxOnScreen { notifyTeamUpdates(fresh) }
+        // Attendu : un réveil en arrière-plan (LiveNotifier) ne se termine
+        // qu'une fois les notifications posées — l'état, lui, est déjà noté.
+        if !fresh.isEmpty, !inboxOnScreen { await notifyTeamUpdates(fresh) }
     }
 
     /// App au premier plan : relue toutes les minutes. Avant, rien ne se
@@ -219,7 +221,7 @@ final class FeedbackStore: ObservableObject {
     /// ou notification (InAppNotices) ; le toucher ouvre « Mes signalements ».
     /// Identifiant = retour + date : la même mise à jour n'est jamais
     /// annoncée deux fois.
-    private func notifyTeamUpdates(_ list: [MyFeedback]) {
+    private func notifyTeamUpdates(_ list: [MyFeedback]) async {
         let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
         for r in list.prefix(3) {
             let notice: InAppNotice
@@ -230,8 +232,8 @@ final class FeedbackStore: ObservableObject {
                                      body: translate("fb_status_line", lang)
                                         .replacingOccurrences(of: "{s}", with: translate("fb_status_\(r.status)", lang)))
             }
-            InAppNotices.shared.deliver(notice, id: "fb-\(r.id)-\(Int(r.updatedAt))",
-                                        userInfo: ["feedback": r.id])
+            await InAppNotices.shared.deliverNow(notice, id: "fb-\(r.id)-\(Int(r.updatedAt))",
+                                                 userInfo: ["feedback": r.id])
         }
     }
 

@@ -408,6 +408,7 @@ struct ChatView: View {
                                   }
                               } : nil)
                     .environmentObject(store)
+                    .inAppNoticeHost()
             }
             // Toucher une emote ou un badge (messages, épinglé) : sa fiche.
             .environment(\.chatInfoAction, { infoItem = $0 })
@@ -569,11 +570,13 @@ struct ChatView: View {
                          })
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
+                .inAppNoticeHost()
         }
         // ── Menu « … » du chat ───────────────────────────────────────
         .sheet(isPresented: $showRules) {
             ChatRulesSheet(channel: chat.channelName, rules: chat.rules) { closeRules(accepted: $0) }
                 .environmentObject(store)
+                .inAppNoticeHost()
         }
         .sheet(isPresented: $showChatMenu) {
             ChatMenuSheet(
@@ -592,6 +595,7 @@ struct ChatView: View {
                 } : nil
             )
             .presentationDetents([.medium, .large])
+            .inAppNoticeHost()
         }
         // ── Sheet points ─────────────────────────────────────────────
         .sheet(isPresented: $showPointsSheet) {
@@ -609,6 +613,7 @@ struct ChatView: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
+            .inAppNoticeHost()
         }
         // ── Login web Twitch (capture du cookie auth-token) ──────────
         .sheet(isPresented: $showWebLogin) {
@@ -622,6 +627,7 @@ struct ChatView: View {
                 },
                 onCancel: { showWebLogin = false }
             )
+            .inAppNoticeHost()
         }
         // ── Token web mis à jour → recharge les points et le suivi ───
         .onChange(of: store.twitchWebToken) { newWebToken in

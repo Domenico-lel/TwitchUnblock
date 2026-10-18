@@ -33,13 +33,22 @@ final class OfflineServer {
         }
     }
 
-    /// http://127.0.0.1:<port>, serveur démarré au besoin. nil s'il ne peut pas.
+    /// Préfixe secret tiré à chaque lancement : une autre app de l'appareil,
+    /// qui parcourrait les ports, ne lit ni la liste des téléchargements ni
+    /// leurs chats (tout le dossier était servi sans contrôle).
+    private let secret = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+
+    /// http://127.0.0.1:<port>/<secret>, serveur démarré au besoin. nil s'il ne peut pas.
     func baseURL() async -> URL? {
         let port: UInt16? = await withCheckedContinuation { cont in
             queue.async { self.ensureStarted { cont.resume(returning: $0) } }
         }
-        return port.flatMap { URL(string: "http://127.0.0.1:\($0)") }
+        return port.flatMap { URL(string: "http://127.0.0.1:\($0)/\(secret)") }
     }
+
+    /// Seuls la playlist et les segments vidéo sont servis (ni index.json,
+    /// ni plan.json, ni chat.json : l'app les lit sur le disque).
+    private static let servedExtensions: Set<String> = ["m3u8", "ts", "mp4", "m4s", "aac", "m4a", "mp3"]
 
     private func ensureStarted(_ done: @escaping (UInt16?) -> Void) {
         if let port { done(port); return }
@@ -127,10 +136,17 @@ final class OfflineServer {
             return
         }
         let rawPath = String(parts[1]).components(separatedBy: "?").first ?? ""
-        let path = (rawPath.removingPercentEncoding ?? rawPath).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let full = (rawPath.removingPercentEncoding ?? rawPath).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Préfixe secret obligatoire, retiré avant de chercher le fichier.
+        guard full.hasPrefix(secret + "/") else {
+            send(conn, status: "404 Not Found", headers: [:], body: Data())
+            return
+        }
+        let path = String(full.dropFirst(secret.count + 1))
         let file = VodDownloads.directory.appendingPathComponent(path)
-        // Rien en dehors du dossier des téléchargements.
+        // Rien en dehors du dossier des téléchargements, et seulement la vidéo.
         guard !path.isEmpty, !path.contains(".."),
+              Self.servedExtensions.contains(file.pathExtension.lowercased()),
               let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
             send(conn, status: "404 Not Found", headers: [:], body: Data())
             return

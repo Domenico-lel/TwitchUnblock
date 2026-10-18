@@ -56,20 +56,34 @@ final class InAppNotices: ObservableObject {
     /// elles sont permises, et sinon gardé pour le prochain retour.
     func deliver(_ notice: InAppNotice, id: String, userInfo: [String: String] = [:]) {
         if UIApplication.shared.applicationState == .active { show(notice); return }
+        // Un peu de temps demandé à iOS : en arrière-plan, l'app pouvait être
+        // suspendue avant que la notification soit posée (réponse vue pendant
+        // un réveil, fin de téléchargement : annoncées des heures après, ou
+        // jamais).
+        let time = BackgroundTaskBox()
+        time.id = UIApplication.shared.beginBackgroundTask(withName: "notice") { time.end() }
         Task {
-            let center = UNUserNotificationCenter.current()
-            let status = await center.notificationSettings().authorizationStatus
-            switch status {
-            case .authorized, .provisional, .ephemeral:
-                let content = UNMutableNotificationContent()
-                content.title = notice.title
-                content.body = notice.body
-                content.sound = .default
-                content.userInfo = userInfo
-                try? await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
-            default:
-                keepForLater(notice)
-            }
+            await deliverNow(notice, id: id, userInfo: userInfo)
+            time.end()
+        }
+    }
+
+    /// Comme `deliver`, mais attendu : un réveil en arrière-plan ne se termine
+    /// qu'une fois la notification posée.
+    func deliverNow(_ notice: InAppNotice, id: String, userInfo: [String: String] = [:]) async {
+        if UIApplication.shared.applicationState == .active { show(notice); return }
+        let center = UNUserNotificationCenter.current()
+        let status = await center.notificationSettings().authorizationStatus
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            let content = UNMutableNotificationContent()
+            content.title = notice.title
+            content.body = notice.body
+            content.sound = .default
+            content.userInfo = userInfo
+            try? await center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+        default:
+            keepForLater(notice)
         }
     }
 

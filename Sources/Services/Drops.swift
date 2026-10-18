@@ -496,6 +496,10 @@ final class DropsHeartbeat: ObservableObject {
         var lastCheck = Date.distantPast
         var lastInventory = Date()
         var failures = 0
+        /// 404 de suite sur la playlist (fin du live à confirmer).
+        var offlineHits = 0
+        /// Refus de suite (401/403) des segments.
+        var refusals = 0
         while !Task.isCancelled {
             // Campagnes de la chaîne : au départ, puis toutes les 10 min (des
             // drops peuvent commencer en cours de live).
@@ -524,23 +528,44 @@ final class DropsHeartbeat: ObservableObject {
                 if pollSegments, variant == nil {
                     variant = await Self.lowestVariant(login: login, token: token)
                     guard !Task.isCancelled else { return }
-                    failures = variant == nil ? failures + 1 : 0
+                    if variant == nil, offlineHits > 0 {
+                        // Liste maîtresse absente aussi, juste après un 404 :
+                        // la fin du live se confirme.
+                        offlineHits += 1
+                    } else {
+                        failures = variant == nil ? failures + 1 : 0
+                    }
                     // Plusieurs échecs de suite : jeton anonyme ou session web
-                    // expirée, à signaler sur la page Drops.
-                    status = failures > 2 ? .failing(login) : .active(login)
+                    // expirée (ou refus répétés), à signaler sur la page Drops.
+                    status = failures > 2 || refusals > 2 ? .failing(login) : .active(login)
                 }
                 if let v = variant {
                     switch await poll(v) {
-                    case .ok: break
-                    case .expired: variant = nil   // jeton expiré (~20 min) : un neuf
+                    case .ok:
+                        offlineHits = 0
+                        refusals = 0
+                    case .expired:
+                        // Jeton expiré (~20 min) : un neuf. Refusé encore et
+                        // encore (live réservé aux abonnés, pays) : « en échec »
+                        // et une minute d'attente — un jeton toutes les 10 s,
+                        // avec « tes drops progressent », sinon.
+                        variant = nil
+                        refusals += 1
                     case .offline:
-                        logger.info("DROPS", "Live terminé", login)
-                        channelId = nil
-                        status = .idle
-                        // Plus rien à relancer si la session web change.
-                        if !Task.isCancelled { runningLogin = nil; runningToken = nil }
-                        return
+                        // Un 404 seul : variante changée (streamer reconnecté) ou
+                        // coupure de quelques secondes — la liste maîtresse est
+                        // relue. Trois de suite : le live est fini.
+                        variant = nil
+                        offlineHits += 1
                     }
+                }
+                if offlineHits >= 3 {
+                    logger.info("DROPS", "Live terminé", login)
+                    channelId = nil
+                    status = .idle
+                    // Plus rien à relancer si la session web change.
+                    if !Task.isCancelled { runningLogin = nil; runningToken = nil }
+                    return
                 }
                 // Inventaire toutes les 5 min : drops terminés réclamés si l'option est active.
                 if Date().timeIntervalSince(lastInventory) > 300 {
@@ -549,7 +574,7 @@ final class DropsHeartbeat: ObservableObject {
                     await DropsService.shared.refresh(token: token, autoClaim: auto)
                 }
             }
-            let pause: UInt64 = channelId == nil || !pollSegments ? 60 : (failures > 2 ? 60 : 10)
+            let pause: UInt64 = channelId == nil || !pollSegments ? 60 : (failures > 2 || refusals > 2 ? 60 : 10)
             try? await Task.sleep(nanoseconds: pause * 1_000_000_000)
         }
     }

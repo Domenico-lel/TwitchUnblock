@@ -367,7 +367,12 @@ final class VodDownloads: ObservableObject {
     // MARK: Préparation
     private func prepare(_ id: String) {
         guard preparing[id] == nil, runners[id] == nil else { return }
+        // Un peu de temps demandé à iOS pour la préparation (playlist,
+        // sondage) : l'app quittée juste après « Télécharger » la coupait.
+        let time = BackgroundTaskBox()
+        time.id = UIApplication.shared.beginBackgroundTask(withName: "download-prepare") { time.end() }
         preparing[id] = Task {
+            defer { time.end() }
             let plan = await self.makePlan(id)
             // Arrêtée (pause, suppression) : une autre a peut-être pris sa place.
             guard !Task.isCancelled else { return }
@@ -385,7 +390,10 @@ final class VodDownloads: ObservableObject {
         if let saved = Self.loadPlan(id) { return saved }
         logger.info("DOWNLOAD", "Téléchargement…", "\(current.title) · \(current.quality)")
         guard let url = URL(string: current.playlist), let text = await VodDownloadPlan.fetch(url) else {
-            if !Task.isCancelled { fail(id, VodDownloadFailure.playlist) }
+            // Hors premier plan : l'élément reste « en cours » et repart au
+            // retour (sceneActive) — l'échec était définitif (« playlist
+            // introuvable ») pour une simple mise en arrière-plan.
+            if !Task.isCancelled, foreground { fail(id, VodDownloadFailure.playlist) }
             return nil
         }
         var made = VodDownloadPlan.make(text, base: url, from: current.start, to: current.end)
@@ -643,11 +651,30 @@ final class VodDownloads: ObservableObject {
             let count = await VodChatArchive.download(vodId: d.vodId, from: from, to: to, into: VodDownloads.folder(id))
             guard let self, !Task.isCancelled else { return }
             self.chats[id] = nil
-            guard let count else { return }
+            guard let count else {
+                // Chat introuvable (VOD supprimée par la chaîne…) : trois essais
+                // espacés, puis le téléchargement s'en passe — il restait « chat
+                // en cours » à vie, et repartait du début à chaque retour.
+                let tries = (self.chatAttempts[id] ?? 0) + 1
+                self.chatAttempts[id] = tries
+                guard tries < 3 else {
+                    logger.warn("DOWNLOAD", "Chat du téléchargement indisponible", d.title)
+                    self.update(id) { $0.withChat = false }
+                    self.save()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if !Task.isCancelled { self.startChat(id) }
+                return
+            }
+            self.chatAttempts[id] = nil
             self.update(id) { $0.chatCount = count }
             self.save()
         }
     }
+
+    /// Essais du chat de chaque téléchargement (session en cours).
+    private var chatAttempts: [String: Int] = [:]
 
     // MARK: Export
     /// Un seul fichier (.ts, ou .mp4 pour les VODs en fMP4), pour Fichiers,
@@ -721,15 +748,22 @@ final class VodDownloads: ObservableObject {
     }
 
     /// Son d'origine encore là ? Quatre premiers passages coupés : tous
-    /// refusés, la VOD est trop ancienne — inutile d'essayer les autres.
+    /// refusés (403/404), la VOD est trop ancienne — inutile d'essayer les
+    /// autres. Sans réponse (réseau lent, app quittée), on essaie quand même,
+    /// segment par segment (repli muet sur refus) : « non » restait figé dans
+    /// le plan, « Réessayer » et la reprise compris.
     nonisolated private static func originalsAvailable(_ plan: VodDownloadPlan) async -> Bool {
+        var probed = 0, refused = 0
         for s in plan.segments.lazy.filter({ $0.original != nil }).prefix(4) {
             guard let original = s.original else { continue }
+            probed += 1
             var req = URLRequest(url: original, timeoutInterval: 6)
             req.httpMethod = "HEAD"
-            if (try? await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode == 200 { return true }
+            let code = (try? await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode
+            if code == 200 { return true }
+            if code == 403 || code == 404 { refused += 1 }
         }
-        return false
+        return probed > 0 && refused < probed
     }
 
     nonisolated private static func writePlaylist(_ plan: VodDownloadPlan, folder: URL, names: [Int: String]) throws {
