@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.10",
+          "buildVersion": "309",
+          "date": "2026-10-18",
+          "localizedDescription": "- Chat: a network drop of a few seconds no longer signs your account out of the chat, and when Twitch really refuses it the read-only notice shows right away in your language\n- Chat: with delay sync on, messages deleted or users banned by moderators no longer show up a few seconds later\n- Chat: channel emotes and badges that fail to load are retried instead of missing until the app restarts; a mention followed by punctuation (@you,) is highlighted\n- Chat: connecting the web session during a live now also updates predictions, polls and raids; closing the chat while it loads no longer leaves connections running\n- Channel points: a chest that fails to claim stays claimable and is retried, and a failed balance refresh no longer shows 0 then a fake gain\n- Channel points, follows, bets and drops no longer fail when several of them need Twitch's integrity token at the same time\n- Animated emotes no longer pile up hundreds of MB of memory\n- Downloaded VODs keep playing after the app was suspended (lock screen, Picture in Picture)\n- Drops: turning on drop progress or connecting the web session during a live starts it right away, and a refused integrity token no longer blocks progress for hours\n- My reports: the \"fix is out\" message now reaches finished reports (they're checked once a day for 30 days)",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-309/TwitchUnblock.ipa",
+          "size": 3716551,
+          "commit": "fd5015e425cac43a5f78e783b3dfefdbf4da2d1f"
+        },
+        {
           "version": "1.4.9",
           "buildVersion": "308",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-270/TwitchUnblock.ipa",
           "size": 2880302,
           "commit": "21b7a5e4cba231b3ceb80e492aa848493edaf642"
-        },
-        {
-          "version": "1.2.44",
-          "buildVersion": "269",
-          "date": "2026-10-11",
-          "localizedDescription": "- Téléchargements : l'app sait qu'elle est à l'écran dès son lancement",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-269/TwitchUnblock.ipa",
-          "size": 2864582,
-          "commit": "85526635a1b31e8ea6d1d8858b5d686e07316215"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.9",
+      "version": "1.4.10",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-308/TwitchUnblock.ipa",
-      "size": 3705045
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-309/TwitchUnblock.ipa",
+      "size": 3716551
     }
   ],
   "news": []
