@@ -23,11 +23,13 @@ final class OfflineServer {
     private var waiting: [(UInt16?) -> Void] = []
 
     private init() {
-        // iOS ferme le serveur pendant que l'app est suspendue : relancé au retour.
-        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
-                                               object: nil, queue: nil) { [weak self] _ in
-            guard let self else { return }
-            self.queue.async { if self.lastPort != nil { self.ensureStarted { _ in } } }
+        // iOS ferme le serveur pendant que l'app est suspendue : relancé au
+        // retour (premier plan, ou app réactivée sans y passer).
+        for name in [UIApplication.willEnterForegroundNotification, UIApplication.didBecomeActiveNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                guard let self else { return }
+                self.queue.async { if self.lastPort != nil { self.ensureStarted { _ in } } }
+            }
         }
     }
 
@@ -68,7 +70,13 @@ final class OfflineServer {
                 let wasReady = self.port != nil
                 self.port = nil
                 self.listener = nil
-                if !wasReady, self.lastPort != nil, !self.waiting.isEmpty {
+                if wasReady, self.lastPort != nil {
+                    // Fermé par iOS pendant une suspension : une lecture hors
+                    // ligne peut reprendre sans repasser au premier plan (écran
+                    // verrouillé, PiP) et calait. Relancé aussitôt sur le même
+                    // port : les adresses données à AVPlayer restent bonnes.
+                    self.startListener()
+                } else if self.lastPort != nil, !self.waiting.isEmpty {
                     // L'ancien port est pris : un autre.
                     self.lastPort = nil
                     self.startListener()

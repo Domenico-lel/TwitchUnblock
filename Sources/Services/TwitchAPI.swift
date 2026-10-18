@@ -189,8 +189,12 @@ func accountPlaybackToken(login: String, webToken: String,
     let body: [String: Any] = ["query": q, "variables": ["l": login]]
     var res = await accountGQL(body, webToken: webToken, integrity: nil)
     if res.status == 401 || res.status == 403 { return .expired }
-    if gqlErrorText(res.json).lowercased().contains("integrity"), let integrity,
-       let it = await integrity() {
+    // Intégrité demandée : le jeton gardé, puis, s'il est refusé à son tour,
+    // un second appel — qui en donne un neuf (voir dropsIntegrity).
+    var tries = 0
+    while tries < 2, gqlErrorText(res.json).lowercased().contains("integrity"), let integrity,
+          let it = await integrity() {
+        tries += 1
         res = await accountGQL(body, webToken: webToken, integrity: it)
         if res.status == 401 || res.status == 403 { return .expired }
     }

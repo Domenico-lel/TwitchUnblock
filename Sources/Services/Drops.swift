@@ -302,6 +302,9 @@ final class DropsService: ObservableObject {
         return fresh
     }
 
+    /// Jeton d'intégrité refusé : le prochain sera neuf.
+    func invalidateIntegrity() { integrity = nil }
+
     /// Le même, en types simples : pour accountPlaybackToken (TwitchAPI.swift,
     /// compilé aussi pour l'Apple TV, qui n'a pas TwitchWebGQL).
     func integrityPair(token: String) async -> (token: String, deviceId: String)? {
@@ -617,5 +620,16 @@ final class DropsHeartbeat: ObservableObject {
 /// Jeton d'intégrité de la session web `webToken`, à donner à
 /// accountPlaybackToken (WebView éphémère si besoin, voir DropsService).
 func dropsIntegrity(for webToken: String) -> () async -> (token: String, deviceId: String)? {
-    { await DropsService.shared.integrityPair(token: webToken) }
+    // Une closure par demande : rappelée par le même accountPlaybackToken, le
+    // jeton gardé vient d'être refusé (autre compte, invalidé chez Twitch) —
+    // on l'oublie et on en génère un neuf, au lieu de resservir le même
+    // jusqu'à son expiration (la progression des drops restait bloquée).
+    let calls = IntegrityCalls()
+    return {
+        calls.count += 1
+        if calls.count > 1 { await DropsService.shared.invalidateIntegrity() }
+        return await DropsService.shared.integrityPair(token: webToken)
+    }
 }
+
+private final class IntegrityCalls { var count = 0 }

@@ -49,7 +49,19 @@ actor BadgeService {
     func loadChannel(channelId: String, token: String?) async {
         guard !loadedChannels.contains(channelId) else { return }
         loadedChannels.insert(channelId)
+        await fetchChannel(channelId: channelId, token: token)
+        // Ni Helix ni GQL n'ont répondu (coupure, erreur 5xx) : nouvel essai
+        // 30 s plus tard, une fois — les badges d'abonné manquaient jusqu'au
+        // redémarrage de l'app.
+        if channel[channelId] == nil {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                await self?.fetchChannel(channelId: channelId, token: token)
+            }
+        }
+    }
 
+    private func fetchChannel(channelId: String, token: String?) async {
         guard let token, !token.isEmpty, let url = URL(string:
             "https://api.twitch.tv/helix/chat/badges?broadcaster_id=\(channelId)"
         ) else { await loadChannelPublic(channelId: channelId); return }

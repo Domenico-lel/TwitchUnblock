@@ -49,6 +49,10 @@ struct ChatView: View {
     @State private var chromeWidth: CGFloat = 320
     @State private var isSetup          = false   // chat/points déjà initialisés
     @State private var teardownWork: DispatchWorkItem? = nil   // anti-rebond plein écran
+    /// Mise en place en cours : annulée au démontage, sans quoi les services
+    /// lancés après ses attentes (PubSub, drops, événements, raid) restaient
+    /// actifs pour une vue déjà fermée.
+    @State private var setupTask: Task<Void, Never>? = nil
     @FocusState private var isInputFocused: Bool
 
     @State private var emoteMatches: [TwitchEmote] = []   // autocomplétion en cours
@@ -624,6 +628,13 @@ struct ChatView: View {
             // et ne faisait plus rien, en silence.
             // Bouton masqué : statut oublié, relu quand on le réactive.
             if store.showFollowButton { Task { await loadFollow() } } else { follow.reset() }
+            // Pronostics, sondages, série et raid gardaient le jeton du
+            // démarrage : parier répondait « connecte ta session ».
+            if store.showWatchStreak || store.showLiveEvents {
+                events.start(login: channelName, channelId: cid, token: newWebToken,
+                             viewerId: store.twitchUserId ?? "", hype: store.showLiveEvents)
+            }
+            if store.enableRaids { raidService.connect(channelId: cid, token: newWebToken ?? "") }
         }
         // Bouton Suivre réactivé pendant le live : il revient tout de suite.
         .onChange(of: store.showFollowButton) { show in
@@ -658,29 +669,40 @@ struct ChatView: View {
             teardownWork?.cancel(); teardownWork = nil
             guard !isSetup else { return }   // déjà initialisé → pas de double connexion
             isSetup = true
-            Task { await setupChat() }
+            setupTask = Task { await setupChat() }
         }
-        .onDisappear {
-            // Le passage en plein écran (AVPlayerViewController) déclenche un onDisappear
-            // transitoire. On NE coupe PAS l'IRC/les points tant qu'on est en plein écran ;
-            // le délai + le flag couvrent aussi le PiP / transitions rapides.
-            let work = DispatchWorkItem {
-                guard !PlayerFullscreen.isActive else { return }   // plein écran → on garde tout actif
-                chat.disconnect()
-                pubsub.disconnect()
-                dropsNotice.stop()
-                if let cid = channelId { Task { await BTTVLive.shared.leave(channelId: cid) } }
-                events.stop()
-                raidService.disconnect()
-                pointsService.stopPolling()
-                // Cache emotes/badges : purge en quittant le live (si l'option est active).
-                ImageCache.shared.purgeIfNeeded()
-                isSetup = false
-            }
-            teardownWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
-        }
+        .onDisappear { scheduleTeardown(after: 0.6) }
     }
+
+    /// Le passage en plein écran (AVPlayerViewController) ou en PiP déclenche
+    /// un onDisappear transitoire : on ne coupe rien tant qu'il dure (le retour
+    /// annule ce démontage, voir onAppear). Mais on attend sa fin au lieu
+    /// d'abandonner — une vue vraiment détruite pendant le PiP (raid suivi)
+    /// gardait IRC, points et minuteries jusqu'à la fermeture de l'app.
+    private func scheduleTeardown(after delay: Double, fullscreenSeen: Bool = false) {
+        let work = DispatchWorkItem {
+            if PlayerFullscreen.isActive { scheduleTeardown(after: 1, fullscreenSeen: true); return }
+            // Plein écran fini : une vue qui revient réapparaît d'abord
+            // (onAppear annule ce démontage) — on lui en laisse le temps.
+            if fullscreenSeen { scheduleTeardown(after: 0.8); return }
+            setupTask?.cancel(); setupTask = nil
+            chat.disconnect()
+            pubsub.disconnect()
+            dropsNotice.stop()
+            if let cid = channelId { Task { await BTTVLive.shared.leave(channelId: cid) } }
+            events.stop()
+            raidService.disconnect()
+            pointsService.stopPolling()
+            // Cache emotes/badges : purge en quittant le live (si l'option est active).
+            ImageCache.shared.purgeIfNeeded()
+            isSetup = false
+        }
+        teardownWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Mise en place toujours voulue : pas démontée entre-temps (tâche annulée).
+    private var setupWanted: Bool { isSetup && !Task.isCancelled }
 
     // MARK: – Setup initial
     private func setupChat() async {
@@ -705,8 +727,9 @@ struct ChatView: View {
         }
         let ready = await finishes(assets, within: 3.5)
         if !ready { logger.warn("CHAT", "Emotes et badges encore en chargement après 3,5 s", "connexion sans les attendre") }
-        // Chat refermé pendant l'attente : pas de connexion orpheline.
-        guard isSetup else { return }
+        // Chat refermé pendant l'attente : pas de connexion orpheline (de même
+        // après chaque attente ci-dessous).
+        guard setupWanted else { return }
         pointsService.autoClaim = store.autoClaimChest
         chat.channelId = channelId
         chat.displayDelay = chatDelay
@@ -719,6 +742,9 @@ struct ChatView: View {
         if let cid = channelId {
             // BTTV en direct : emotes personnelles (Pro), emotes ajoutées en live.
             await BTTVLive.shared.join(channelId: cid)
+            // Démonté pendant l'attente : son départ (leave) est passé avant
+            // l'arrivée — la chaîne n'était jamais quittée.
+            guard setupWanted else { await BTTVLive.shared.leave(channelId: cid); return }
             // Points : on utilise le token de session web (cookie auth-token), pas l'OAuth.
             // Si absent, load() affiche quand même les récompenses et signale needsWebLogin.
             await pointsService.load(
@@ -728,6 +754,7 @@ struct ChatView: View {
                 userLogin:   login,
                 viewerId:    store.twitchUserId
             )
+            guard setupWanted else { pointsService.stopPolling(); return }
         }
 
         // Les services ci-dessous sont conditionnés par les réglages de personnalisation :
@@ -744,6 +771,7 @@ struct ChatView: View {
         if let cid = channelId {
             // Statut de suivi (nécessite le token web pour le champ self.follower)
             if store.showFollowButton { await loadFollow() }
+            guard setupWanted else { pubsub.disconnect(); dropsNotice.stop(); return }
             // Événements live (série de visionnage, sondage, prédiction, hype train)
             if store.showWatchStreak || store.showLiveEvents {
                 events.start(login: channelName, channelId: cid,
@@ -1143,7 +1171,9 @@ struct ChatMessageRow: View {
         for token in message.tokens {
             switch token {
             case .mention(let m):
-                if !me.isEmpty, m.lowercased() == me { return true }
+                // « @pseudo, » : la ponctuation collée restait dans le nom.
+                let w = m.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@.,!?:;"))
+                if (!me.isEmpty && w == me) || words.contains(w) { return true }
             case .text(let t):
                 let w = t.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "@.,!?:;"))
                 if (!me.isEmpty && w == me) || words.contains(w) { return true }

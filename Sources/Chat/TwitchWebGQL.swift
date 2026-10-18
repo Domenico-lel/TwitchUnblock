@@ -27,15 +27,26 @@ final class TwitchWebGQL: NSObject, WKNavigationDelegate {
 
     private var webView: WKWebView?
     private var loadCont: CheckedContinuation<Bool, Never>?
-    private var minting = false
+    /// Génération en cours, partagée par tous les appelants.
+    private var minting: Task<Integrity?, Never>?
 
     struct Integrity { let token: String; let deviceId: String; let expiry: Date }
 
     /// Génère un token Client-Integrity via une WebView éphémère, puis se détruit.
+    /// Une seule génération à la fois : un second appelant (points, drops,
+    /// suivre, pari) attend la même au lieu de recevoir nil — le coffre, le
+    /// pari ou le suivi échouaient pendant les 5 à 20 s de la première.
     func mintIntegrity(token: String) async -> Integrity? {
-        guard !minting else { return nil }   // une seule génération à la fois
-        minting = true
-        defer { minting = false; teardown() }
+        if let running = minting { return await running.value }
+        let task = Task { await self.mintNow(token: token) }
+        minting = task
+        let result = await task.value
+        minting = nil
+        return result
+    }
+
+    private func mintNow(token: String) async -> Integrity? {
+        defer { teardown() }
 
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()   // partage les cookies (auth-token, unique_id)

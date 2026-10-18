@@ -88,7 +88,28 @@ final class ChatService: NSObject, ObservableObject {
         }
     }
 
+    /// Modération arrivée pendant que des messages attendaient le délai de
+    /// synchro (jusqu'à 60 s) : appliquée à leur affichage. Sans elle, un spam
+    /// supprimé 2 s après son envoi s'affichait intact 8 s plus tard.
+    private var deletedIds: [String: Date] = [:]
+    private var bannedUsers: [String: Date] = [:]
+    private var purgedAt: Date? = nil
+
+    /// Retenu au-delà du plus long délai de synchro, puis oublié.
+    private static func rememberModeration(_ store: inout [String: Date], _ key: String) {
+        let now = Date()
+        store = store.filter { now.timeIntervalSince($0.value) < 90 }
+        store[key] = now
+    }
+
     private func insert(_ message: ChatMessage) {
+        var message = message
+        if let purgedAt, message.timestamp <= purgedAt { return }
+        if deletedIds[message.id] != nil
+            || bannedUsers[message.userName].map({ message.timestamp <= $0 }) == true {
+            guard keepDeleted else { return }
+            message.isDeleted = true
+        }
         // La liste est rangée du plus récent au plus ancien. Si le délai de synchro
         // vient de baisser, un message peut arriver après un plus récent : on le
         // replace alors à sa position chronologique au lieu de le coller en haut.
@@ -130,13 +151,15 @@ final class ChatService: NSObject, ObservableObject {
         connectionTimeoutTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             guard let self, !Task.isCancelled, !self.isConnected else { return }
-            logger.warn("CHAT", "Timeout IRC (10 s) — fallback anonyme")
-            self.countFailure("pas de réponse de l'IRC en 10 s")
-            // Oubliée d'abord : reconnectAnonymously annule la tâche du délai,
-            // c'est-à-dire celle-ci — la connexion anonyme partait alors dans
-            // une tâche annulée (envois et lecture interrompus).
+            logger.warn("CHAT", "Timeout IRC (10 s)", "nouvel essai")
+            // Réseau lent ou coupé : nouvel essai avec le même compte. Seul un
+            // refus de Twitch (NOTICE « Login authentication failed ») fait
+            // passer en anonyme — le délai le faisait en silence, et le compte
+            // restait perdu jusqu'à la réouverture du chat.
             self.connectionTimeoutTask = nil
-            await self.reconnectAnonymously()
+            self.webSocketTask?.cancel(with: .goingAway, reason: nil)
+            self.webSocketTask = nil
+            self.scheduleReconnect(gen: self.generation, reason: "pas de réponse de l'IRC en 10 s")
         }
 
         Task {
@@ -247,6 +270,7 @@ final class ChatService: NSObject, ObservableObject {
     // MARK: – Disconnect
     func disconnect() {
         generation &+= 1   // abandonne les messages encore en attente de synchro
+        deletedIds = [:]; bannedUsers = [:]; purgedAt = nil
         reconnectTask?.cancel(); reconnectTask = nil
         presentUsers.removeAll()
         presenceSupported = false
@@ -389,11 +413,9 @@ final class ChatService: NSObject, ObservableObject {
         countFailure(reason)
         let delay = reconnectDelay
         reconnectDelay = min(reconnectDelay * 2, 30)
-        // Plusieurs échecs d'affilée (jeton refusé par l'IRC, par ex.) : on
-        // repasse en lecture anonyme plutôt que de réessayer sans fin. Déjà en
-        // lecture seule, on est anonyme : le compte est gardé, c'est lui qui
-        // retrouve la mémoire de séance (et le bandeau) à la reconnexion.
-        if delay >= 8, !readOnly { lastToken = nil; lastLogin = nil }
+        // Le compte est toujours gardé : une coupure de quelques secondes
+        // (ascenseur, passage Wi-Fi/4G) le faisait oublier au troisième échec,
+        // et le chat restait anonyme. Un vrai refus passe par le NOTICE.
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -658,8 +680,12 @@ final class ChatService: NSObject, ObservableObject {
             || text.lowercased().contains("login authentication failed") {
             logger.warn("CHAT", "Auth IRC rejetée", "Passage en mode anonyme")
             isAuthenticated = false
-            await reconnectAnonymously()
-            insertSystemMessage("Reconnecté en lecture seule. Reconnecte-toi via Paramètres.")
+            // Dit d'abord, dans la langue de l'app : la reconnexion anonyme ne
+            // rend la main qu'à sa fermeture (elle lit sa connexion), le
+            // message n'arrivait qu'à la fin. Lancée à part, sans l'attendre :
+            // la boucle de lecture d'ici s'arrête (connexion remplacée).
+            insertSystemMessage(translate("chat_auth_failed", lang))
+            Task { [weak self] in await self?.reconnectAnonymously() }
             return
         }
 
@@ -793,8 +819,10 @@ final class ChatService: NSObject, ObservableObject {
     // MARK: – Moderation
     private func handleClearChat(_ irc: IRCMessage) async {
         if let target = irc.params.last, !target.hasPrefix("#") {
-            // Exclusion / bannissement : tous les messages de la personne.
+            // Exclusion / bannissement : tous les messages de la personne
+            // (ceux encore retenus par le délai de synchro compris).
             mark(where: { $0.userName == target })
+            Self.rememberModeration(&bannedUsers, target)
             // Nous visés, avec le compte (en lecture seule `localLogin` est
             // vide : les exclusions des autres ne nous concernent pas).
             guard target.lowercased() == localLogin, !localLogin.isEmpty,
@@ -812,6 +840,7 @@ final class ChatService: NSObject, ObservableObject {
             // Purge complète du canal : même avec le réglage, garder l'écran
             // barré de bout en bout n'aurait aucun intérêt.
             messages.removeAll()
+            purgedAt = Date()
             logger.warn("CHAT", "Chat effacé par un modérateur")
         }
     }
@@ -834,6 +863,7 @@ final class ChatService: NSObject, ObservableObject {
     private func handleClearMsg(_ irc: IRCMessage) async {
         guard let targetId = irc.tags["target-msg-id"] else { return }
         mark(where: { $0.id == targetId })
+        Self.rememberModeration(&deletedIds, targetId)
     }
 
     /// Retire les messages visés, ou les barre si le réglage le demande.

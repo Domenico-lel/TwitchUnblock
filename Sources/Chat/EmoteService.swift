@@ -55,11 +55,29 @@ actor EmoteService {
     func loadChannel(channelId: String, channelName: String) async {
         guard !loadedChannels.contains(channelId) else { return }
         loadedChannels.insert(channelId)
+        await loadChannelSources(channelId: channelId, channelName: channelName, onlyMissing: false)
+        // Un service sans réponse (coupure, erreur 5xx) : nouvel essai 30 s plus
+        // tard, une seule fois — « catJAM » restait en texte jusqu'au
+        // redémarrage. Une chaîne sans compte FFZ ou 7TV ne répond pas non
+        // plus : un essai de plus, pas une boucle.
+        if channelBTTV[channelId] == nil || channelFFZ[channelId] == nil || channel7TV[channelId] == nil {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                await self?.loadChannelSources(channelId: channelId, channelName: channelName, onlyMissing: true)
+            }
+        }
+    }
+
+    private func loadChannelSources(channelId: String, channelName: String, onlyMissing: Bool) async {
+        let bttv = !onlyMissing || channelBTTV[channelId] == nil
+        let ffz  = !onlyMissing || channelFFZ[channelId] == nil
+        let stv  = !onlyMissing || channel7TV[channelId] == nil
+        guard bttv || ffz || stv else { return }
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.loadBTTVChannel(channelId: channelId, channelName: channelName) }
+            if bttv { group.addTask { await self.loadBTTVChannel(channelId: channelId, channelName: channelName) } }
             // FFZ reçoit maintenant les deux : channelId pour stocker, channelName pour l'API
-            group.addTask { await self.loadFFZChannel(channelId: channelId, channelName: channelName) }
-            group.addTask { await self.load7TVChannel(channelId: channelId) }
+            if ffz { group.addTask { await self.loadFFZChannel(channelId: channelId, channelName: channelName) } }
+            if stv { group.addTask { await self.load7TVChannel(channelId: channelId) } }
         }
         // Auteur des emotes BTTV de la chaîne : le login passé en repli
         // (« trymacs ») devient le nom affiché, comme pour les emotes partagées.

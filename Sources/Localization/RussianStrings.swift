@@ -777,6 +777,7 @@ let kRussianStrings: [String: String] = [
     "chat_ban_retry": "Повторить с моим аккаунтом",
     "chat_system": "Система",
     "chat_timed_out": "Вас отстранили от этого чата на {d}.",
+    "chat_auth_failed": "Twitch отклонил ваш аккаунт в чате: только чтение. Снова войдите в Twitch в Настройках.",
     "adm_empty": "Нет обращений с этим статусом.",
     "adm_them": "Пользователь",
     "adm_reply_ph": "Ответить (пользователь увидит)…",

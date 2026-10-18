@@ -42,6 +42,9 @@ struct MyFeedback: Codable, Identifiable, Hashable {
     /// n'est attendu, il n'est plus relu tout seul. Une réponse de la
     /// personne le remet au suivi (dernier mot à elle).
     var closed: Bool { (status == "done" || status == "refused") && lastFrom == "a" }
+    /// Terminé depuis moins de 30 jours : relu une fois par jour, le Worker y
+    /// ajoute « le correctif est en ligne » à la sortie du correctif.
+    var recentlyClosed: Bool { closed && updatedAt > (Date().timeIntervalSince1970 - 30 * 86_400) * 1000 }
     var messages: [FeedbackMessage] { thread ?? [FeedbackMessage(f: "u", m: text, at: at)] }
 }
 
@@ -84,10 +87,12 @@ final class FeedbackStore: ObservableObject {
         }
         // Des retours encore suivis : iOS réveille aussi l'app pour leurs
         // réponses (LiveNotifier), même sans les notifications de live. Tous
-        // terminés : plus de réveil pour eux.
-        UserDefaults.standard.set(reports.contains { !$0.closed }, forKey: Self.hasReportsKey)
+        // terminés depuis plus de 30 jours : plus de réveil pour eux.
+        UserDefaults.standard.set(reports.contains { !$0.closed || $0.recentlyClosed }, forKey: Self.hasReportsKey)
     }
     nonisolated static let hasReportsKey = "fb_has_reports"
+    /// Dernière relecture des retours terminés (une par jour au plus).
+    private static let closedCheckKey = "fb_closed_checked"
 
     func add(id: String, token: String, kind: String, text: String) {
         let now = Date().timeIntervalSince1970 * 1000
@@ -115,13 +120,23 @@ final class FeedbackStore: ObservableObject {
     /// relu, sauf s'il est dans `including` (discussion qu'on ouvre, liste
     /// tirée pour rafraîchir). Un retour effacé ou expiré quitte la liste.
     func refresh(force: Bool = false, minInterval: TimeInterval = 180, including: Set<String> = []) async {
-        let followed = reports.filter { !$0.closed || including.contains($0.id) }
+        // Terminés depuis moins de 30 jours : relus une fois par jour, pour le
+        // « correctif en ligne » que le Worker ajoute à la sortie (il n'arrivait
+        // jamais : un retour terminé n'était plus relu).
+        let now = Date().timeIntervalSince1970
+        let closedDue = now - UserDefaults.standard.double(forKey: Self.closedCheckKey) > 86_400
+        let followed = reports.filter {
+            !$0.closed || including.contains($0.id) || (closedDue && $0.recentlyClosed)
+        }
         guard !followed.isEmpty, force || Date().timeIntervalSince(checkedAt) > minInterval else { return }
         checkedAt = Date()
         let items = followed.map { ["id": $0.id, "token": $0.token] }
         guard let data = await post("/api/feedback/thread", ["items": items]),
               let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
         else { return }
+        if closedDue, followed.contains(where: { $0.recentlyClosed }) {
+            UserDefaults.standard.set(now, forKey: Self.closedCheckKey)
+        }
         let byId = Dictionary(states.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let before = Dictionary(reports.map { ($0.id, $0.updatedAt) }, uniquingKeysWith: { a, _ in a })
         reports = reports.compactMap { r in

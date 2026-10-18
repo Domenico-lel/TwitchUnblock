@@ -585,6 +585,10 @@ struct MainTabView: View {
         // relu tout de suite, avec la nouvelle session ou le jeton anonyme,
         // sans bouger le lecteur (réduit, chat seul).
         .onChange(of: store.twitchWebToken) { _ in
+            // Drops : la pulsation repart avec la nouvelle session.
+            if case .live(let channel)? = playerMode, dvrSourceChannel == nil, !closingPlayer {
+                startDropsHeartbeat(channel: channel)
+            }
             guard case .live(let channel)? = playerMode, dvrSourceChannel == nil,
                   liveSourceUsed == "account", !closingPlayer else { return }
             logger.info("LECTEUR", "Session web changée : direct relu", channel)
@@ -592,6 +596,12 @@ struct MainTabView: View {
             playLive(channel, soft: true)
             playerVisible = visible
             chatOnly = onlyChat
+        }
+        // Progression des drops activée pendant un direct : elle démarre.
+        .onChange(of: store.dropsProgress) { on in
+            guard on, case .live(let channel)? = playerMode, dvrSourceChannel == nil,
+                  !closingPlayer else { return }
+            startDropsHeartbeat(channel: channel)
         }
         // Minuteur de veille écoulé → on coupe la lecture.
         .onChange(of: sleepTimer.fireCount) { _ in
@@ -1800,10 +1810,16 @@ struct MainTabView: View {
         // Direct lu par le compte : c'est déjà le cas, une seconde session du
         // compte ne servirait à rien ; la pulsation garde alors seulement
         // l'état de la page Drops et la réclamation automatique.
-        if store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty {
-            DropsHeartbeat.shared.start(login: channel, token: web,
-                                        pollSegments: liveSourceUsed != "account")
-        }
+        startDropsHeartbeat(channel: channel)
+    }
+
+    /// Progression des drops pour le direct en cours. Appelée aussi quand on
+    /// l'active ou qu'on connecte la session web pendant le direct : rien ne
+    /// progressait avant de rouvrir le live.
+    private func startDropsHeartbeat(channel: String) {
+        guard store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty else { return }
+        DropsHeartbeat.shared.start(login: channel, token: web,
+                                    pollSegments: liveSourceUsed != "account")
     }
 
     private func stopLiveTimers() {

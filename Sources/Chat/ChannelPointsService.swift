@@ -50,6 +50,8 @@ final class ChannelPointsService: ObservableObject {
     // MARK: – Anti-spam claim
     /// Coffres dont le claim a échoué → on ne réessaie pas en boucle (évite le spam).
     private var failedClaims: Set<String> = []
+    /// Échecs passagers par coffre (voir claimBonus).
+    private var claimAttempts: [String: Int] = [:]
 
     // MARK: – Client-Integrity (token minté via WebView éphémère, réutilisé ~1h en natif)
     private var integrityTok:    String? = nil
@@ -104,8 +106,10 @@ final class ChannelPointsService: ObservableObject {
         let b = await fetchBalance()
         let elapsed = String(format: "%.0f ms", Date().timeIntervalSince(start) * 1000)
 
-        balance        = b.balance
-        pendingClaimId = b.claimId
+        if let b {
+            balance        = b.balance
+            pendingClaimId = b.claimId
+        }
 
         logger.success("POINTS", "Chargement terminé (\(elapsed))",
                        "\(formatted(balance)) pts · \(rewards.count) récompenses"
@@ -153,7 +157,7 @@ final class ChannelPointsService: ObservableObject {
     // MARK: – Refresh balance (60s)
     private func refreshBalance() async {
         // Polling silencieux : on ne logge que les vrais changements (gains/pertes/coffre).
-        let b = await fetchBalance(quiet: true)
+        guard let b = await fetchBalance(quiet: true) else { return }
         let delta = b.balance - balance
         if delta > 0 {
             logger.success("POINTS", "Points passifs gagnés",
@@ -176,7 +180,12 @@ final class ChannelPointsService: ObservableObject {
 
     // MARK: – Check bonus (10s)
     private func checkForBonus() async {
-        guard pendingClaimId == nil else { return }
+        // Coffre resté affiché après un échec passager : nouvel essai ici
+        // (réclamation automatique), au plus 4 en tout pour ce coffre.
+        if let pending = pendingClaimId {
+            if autoClaim, claimAttempts[pending] != nil { await claimBonus() }
+            return
+        }
         let query = """
         { channel(name: "\(gqlStr(channelLogin))") {
             self { communityPoints { availableClaim { id } } }
@@ -328,9 +337,14 @@ final class ChannelPointsService: ObservableObject {
               let data  = json["data"]                  as? [String: Any],
               let claim = data["claimCommunityPoints"]  as? [String: Any]
         else {
-            // Échec → on mémorise pour ne pas spammer ce coffre.
-            logger.error("POINTS", "Claim coffre échoué", nil)
-            failedClaims.insert(claimId); pendingClaimId = nil; return
+            // Échec passager (jeton, réseau, réponse inattendue) : le coffre
+            // reste affiché et réclamable ; il était perdu pour la séance au
+            // premier raté. Abandon au 4e essai.
+            let n = (claimAttempts[claimId] ?? 0) + 1
+            claimAttempts[claimId] = n
+            logger.error("POINTS", "Claim coffre échoué", "essai \(n)/4")
+            if n >= 4 { failedClaims.insert(claimId); pendingClaimId = nil }
+            return
         }
 
         if let err = claim["error"] as? [String: Any], let code = err["code"] as? String {
@@ -454,7 +468,10 @@ final class ChannelPointsService: ObservableObject {
     }
 
     // MARK: – Fetch balance (AVEC auth OAuth)
-    private func fetchBalance(quiet: Bool = false) async -> (balance: Int, claimId: String?) {
+    /// nil : Twitch n'a pas répondu (réseau, jeton) — l'appelant garde le solde
+    /// affiché. Un échec rendait 0 : le solde tombait à 0, puis le sondage
+    /// suivant affichait « +12000 » (tout le solde) comme un gain.
+    private func fetchBalance(quiet: Bool = false) async -> (balance: Int, claimId: String?)? {
         if !quiet { logger.debug("POINTS", "fetchBalance → channel(name:\(channelLogin)).self", nil) }
         let query = """
         { channel(name: "\(gqlStr(channelLogin))") {
@@ -467,7 +484,7 @@ final class ChannelPointsService: ObservableObject {
               let selfObj = channel["self"]                                 as? [String: Any]
         else {
             logger.warn("POINTS", "fetchBalance : parsing échoué", nil)
-            return (0, nil)
+            return nil
         }
         guard let pts = selfObj["communityPoints"] as? [String: Any] else {
             logger.info("POINTS", "communityPoints null — premier visionnage ou token incompatible",
