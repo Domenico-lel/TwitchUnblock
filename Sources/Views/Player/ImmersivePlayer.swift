@@ -985,6 +985,12 @@ struct ImmersivePlayer: View {
     @StateObject private var model: ImmersivePlayerModel
     @State private var showControls = true
     @State private var hideTask: Task<Void, Never>? = nil
+    /// Touchers sur l'image (voir `tap`) : le précédent, l'état des commandes
+    /// avant lui, et une série de doubles-tapes en cours.
+    @State private var lastTapAt = Date.distantPast
+    @State private var lastTapZone: TapZone? = nil
+    @State private var controlsBeforeTap = true
+    @State private var tapStreak = false
     @State private var dragging  = false
     @State private var dragValue: Double = 0
     /// Bornes gelées le temps d'un glissement. En direct, `endTime` et la durée
@@ -1190,13 +1196,11 @@ struct ImmersivePlayer: View {
             // ramène au bord après une pause ou un retard.
             if !isLive {
                 HStack(spacing: 0) {
-                    seekZone(seconds: -10, label: "−10 s")
-                    seekZone(seconds:  10, label: "+10 s")
+                    tapZone(.back)
+                    tapZone(.forward)
                 }
             } else if isLandscape {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { toggleChatVisibility() }
+                tapZone(.chat)
             }
 
             if let flash = seekFlash {
@@ -1243,7 +1247,7 @@ struct ImmersivePlayer: View {
         // « remplir l'écran » vient de demander. AVPlayerLayer borne déjà son
         // image à ses propres limites, y compris en `resizeAspectFill`.
         .contentShape(Rectangle())
-        .onTapGesture { toggleControls() }
+        .onTapGesture { tap(.plain) }
         // Zoom à deux doigts, comme sur l'app Twitch ; une fois agrandie,
         // l'image se déplace au doigt. À taille normale, glisser vers le bas
         // réduit le lecteur, comme la flèche en haut à gauche.
@@ -1925,38 +1929,60 @@ struct ImmersivePlayer: View {
         .transition(.opacity)
     }
 
-    /// Touchers du voile des commandes. Le double-tap passe avant le simple,
-    /// qui attend donc de savoir : ±10 s en VOD, chat affiché ou masqué en
-    /// paysage pendant un direct ; un simple toucher masque les commandes.
+    /// Touchers du voile des commandes : mêmes zones que sur l'image (±10 s en
+    /// VOD, chat en paysage pendant un direct), voir `tap`.
     @ViewBuilder private var controlsTapLayer: some View {
         if !isLive {
             HStack(spacing: 0) {
-                controlsTapZone(seconds: -10)
-                controlsTapZone(seconds: 10)
+                tapZone(.back)
+                tapZone(.forward)
             }
-        } else if isLandscape {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { toggleChatVisibility(); scheduleAutoHide() }
-                .onTapGesture { toggleControls() }
         } else {
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { toggleControls() }
+            tapZone(isLandscape ? .chat : .plain)
         }
     }
 
-    /// Moitié du voile : double-tap ±10 s (les commandes restent affichées),
-    /// simple toucher pour les masquer.
-    private func controlsTapZone(seconds: Double) -> some View {
+    /// Ce qu'un double-tap fait à cet endroit de l'image.
+    private enum TapZone { case back, forward, chat, plain }
+
+    private func tapZone(_ zone: TapZone) -> some View {
         Color.clear
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                model.seekBy(seconds)
-                accumulateSeek(seconds)
-                scheduleAutoHide()
-            }
-            .onTapGesture { toggleControls() }
+            .onTapGesture { tap(zone) }
+    }
+
+    /// Un toucher agit aussitôt (commandes affichées ou masquées). Avec un
+    /// double-tap reconnu par SwiftUI, chaque simple toucher attendait de
+    /// savoir si un second suivait : en paysage pendant un direct et en VOD,
+    /// les commandes mettaient près d'une seconde à répondre. Le double-tap se
+    /// déduit donc de l'écart : un second toucher au même endroit dans les
+    /// 0,3 s remet les commandes comme avant le premier et fait son action
+    /// (±10 s, chat) ; en VOD les suivants l'enchaînent (+20 s, +30 s…).
+    private func tap(_ zone: TapZone) {
+        let now = Date()
+        let quick = zone != .plain && zone == lastTapZone && now.timeIntervalSince(lastTapAt) < 0.3
+        lastTapAt = now
+        lastTapZone = zone
+        guard quick else {
+            tapStreak = false
+            controlsBeforeTap = showControls
+            toggleControls()
+            return
+        }
+        if !tapStreak {
+            tapStreak = true
+            if showControls != controlsBeforeTap { toggleControls() }
+        }
+        switch zone {
+        case .back:    model.seekBy(-10); accumulateSeek(-10)
+        case .forward: model.seekBy(10); accumulateSeek(10)
+        case .chat:
+            toggleChatVisibility()
+            // Une bascule par double-tap : le toucher suivant repart de zéro.
+            lastTapAt = .distantPast
+        case .plain:   break
+        }
+        if showControls { scheduleAutoHide() }
     }
 
     /// Direct en paysage : chat affiché ou masqué, et le nouvel état annoncé.
@@ -2107,17 +2133,6 @@ struct ImmersivePlayer: View {
         let s = Int(max(0, seconds).rounded())
         guard s >= 15 else { return "" }
         return s >= 60 ? " · −\(s / 60):\(String(format: "%02d", s % 60))" : " · −\(s) s"
-    }
-
-    /// Moitié d'écran qui recule ou avance de 10 s au double-tap.
-    @ViewBuilder
-    private func seekZone(seconds: Double, label: String) -> some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                model.seekBy(seconds)
-                accumulateSeek(seconds)
-            }
     }
 
     /// Additionne les sauts tant qu'ils s'enchaînent. Un saut dans l'autre sens
