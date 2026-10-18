@@ -442,26 +442,21 @@ no key to paste. The backend is already hosted and shared by every install.
 
 TwitchUnblock isn't on the App Store, so it has to be sideloaded.
 
-### AltStore / SideStore / Feather (recommended)
+<h3 align="center">
+<a href="https://altdirect.app/?url=https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json" target="_blank"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" alt="Add AltSource" width="200"></a>
+&nbsp;
+<a href="https://github.com/MXFia19/TwitchUnblock/releases/latest/download/TwitchUnblock.ipa" target="_blank"><img src="https://altdirect.app/assets/png/Download_Blue.png" alt="Download .ipa" width="200"></a>
+</h3>
 
-Automatic nightly builds, straight from your sideloader:
+**Add AltSource** opens the source in AltStore, SideStore, Feather, LiveContainer,
+StikStore or TrollApps (automatic nightly builds): install **TwitchUnblock** from
+it. It also lists **TU Test**, the test builds (newest features, may be
+unstable), installed next to the normal app. **Download .ipa** gets the latest
+build, for Sideloadly or TrollStore. Source address, to add it by hand:
 
-1. Open AltStore, SideStore or Feather.
-2. Go to **Sources**.
-3. Add:
-   ```
-   https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
-   ```
-4. Install **TwitchUnblock** from there.
-
-The same source also lists **TU Test**, the test builds (newest features,
-may be unstable), installed next to the normal app.
-
-### Manual
-
-Download the latest `TwitchUnblock.ipa` from the
-[Releases](https://github.com/MXFia19/TwitchUnblock/releases) page and install it
-with Sideloadly, AltStore, or TrollStore if your device supports it.
+```
+https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
+```
 
 ---
 
