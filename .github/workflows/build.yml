@@ -310,10 +310,12 @@ jobs:
           git add "$SOURCE"
           if ! git diff --cached --quiet; then
             git commit -m "chore: bump version to ${{ steps.vars.outputs.version }} [skip ci]"
-            # Le push peut être rejeté si la branche a bougé pendant le build :
-            # on rejoue par-dessus au lieu d'échouer sur une course bénigne.
+            # Le push peut être rejeté si la branche a bougé pendant le build
+            # (source de l'Apple TV poussée entre-temps…) : on rejoue par-dessus
+            # au lieu d'échouer sur une course bénigne. --autostash : Info.plist
+            # et le projet généré sont modifiés ici, et bloquaient la reprise.
             git push origin HEAD:$BRANCH || {
-              git pull --rebase origin $BRANCH && git push origin HEAD:$BRANCH
+              git pull --rebase --autostash origin $BRANCH && git push origin HEAD:$BRANCH
             }
           fi
 
