@@ -94,10 +94,17 @@ final class AdminFeedbackService: ObservableObject {
             threads = [:]
             return
         }
-        guard let data = await request("GET", "/api/admin/me"),
-              let me = try? JSONDecoder().decode(Me.self, from: data) else { return }
+        let data = await request("GET", "/api/admin/me")
+        // Compte changé (ou déconnecté) pendant la question : la réponse ne
+        // le concerne plus — « Gérer les retours » réapparaissait après la
+        // déconnexion.
+        guard self.token == token else { return }
+        guard let data, let me = try? JSONDecoder().decode(Me.self, from: data) else {
+            isAdmin = false
+            return
+        }
         isAdmin = me.admin
-        if me.admin { await load() }
+        if me.admin { await load() } else { items = []; threads = [:] }
     }
 
     func load() async {

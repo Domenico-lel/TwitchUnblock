@@ -35,13 +35,25 @@ final class AppLogger: ObservableObject {
     private var counter = 0
     private let maxLogs = 500
 
+    /// Un formateur par format (12 h, 24 h), gardé : en créer un à chaque ligne
+    /// coûtait cher. Locale POSIX : iOS ne réécrit plus le format fixe selon
+    /// la région (« 3:04:05 PM.123 »).
+    private static let stampFormatters: [Bool: DateFormatter] = {
+        var out: [Bool: DateFormatter] = [:]
+        for twelve in [false, true] {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = ClockFormat.pattern(seconds: true, twelve: twelve)
+            out[twelve] = f
+        }
+        return out
+    }()
+
     // ─── Core add ───────────────────────────────────────────────
     private func add(_ level: LogLevel, _ category: String, _ message: String, _ detail: String? = nil) {
         let now = Date()
-        let formatter = DateFormatter()
         // 12 h ou 24 h selon le réglage (millièmes compris).
-        formatter.dateFormat = ClockFormat.pattern(seconds: true)
-        let timestamp = formatter.string(from: now)
+        let timestamp = Self.stampFormatters[ClockFormat.uses12h()]?.string(from: now) ?? ""
         // Identifiant attribué sur le fil principal : incrémenté depuis
         // plusieurs fils, le compteur pouvait donner deux fois le même id.
         DispatchQueue.main.async {
@@ -53,9 +65,11 @@ final class AppLogger: ObservableObject {
                 self.logs = Array(self.logs.prefix(self.maxLogs))
             }
         }
+        #if DEBUG
         let icons = ["info": "ℹ️", "success": "✅", "warn": "⚠️", "error": "❌", "debug": "🔍"]
         let icon = icons[level.rawValue] ?? "•"
         print("\(icon) [\(category)] \(message)\(detail.map { " → \($0)" } ?? "")")
+        #endif
     }
 
     func info   (_ c: String, _ m: String, _ d: String? = nil) { add(.info,    c, m, d) }

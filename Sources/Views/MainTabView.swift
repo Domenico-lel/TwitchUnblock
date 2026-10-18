@@ -465,13 +465,20 @@ struct MainTabView: View {
                     icon: "arrow.down.circle.fill",
                     title: store.t("update_title"),
                     message: store.t(up.changes.isEmpty ? "update_msg_short" : "update_whats_new"),
-                    detail: "\(UpdateChecker.installedVersion)  →  \(up.version)",
+                    // Même version (builds de test) : le numéro de build les distingue.
+                    detail: UpdateChecker.installedVersion == up.version
+                        ? "\(up.version) (\(UpdateChecker.installedBuild))  →  \(up.version) (\(up.build))"
+                        : "\(UpdateChecker.installedVersion)  →  \(up.version)",
                     primary: store.t("update_open"),
                     secondary: store.t("later"),
                     onPrimary: { withAnimation(.spring(response: 0.3)) { updater.dismiss() }; UpdateChecker.openSource() },
                     onSecondary: { withAnimation(.spring(response: 0.3)) { updater.dismiss() } },
                     // Nouveautés de chaque build manquant, du plus récent au plus ancien.
-                    sections: up.changes.map { .init(title: $0.version, items: $0.items) })
+                    sections: up.changes.map { c -> TPromptCard.PromptSection in
+                        let twin = up.changes.contains { $0.version == c.version && $0.build != c.build }
+                        return TPromptCard.PromptSection(title: twin ? "\(c.version) (build \(c.build))" : c.version,
+                                                         items: c.items, key: "\(c.build)")
+                    })
                 .zIndex(10)
             } else if onboardingDone, showDiscordPrompt {
                 TPromptCard(

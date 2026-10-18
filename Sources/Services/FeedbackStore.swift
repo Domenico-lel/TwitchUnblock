@@ -35,9 +35,23 @@ struct MyFeedback: Codable, Identifiable, Hashable {
     var lastFrom: String = "u"
     var seen: Double
     var thread: [FeedbackMessage]? = nil
+    /// Worker qui a reçu le retour (absent pour ceux d'avant) : la discussion
+    /// s'y relit, même après être passé par un Worker personnel — qui
+    /// répondait « effacé » pour ceux de l'officiel, et l'app les oubliait.
+    var base: String? = nil
 
-    /// Réponse (ou nouvel état) du développeur pas encore lue.
+    /// Réponse (ou nouvel état) du développeur pas encore lue. `seen` est
+    /// une date du serveur (celle du dernier état vu) : l'horloge de
+    /// l'appareil, souvent décalée en sideload, faisait manquer des réponses
+    /// ou laissait une pastille rouge pour toujours.
     var unread: Bool { lastFrom == "a" && updatedAt > seen }
+    /// Worker à interroger pour ce retour.
+    var origin: String { base ?? APIConfig.base }
+    /// « Effacé » fait foi : réponse de son propre Worker, ou d'un retour
+    /// d'avant sans Worker personnel (tout partait alors à l'officiel).
+    func goneIsReliable(from queried: String) -> Bool {
+        base.map { $0 == queried } ?? (APIConfig.custom == nil)
+    }
     /// Terminé (fait ou refusé), dernier mot au développeur : plus rien
     /// n'est attendu, il n'est plus relu tout seul. Une réponse de la
     /// personne le remet au suivi (dernier mot à elle).
@@ -69,6 +83,9 @@ final class FeedbackStore: ObservableObject {
 
     private let key = "my_feedback"
     private var checkedAt = Date.distantPast
+    /// Dernière réponse envoyée d'ici, par retour : une relecture partie
+    /// avant ne l'écrase pas.
+    private var localEdits: [String: Date] = [:]
     /// « Mes signalements » à l'écran (liste ou discussion) : la réponse s'y
     /// voit déjà, pas de bandeau par-dessus.
     var inboxViewers = 0
@@ -94,22 +111,25 @@ final class FeedbackStore: ObservableObject {
     /// Dernière relecture des retours terminés (une par jour au plus).
     private static let closedCheckKey = "fb_closed_checked"
 
-    func add(id: String, token: String, kind: String, text: String) {
+    /// `base` : le Worker qui vient de recevoir le retour.
+    func add(id: String, token: String, kind: String, text: String, base: String = APIConfig.base) {
         let now = Date().timeIntervalSince1970 * 1000
+        // `seen` à 0 : rien du développeur n'est encore arrivé (dernier mot
+        // à la personne), et la date du serveur prendra le relais.
         reports.insert(MyFeedback(id: id, token: token, at: now, kind: kind,
-                                  text: String(text.prefix(200)), updatedAt: now, seen: now), at: 0)
+                                  text: String(text.prefix(200)), updatedAt: now, seen: 0, base: base), at: 0)
         save()
     }
 
     func markSeen(_ id: String) {
         guard let i = reports.firstIndex(where: { $0.id == id }) else { return }
-        reports[i].seen = Date().timeIntervalSince1970 * 1000
+        reports[i].seen = reports[i].updatedAt
         save()
     }
 
     /// Adresse d'une photo de la discussion (le jeton du retour en donne l'accès).
     func photoURL(_ r: MyFeedback, _ n: Int) -> URL? {
-        var c = URLComponents(string: "\(APIConfig.base)/api/feedback/photo")
+        var c = URLComponents(string: "\(r.origin)/api/feedback/photo")
         c?.queryItems = [.init(name: "id", value: r.id), .init(name: "n", value: String(n)),
                          .init(name: "token", value: r.token)]
         return c?.url
@@ -130,18 +150,39 @@ final class FeedbackStore: ObservableObject {
         }
         guard !followed.isEmpty, force || Date().timeIntervalSince(checkedAt) > minInterval else { return }
         checkedAt = Date()
-        let items = followed.map { ["id": $0.id, "token": $0.token] }
-        guard let data = await post("/api/feedback/thread", ["items": items]),
-              let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
-        else { return }
+        let started = Date()
+        // Chacun à son Worker d'origine, par paquets de 30 : le Worker n'en
+        // relit pas plus par appel (au-delà, les plus anciens restaient figés).
+        var byId: [String: FeedbackState] = [:]
+        var reliablyGone: Set<String> = []
+        var reached = false
+        for (base, list) in Dictionary(grouping: followed, by: \.origin) {
+            for start in stride(from: 0, to: list.count, by: 30) {
+                let chunk = Array(list[start ..< min(start + 30, list.count)])
+                let items = chunk.map { ["id": $0.id, "token": $0.token] }
+                guard let data = await post("/api/feedback/thread", ["items": items], base: base),
+                      let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
+                else { continue }
+                reached = true
+                for st in states {
+                    byId[st.id] = st
+                    if st.gone == true, chunk.first(where: { $0.id == st.id })?.goneIsReliable(from: base) == true {
+                        reliablyGone.insert(st.id)
+                    }
+                }
+            }
+        }
+        guard reached else { return }
         if closedDue, followed.contains(where: { $0.recentlyClosed }) {
             UserDefaults.standard.set(now, forKey: Self.closedCheckKey)
         }
-        let byId = Dictionary(states.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let before = Dictionary(reports.map { ($0.id, $0.updatedAt) }, uniquingKeysWith: { a, _ in a })
         reports = reports.compactMap { r in
             guard let st = byId[r.id] else { return r }
-            if st.gone == true { return nil }
+            if st.gone == true { return reliablyGone.contains(r.id) ? nil : r }
+            // Réponse envoyée pendant la relecture : l'état lu est plus ancien
+            // (le message disparaissait jusqu'à la relecture suivante).
+            if let edited = localEdits[r.id], edited > started { return r }
             return apply(st, to: r)
         }
         save()
@@ -208,17 +249,18 @@ final class FeedbackStore: ObservableObject {
         guard let r = reports.first(where: { $0.id == id }) else { return false }
         let body: [String: Any] = ["id": r.id, "token": r.token, "message": message,
                                    "photos": photos.map { $0.base64EncodedString() }]
-        guard let data = await post("/api/feedback/reply", body),
+        guard let data = await post("/api/feedback/reply", body, base: r.origin),
               let item = try? JSONDecoder().decode(ReplyResponse.self, from: data).item,
               let i = reports.firstIndex(where: { $0.id == id }) else { return false }
         reports[i] = apply(item, to: reports[i])
-        reports[i].seen = Date().timeIntervalSince1970 * 1000
+        reports[i].seen = reports[i].updatedAt
+        localEdits[id] = Date()
         save()
         return true
     }
 
-    private func post(_ path: String, _ body: [String: Any]) async -> Data? {
-        guard let url = URL(string: APIConfig.base + path),
+    private func post(_ path: String, _ body: [String: Any], base: String = APIConfig.base) async -> Data? {
+        guard let url = URL(string: base + path),
               let payload = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

@@ -5,6 +5,15 @@
     <!-- ── App ───────────────────────────────────────────────── -->
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
+    <!-- Langues de l'app : sans elles, les éléments du système (Annuler,
+         Copier, partage, lecteur vidéo…) restaient en anglais. -->
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>fr</string>
+        <string>es</string>
+        <string>ru</string>
+    </array>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -69,9 +78,9 @@
 
     <!-- ── Privacy ───────────────────────────────────────────── -->
     <key>NSCameraUsageDescription</key>
-    <string>Cette app n'utilise pas la caméra.</string>
+    <string>This app doesn't use the camera.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Cette app n'utilise pas le microphone.</string>
+    <string>This app doesn't use the microphone.</string>
 
     <!-- ── ATS : HTTPS partout, sauf pour la lecture vidéo (AVPlayer) ── -->
     <key>NSAppTransportSecurity</key>

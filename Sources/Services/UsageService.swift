@@ -135,12 +135,32 @@ final class UsageService: ObservableObject {
 
     // MARK: – Ping
     /// Signale l'installation au Worker. Sans effet si le comptage est coupé.
+    /// Comptage coupé : un effacement resté en attente est retenté. Un ping en
+    /// cours est attendu au lieu d'en envoyer un second (lancement et retour
+    /// au premier plan le doublaient : lectures et actifs comptés deux fois).
     func ping(enabled: Bool, force: Bool = false) async {
-        guard enabled else { return }
+        guard enabled else { await retryForget(); return }
+        UserDefaults.standard.removeObject(forKey: forgetPendingKey)
+        if let running = inFlight { await running.value; return }
+        let task = Task { await self.sendPing(force: force) }
+        inFlight = task
+        await task.value
+        inFlight = nil
+    }
+
+    private var inFlight: Task<Void, Never>? = nil
+    /// Worker du dernier ping accepté : l'effacement y part aussi (après
+    /// « Tout par mon Worker », il n'allait qu'au nouveau).
+    private let pingBaseKey = "usage_ping_base"
+    /// Effacements pas encore confirmés (hors ligne, 429…) : retentés.
+    private let forgetPendingKey = "usage_forget_pending"
+
+    private func sendPing(force: Bool) async {
         if !force, let last = lastPing, Date().timeIntervalSince(last) < pingInterval {
             return
         }
-        guard let url = URL(string: "\(APIConfig.base)/api/ping") else { return }
+        let base = APIConfig.base
+        guard let url = URL(string: "\(base)/api/ping") else { return }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -178,6 +198,7 @@ final class UsageService: ObservableObject {
             }
             lastPing = Date()
             UserDefaults.standard.set(lastPing!.timeIntervalSince1970, forKey: "usage_last_ping")
+            UserDefaults.standard.set(base, forKey: pingBaseKey)
             // Partis : retirés (ceux arrivés pendant l'envoi restent).
             if !events.isEmpty {
                 var left = pendingEvents
@@ -249,9 +270,43 @@ final class UsageService: ObservableObject {
     }
 
     // MARK: – Retrait
-    /// Efface cette installation côté serveur (quand on coupe le comptage).
+    /// Efface cette installation côté serveur (quand on coupe le comptage) :
+    /// au Worker actuel et à celui du dernier ping. Après un ping en cours
+    /// (arrivé après, il la réinscrivait). Non confirmé (hors ligne, 429…) :
+    /// retenté au prochain passage au premier plan.
     func forget() async {
-        guard let url = URL(string: "\(APIConfig.base)/api/ping") else { return }
+        await inFlight?.value
+        lastPing = nil
+        let ud = UserDefaults.standard
+        ud.removeObject(forKey: "usage_last_ping")
+        ud.removeObject(forKey: eventsKey)
+        var bases = [APIConfig.base]
+        if let b = ud.string(forKey: pingBaseKey), !bases.contains(b) { bases.append(b) }
+        ud.set(bases, forKey: forgetPendingKey)
+        await retryForget()
+        logger.info("USAGE", "Retrait du comptage demandé", nil)
+    }
+
+    private func retryForget() async {
+        let ud = UserDefaults.standard
+        guard let pending = ud.stringArray(forKey: forgetPendingKey), !pending.isEmpty else { return }
+        var left: [String] = []
+        for base in pending {
+            if !(await sendForget(to: base)) { left.append(base) }
+        }
+        // Réactivé entre-temps : plus rien à effacer.
+        guard ud.stringArray(forKey: forgetPendingKey) != nil else { return }
+        if left.isEmpty {
+            ud.removeObject(forKey: forgetPendingKey)
+            ud.removeObject(forKey: pingBaseKey)
+        } else {
+            ud.set(left, forKey: forgetPendingKey)
+            logger.warn("USAGE", "Retrait du comptage pas encore confirmé", left.joined(separator: ", "))
+        }
+    }
+
+    private func sendForget(to base: String) async -> Bool {
+        guard let url = URL(string: "\(base)/api/ping") else { return true }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -264,10 +319,10 @@ final class UsageService: ObservableObject {
             "id": installId,
             "forget": true,
         ])
-        _ = try? await URLSession.shared.data(for: req)
-        lastPing = nil
-        UserDefaults.standard.removeObject(forKey: "usage_last_ping")
-        UserDefaults.standard.removeObject(forKey: eventsKey)
-        logger.info("USAGE", "Retrait du comptage demandé", nil)
+        guard let (_, resp) = try? await URLSession.shared.data(for: req) else { return false }
+        // Retenté seulement pour ce qui peut passer plus tard (429, 5xx) ; un
+        // autre refus (route absente…) ne changerait pas.
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        return code == 200 || (400 ..< 500).contains(code) && code != 429
     }
 }

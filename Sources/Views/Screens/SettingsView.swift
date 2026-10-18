@@ -12,6 +12,7 @@ struct SettingsView: View {
     @ObservedObject private var updater = UpdateChecker.shared
     @State private var checkingUpdate  = false
     @State private var upToDate        = false
+    @State private var updateCheckFailed = false
     @State private var highlightDraft  = ""
     @State private var mutedDraft      = ""
     @State private var liveNotif       = LiveNotifier.isEnabled
@@ -28,6 +29,8 @@ struct SettingsView: View {
     @AppStorage(APIConfig.allKey) private var customWorkerAll = false
     @State private var workerInput = ""
     @State private var workerChecking = false
+    /// Adresse (nettoyée) à laquelle se rapporte `workerResult`.
+    @State private var workerResultFor: String? = nil
     /// Dernière vérification du Worker personnel (nil : rien à dire).
     @State private var workerResult: APIConfig.CheckResult? = nil
     /// « Tout par ce Worker » refusé : il n'a pas de base D1.
@@ -160,11 +163,11 @@ struct SettingsView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "terminal.fill")
                             .foregroundColor(.tPrimary)
-                        Text("Logs")
+                        Text(store.t("logs_title"))
                             .font(.tSection).foregroundColor(.tText)
                     }
                     Spacer()
-                    Button("Fermer") { showLogs = false }
+                    Button(store.t("close")) { showLogs = false }
                         .foregroundColor(.tPrimary).fontWeight(.semibold)
                 }
                 .padding(16)
@@ -541,6 +544,10 @@ struct SettingsView: View {
                     .keyboardType(.URL)
                     .submitLabel(.done)
                     .onSubmit { checkWorker() }
+                    // Résultat d'une autre adresse : effacé dès qu'on la change.
+                    .onChange(of: workerInput) { v in
+                        if !workerChecking, APIConfig.normalize(v) != workerResultFor { workerResult = nil }
+                    }
                     .font(.tBody)
                     .foregroundColor(.tText)
                     .padding(10)
@@ -566,7 +573,10 @@ struct SettingsView: View {
                     Text(store.t(result.messageKey))
                         .font(.tMeta).foregroundColor(result == .ok ? .tSuccess : .tDanger)
                         .fixedSize(horizontal: false, vertical: true)
-                } else if !customWorker.isEmpty {
+                }
+                // Le Worker en service reste affiché après l'échec d'une autre
+                // adresse : c'est toujours lui qui sert.
+                if !customWorker.isEmpty, workerResult != .ok {
                     Text(store.t("expert_using").replacingOccurrences(of: "{u}", with: customWorker))
                         .font(.tMeta).foregroundColor(.tMuted)
                 }
@@ -609,12 +619,18 @@ struct SettingsView: View {
 
     /// Adresse vérifiée (c'est bien un Worker TwitchUnblock) avant d'être gardée.
     private func checkWorker() {
+        // Une vérification à la fois (Entrée pendant la vérification en
+        // lançait une autre, et la plus lente remettait son adresse).
+        guard !workerChecking else { return }
         guard let base = APIConfig.normalize(workerInput) else { workerResult = .notAWorker; return }
         workerChecking = true
         workerResult = nil
         Task {
             let result = await APIConfig.check(base)
             workerChecking = false
+            // Adresse modifiée pendant la vérification : résultat périmé.
+            guard APIConfig.normalize(workerInput) == base else { return }
+            workerResultFor = base
             workerResult = result
             guard result == .ok else {
                 logger.warn("SETTINGS", "Worker personnel refusé (\(result))", base)
@@ -1852,15 +1868,19 @@ struct SettingsView: View {
                     Button {
                         checkingUpdate = true
                         Task {
-                            await updater.checkIfDue(force: true)
+                            // Hors ligne (ou build local) : « vérification
+                            // impossible », plus « déjà à jour ».
+                            let outcome = await updater.checkIfDue(force: true)
                             checkingUpdate = false
-                            upToDate = updater.available == nil
+                            upToDate = outcome == .upToDate
+                            updateCheckFailed = outcome == .failed
                         }
                     } label: {
                         HStack(spacing: TSpace.sm) {
-                            Image(systemName: upToDate ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+                            Image(systemName: upToDate ? "checkmark.circle.fill"
+                                  : updateCheckFailed ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath")
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(store.t(upToDate ? "update_none" : "update_check")).font(.tLabel)
+                            Text(store.t(upToDate ? "update_none" : updateCheckFailed ? "update_check_failed" : "update_check")).font(.tLabel)
                             Spacer()
                             if checkingUpdate { ProgressView().scaleEffect(0.8) }
                         }

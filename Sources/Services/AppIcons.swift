@@ -35,7 +35,15 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
     /// iOS change l'icône (et le dit lui-même par une petite alerte). `done` :
     /// nil si c'est fait, sinon la raison donnée par iOS — jusqu'ici avalée,
     /// un refus ne se voyait pas : on croyait que l'appui ne marchait pas.
-    @MainActor func apply(retry: Bool = true, _ done: @escaping (String?) -> Void) {
+    /// Numéro de la dernière demande : le second essai d'une ancienne ne
+    /// remplace plus une icône choisie entre-temps.
+    @MainActor private static var requests = 0
+
+    @MainActor func apply(retry: Bool = true, request: Int? = nil, _ done: @escaping (String?) -> Void) {
+        let request = request ?? {
+            Self.requests += 1
+            return Self.requests
+        }()
         let app = UIApplication.shared
         guard app.supportsAlternateIcons else {
             logger.warn("ICON", "Icônes au choix indisponibles", "supportsAlternateIcons = false")
@@ -58,7 +66,9 @@ enum AppIconChoice: String, CaseIterable, Identifiable {
                 // second essai un peu plus tard passe d'habitude.
                 if retry, ns.domain == NSPOSIXErrorDomain, ns.code == 35 {
                     try? await Task.sleep(nanoseconds: 600_000_000)
-                    apply(retry: false, done)
+                    // Une autre icône demandée entre-temps : c'est elle qui compte.
+                    guard request == Self.requests else { done(nil); return }
+                    apply(retry: false, request: request, done)
                     return
                 }
                 done("\(ns.localizedDescription) (\(ns.domain) \(ns.code))")

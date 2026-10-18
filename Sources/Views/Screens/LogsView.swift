@@ -46,7 +46,7 @@ struct LogsView: View {
                         filter = nil
                     }
                     ForEach(LogLevel.allCases, id: \.self) { level in
-                        filterChip(label: level.rawValue, active: filter == level) {
+                        filterChip(label: t("log_level_\(level.rawValue)"), active: filter == level) {
                             filter = (filter == level) ? nil : level
                         }
                     }
@@ -98,9 +98,12 @@ struct LogsView: View {
                     Text("📋").font(.system(size: 48))
                     Text(appLogger.logs.isEmpty ? t("logs_empty") : t("logs_no_match"))
                         .font(.system(size: 18, weight: .bold)).foregroundColor(.tText)
-                    Text(t("logs_empty_hint"))
-                        .font(.system(size: 13)).foregroundColor(.tMuted)
-                        .multilineTextAlignment(.center)
+                    // Le conseil seulement quand le journal est vide (pas quand un filtre ne trouve rien).
+                    if appLogger.logs.isEmpty {
+                        Text(t("logs_empty_hint"))
+                            .font(.system(size: 13)).foregroundColor(.tMuted)
+                            .multilineTextAlignment(.center)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(40)

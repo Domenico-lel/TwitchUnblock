@@ -321,6 +321,7 @@ enum LogTranslator {
         "Retour envoyé": ["Report sent", "Comentario enviado", "Отзыв отправлен"],
         "Retour refusé": ["Report refused", "Comentario rechazado", "Отзыв отклонён"],
         "Retrait du comptage demandé": ["Removal from the count requested", "Retirada del recuento solicitada", "Запрошено исключение из подсчёта"],
+        "Retrait du comptage pas encore confirmé": ["Removal from the count not confirmed yet", "Retirada del recuento aún sin confirmar", "Исключение из подсчёта ещё не подтверждено"],
         "Réveil en arrière-plan refusé par iOS": ["Background wake-up refused by iOS", "Despertar en segundo plano rechazado por iOS", "Фоновое пробуждение отклонено iOS"],
         "rien à reprendre": ["nothing to resume", "nada que reanudar", "нечего возобновлять"],
         "Rotation refusée": ["Rotation refused", "Rotación rechazada", "Поворот отклонён"],

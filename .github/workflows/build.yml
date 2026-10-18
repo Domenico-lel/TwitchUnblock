@@ -20,7 +20,8 @@ on:
       - 'buildipa.sh'
       - 'assets/icon.png'
       - 'assets/icons/**'
-      - '.github/workflows/build.yml'
+      # Pas build.yml : une modification de la CI seule publiait un « nouveau »
+      # build sous le même numéro de version (lancement à la main pour l'essayer).
   workflow_dispatch:
 
 env:

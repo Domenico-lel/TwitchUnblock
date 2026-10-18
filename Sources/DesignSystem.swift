@@ -436,8 +436,15 @@ struct TPromptCard: View {
     struct PromptSection: Identifiable {
         let title: String
         let items: [String]
-        var id: String { title }
+        /// Identifiant propre (numéro de build) : deux builds de même version
+        /// avaient le même titre, donc le même identifiant.
+        var key: String? = nil
+        var id: String { key ?? title }
     }
+
+    /// Paysage sur iPhone : sans l'icône et avec une liste plus courte, la
+    /// carte tient à l'écran (« Ouvrir » et « Plus tard » en sortaient).
+    @Environment(\.verticalSizeClass) private var verticalSize
 
     var body: some View {
         ZStack {
@@ -445,17 +452,19 @@ struct TPromptCard: View {
                 .ignoresSafeArea()
                 .onTapGesture { onSecondary() }
 
-            VStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(colors: [Color.tPrimary, Color.tPurple],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 56, height: 56)
-                    Image(systemName: icon)
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundColor(.white)
+            VStack(spacing: verticalSize == .compact ? 10 : 14) {
+                if verticalSize != .compact {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(colors: [Color.tPrimary, Color.tPurple],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 56, height: 56)
+                        Image(systemName: icon)
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
 
                 Text(title)
                     .font(.system(size: 20, weight: .bold))
@@ -500,7 +509,7 @@ struct TPromptCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
                     }
-                    .frame(maxHeight: 220)
+                    .frame(maxHeight: verticalSize == .compact ? 80 : 220)
                     .fixedSize(horizontal: false, vertical: true)
                     .background(Color.tSurface)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

@@ -51,6 +51,21 @@ final class AnnouncementService: ObservableObject {
             until: Date(timeIntervalSince1970: untilMs / 1000))
         let dismissed = UserDefaults.standard.stringArray(forKey: dismissedKey) ?? []
         current = (item.until > Date() && !dismissed.contains(item.id)) ? item : nil
+        scheduleExpiry()
+    }
+
+    /// Retirée à son échéance, même si l'app reste au premier plan (elle ne
+    /// l'était qu'au lancement et au retour dans l'app).
+    private var expiry: Task<Void, Never>? = nil
+    private func scheduleExpiry() {
+        expiry?.cancel()
+        guard let c = current else { return }
+        let delay = max(0, c.until.timeIntervalSinceNow)
+        expiry = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.pruneExpired()
+        }
     }
 
     /// ✕ : cette annonce ne revient plus (une nouvelle, si).
@@ -63,21 +78,42 @@ final class AnnouncementService: ObservableObject {
 
     /// Toucher une réaction : la choisit, ou la retire si c'était déjà elle.
     /// Affichée tout de suite ; annulée si le serveur refuse.
+    /// Envois l'un après l'autre, dans l'ordre des touches ; un échec ne revient
+    /// en arrière que si aucune autre touche n'a suivi (il effaçait sinon la
+    /// réaction suivante, acceptée par le serveur).
+    private var reactChain: Task<Void, Never>? = nil
+    private var reactSeq = 0
+
     func react(_ a: Announcement, _ emoji: String) async {
         let prev = reacted[a.id]
         let next: String? = prev == emoji ? nil : emoji
         setReaction(next, for: a.id)
-        guard let url = URL(string: "\(APIConfig.base)/api/announcement/react") else { return }
+        reactSeq += 1
+        let seq = reactSeq
+        let before = reactChain
+        let task = Task { [weak self] in
+            await before?.value
+            guard let self else { return }
+            let code = await self.sendReaction(a.id, next)
+            // Annonce terminée côté serveur : retirée tout de suite.
+            if code == 410, self.current?.id == a.id { withAnimation { self.current = nil } }
+            if code != 200, seq == self.reactSeq { self.setReaction(prev, for: a.id) }
+        }
+        reactChain = task
+        await task.value
+    }
+
+    private func sendReaction(_ id: String, _ emoji: String?) async -> Int {
+        guard let url = URL(string: "\(APIConfig.base)/api/announcement/react") else { return 0 }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
-            "announcementId": a.id,
+            "announcementId": id,
             "id": UsageService.shared.installId,
-            "emoji": next.map { $0 as Any } ?? NSNull(),
+            "emoji": emoji.map { $0 as Any } ?? NSNull(),
         ])
-        let ok = ((try? await URLSession.shared.data(for: req))?.1 as? HTTPURLResponse)?.statusCode == 200
-        if !ok { setReaction(prev, for: a.id) }
+        return ((try? await URLSession.shared.data(for: req))?.1 as? HTTPURLResponse)?.statusCode ?? 0
     }
 
     private func setReaction(_ emoji: String?, for id: String) {
