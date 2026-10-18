@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.18",
+          "buildVersion": "18",
+          "date": "2026-10-18",
+          "localizedDescription": "- A live source that doesn't answer no longer leaves you on a checked source that isn't playing (the current one keeps playing and a notice says so), and changing quality while paused stays paused\n- Chat reconnects within 2 seconds after a drop, says \"Chat connected\" on quiet channels, retries BTTV/FFZ/7TV emotes after a failed first load, and VOD chat shows emotes from the very first messages\n- Signing in with a code keeps waiting when you switch tabs (with a Cancel button), and a network hiccup at launch no longer signs you out\n- Russian wording for followed channels fixed",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-18/TwitchUnblockTV.ipa",
+          "size": 2362373,
+          "commit": "c91dbbed694d1196ed819b11b036c4b4aed41ca0"
+        },
+        {
           "version": "0.1.17",
           "buildVersion": "17",
           "date": "2026-10-18",
@@ -88,10 +97,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.17",
+      "version": "0.1.18",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-17/TwitchUnblockTV.ipa",
-      "size": 2356231
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-18/TwitchUnblockTV.ipa",
+      "size": 2362373
     }
   ]
 }
