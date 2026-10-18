@@ -32,6 +32,8 @@ final class TVChatModel: ObservableObject {
     @Published private(set) var lines: [TVChatLine] = []
     /// Rien encore à montrer : connexion au direct, premiers commentaires de la VOD.
     @Published private(set) var waiting = true
+    /// Chat du direct rejoint (ROOMSTATE), même sans message encore.
+    @Published private(set) var joined = false
 
     private var channel: String?
     private var socket: URLSessionWebSocketTask?
@@ -44,7 +46,10 @@ final class TVChatModel: ObservableObject {
 
     // VOD : commentaires chargés d'avance, en attente de leur instant.
     private var vodId: String?
-    private var buffer: [(offset: Double, line: TVChatLine)] = []
+    /// Commentaires bruts : découpés (emotes) au moment de les montrer, une
+    /// fois les emotes de la chaîne chargées — la première minute restait
+    /// en texte sur les chaînes très 7TV.
+    private var buffer: [(offset: Double, node: [String: Any])] = []
     /// Identifiants déjà reçus → instant (les pages se chevauchent).
     private var seen: [String: Double] = [:]
     /// Plus grand instant reçu depuis le dernier saut (−1 : rien encore).
@@ -91,6 +96,7 @@ final class TVChatModel: ObservableObject {
         retryAt = .distantPast
         failures = 0
         waiting = true
+        joined = false
     }
 
     private func add(_ line: TVChatLine) {
@@ -103,24 +109,35 @@ final class TVChatModel: ObservableObject {
     private func loadEmotes(channelId: String, login: String) async {
         guard emotesFor != channelId else { return }
         emotesFor = channelId
-        thirdParty = await TVThirdPartyEmotes.shared.emotes(channelId: channelId, login: login)
-    }
-
-    // MARK: Direct
-    /// Connexion, lecture, et reconnexion après une coupure (2 s, puis de
-    /// plus en plus espacée, 30 s au plus).
-    private func run(_ channel: String) async {
-        var delay: UInt64 = 2
-        while !Task.isCancelled {
-            await session(channel)
-            guard !Task.isCancelled else { return }
-            try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
-            delay = min(delay * 2, 30)
+        // Premier chargement raté (coupure) : nouvel essai à 30 s puis 60 s,
+        // au lieu d'un chat sans BTTV/FFZ/7TV pour toute la session.
+        for attempt in 0 ..< 3 {
+            let found = await TVThirdPartyEmotes.shared.emotes(channelId: channelId, login: login)
+            guard emotesFor == channelId else { return }
+            if !found.isEmpty || attempt == 2 { thirdParty = found; return }
+            try? await Task.sleep(nanoseconds: UInt64(30 * (attempt + 1)) * 1_000_000_000)
+            guard emotesFor == channelId else { return }
         }
     }
 
-    private func session(_ channel: String) async {
-        guard let url = URL(string: "wss://irc-ws.chat.twitch.tv:443") else { return }
+    // MARK: Direct
+    /// Connexion, lecture, et reconnexion après une coupure : 2 s après une
+    /// session qui marchait (le délai restait doublé à chaque coupure, jusqu'à
+    /// 30 s de chat figé), puis de plus en plus espacée si ça échoue encore.
+    private func run(_ channel: String) async {
+        var delay: UInt64 = 2
+        while !Task.isCancelled {
+            let worked = await session(channel)
+            guard !Task.isCancelled else { return }
+            if worked { delay = 2 }
+            try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
+            if !worked { delay = min(delay * 2, 30) }
+        }
+    }
+
+    /// true si la connexion a reçu quelque chose avant de tomber.
+    private func session(_ channel: String) async -> Bool {
+        guard let url = URL(string: "wss://irc-ws.chat.twitch.tv:443") else { return false }
         let ws = URLSession.shared.webSocketTask(with: url)
         socket = ws
         ws.resume()
@@ -129,8 +146,10 @@ final class TVChatModel: ObservableObject {
                         "NICK \(nick)", "JOIN #\(channel)"] {
             try? await ws.send(.string(command))
         }
+        var received = false
         while !Task.isCancelled {
-            guard let message = try? await ws.receive() else { return }
+            guard let message = try? await ws.receive() else { return received }
+            received = true
             let text: String
             switch message {
             case .string(let s): text = s
@@ -141,6 +160,7 @@ final class TVChatModel: ObservableObject {
                 await handle(raw, ws)
             }
         }
+        return received
     }
 
     private func handle(_ raw: String, _ ws: URLSessionWebSocketTask) async {
@@ -151,10 +171,16 @@ final class TVChatModel: ObservableObject {
         guard let msg = TVIRCLine(raw) else { return }
         switch msg.command {
         case "ROOMSTATE":
+            // Chat rejoint : « Connexion au chat… » laisse la place, même sur
+            // une chaîne silencieuse.
+            joined = true
             // Identifiant de la chaîne : de quoi charger ses emotes.
             if let id = msg.tags["room-id"], !id.isEmpty, let login = channel {
                 Task { await loadEmotes(channelId: id, login: login) }
             }
+        case "RECONNECT":
+            // Twitch va couper : on se reconnecte tout de suite.
+            ws.cancel(with: .goingAway, reason: nil)
         case "PRIVMSG":
             append(msg)
         case "CLEARMSG":
@@ -262,7 +288,7 @@ final class TVChatModel: ObservableObject {
             seen[cid] = at
             fresh += 1
             newest = max(newest, at)
-            if let line = vodLine(node) { buffer.append((at, line)) }
+            buffer.append((at, node))
         }
         buffer.sort { $0.offset < $1.offset }
         fetchedUntil = fresh > 0 ? newest : max(fetchedUntil, Double(offset)) + 5
@@ -274,7 +300,7 @@ final class TVChatModel: ObservableObject {
     private func release(upTo offset: Double) {
         while let first = buffer.first, first.offset <= offset {
             buffer.removeFirst()
-            add(first.line)
+            if let line = vodLine(first.node) { add(line) }
         }
     }
 
@@ -426,9 +452,11 @@ actor TVThirdPartyEmotes {
     private var global: [String: String]?
     private var channels: [String: [String: String]] = [:]
 
+    /// Seules les réussites sont gardées : un premier chargement raté (vide)
+    /// passait pour la liste de la chaîne jusqu'à la fermeture de l'app.
     func emotes(channelId: String, login: String) async -> [String: String] {
-        if global == nil { global = await Self.globals() }
-        if channels[channelId] == nil { channels[channelId] = await Self.channel(id: channelId, login: login) }
+        if global?.isEmpty ?? true { global = await Self.globals() }
+        if channels[channelId]?.isEmpty ?? true { channels[channelId] = await Self.channel(id: channelId, login: login) }
         return (global ?? [:]).merging(channels[channelId] ?? [:]) { _, channel in channel }
     }
 
@@ -583,13 +611,15 @@ struct TVChatOverlay: View {
     @ObservedObject var model: TVChatModel
     let waitingText: String
     var layout = TVChatLayout()
+    /// Chat rejoint mais encore silencieux.
+    var quietText = ""
 
     var body: some View {
         GeometryReader { geo in
             VStack(alignment: .leading, spacing: 12) {
                 Spacer(minLength: 0)
                 if model.lines.isEmpty && model.waiting {
-                    Text(waitingText)
+                    Text(model.joined && !quietText.isEmpty ? quietText : waitingText)
                         .font(.system(size: 24))
                         .foregroundColor(.white.opacity(0.6))
                 }

@@ -535,9 +535,6 @@ struct TVAccountTab: View {
     @EnvironmentObject private var session: TVSession
     /// Signal d'utilisation pour /stats (TVUsage) : coupé, le serveur oublie tout.
     @AppStorage(TVUsage.enabledKey) private var shareUsage = true
-    @State private var code: TVSession.DeviceCode?
-    @State private var failed = false
-    @State private var loginTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -555,13 +552,13 @@ struct TVAccountTab: View {
                     // Toute la largeur : en remontant depuis « Langue », le
                     // focus trouve ce bouton puis la barre des onglets.
                     .focusSection()
-                } else if let code {
+                } else if let code = session.pendingCode {
                     loginPanel(code)
                 } else {
                     VStack(alignment: .leading, spacing: 24) {
                         Text(session.t("tv_login_intro")).font(.title3)
-                        Button(session.t("tv_login")) { startLogin() }
-                        if failed {
+                        Button(session.t("tv_login")) { session.startLogin() }
+                        if session.loginFailed {
                             Text(session.t("tv_login_expired")).foregroundColor(Color.tWarning)
                         }
                     }
@@ -623,11 +620,7 @@ struct TVAccountTab: View {
             }
             .padding(64)
         }
-        .onDisappear {
-            loginTask?.cancel()
-            loginTask = nil
-            code = nil
-        }
+        // L'attente du code n'est plus annulée en quittant l'onglet (TVSession).
     }
 
     /// Chaînes et catégories masquées : un bouton par élément pour le
@@ -666,18 +659,6 @@ struct TVAccountTab: View {
         }
     }
 
-    private func startLogin() {
-        failed = false
-        loginTask?.cancel()
-        loginTask = Task {
-            guard let c = await session.requestCode() else { failed = true; return }
-            code = c
-            let ok = await session.waitForApproval(c)
-            code = nil
-            if !ok && !Task.isCancelled { failed = true }
-        }
-    }
-
     private func loginPanel(_ c: TVSession.DeviceCode) -> some View {
         HStack(alignment: .center, spacing: 80) {
             if let qr = tvQRCode(c.verificationURL) {
@@ -699,6 +680,9 @@ struct TVAccountTab: View {
                     ProgressView()
                     Text(session.t("tv_login_waiting")).foregroundColor(.secondary)
                 }
+                // L'attente ne s'arrête plus en changeant d'onglet : on peut
+                // l'abandonner ici.
+                Button(session.t("cancel")) { session.cancelLogin() }
             }
         }
     }

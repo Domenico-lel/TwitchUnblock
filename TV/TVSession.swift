@@ -163,24 +163,43 @@ final class TVSession: ObservableObject {
     func restore() async {
         guard let current = token else { return }
         if await Self.isValid(current) == false {
-            guard await renewToken() != nil else { logout(); return }
+            switch await renew() {
+            case .renewed: break
+            case .refused: logout(); return
+            // Réseau instable : la session reste (il fallait refaire la
+            // connexion par code) ; nouvel essai au prochain passage.
+            case .unreachable: return
+            }
         }
         if let t = token { user = await getTwitchUser(token: t) }
     }
 
+    enum Renewal { case renewed, refused, unreachable }
+
     /// Nouveau jeton à partir du jeton de renouvellement (les jetons Twitch
-    /// expirent au bout de quelques heures). nil si c'est impossible.
-    @discardableResult
-    func renewToken() async -> String? {
-        guard let refresh = Keychain.loadToken(Self.refreshKey) else { return nil }
-        let json = await Self.post("https://id.twitch.tv/oauth2/token", [
+    /// expirent au bout de quelques heures). `refused` : Twitch n'en veut
+    /// plus ; `unreachable` : pas de réponse (rien n'est effacé).
+    func renew() async -> Renewal {
+        guard let refresh = Keychain.loadToken(Self.refreshKey) else { return .refused }
+        guard let json = await Self.post("https://id.twitch.tv/oauth2/token", [
             "client_id": kHelixClientID,
             "grant_type": "refresh_token",
             "refresh_token": refresh,
-        ])
-        guard let access = json?["access_token"] as? String else { return nil }
-        save(access: access, refresh: json?["refresh_token"] as? String)
-        return access
+        ]) else { return .unreachable }
+        guard let access = json["access_token"] as? String else {
+            // Refus explicite (400 « Invalid refresh token ») seulement : une
+            // erreur du serveur de Twitch n'efface rien.
+            let status = json["status"] as? Int ?? 400
+            return (400 ..< 500).contains(status) ? .refused : .unreachable
+        }
+        save(access: access, refresh: json["refresh_token"] as? String)
+        return .renewed
+    }
+
+    /// Nouveau jeton, ou nil si c'est impossible (refus ou pas de réponse).
+    @discardableResult
+    func renewToken() async -> String? {
+        await renew() == .renewed ? token : nil
     }
 
     func logout() {
@@ -215,6 +234,33 @@ final class TVSession: ObservableObject {
         return DeviceCode(deviceCode: device, userCode: userCode, verificationURL: uri,
                           interval: json["interval"] as? Int ?? 5,
                           expiresAt: Date().addingTimeInterval(Double(json["expires_in"] as? Int ?? 1800)))
+    }
+
+    /// Connexion par code en cours, portée par la session : elle survit au
+    /// passage dans un autre onglet (sur tvOS, l'onglet change dès que le
+    /// focus passe dans la barre, et l'attente du code était annulée).
+    @Published private(set) var pendingCode: DeviceCode?
+    @Published private(set) var loginFailed = false
+    private var loginTask: Task<Void, Never>?
+
+    func startLogin() {
+        loginFailed = false
+        loginTask?.cancel()
+        loginTask = Task { [weak self] in
+            guard let self else { return }
+            guard let c = await self.requestCode() else { self.loginFailed = true; return }
+            self.pendingCode = c
+            let ok = await self.waitForApproval(c)
+            guard !Task.isCancelled else { return }
+            self.pendingCode = nil
+            if !ok { self.loginFailed = true }
+        }
+    }
+
+    func cancelLogin() {
+        loginTask?.cancel()
+        loginTask = nil
+        pendingCode = nil
     }
 
     /// Attend la validation sur le téléphone. true une fois connecté ; false

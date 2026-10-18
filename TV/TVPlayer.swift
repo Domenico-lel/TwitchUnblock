@@ -28,6 +28,16 @@ struct TVPlayerScreen: View {
                 TVPlayerController(player: player, model: model, session: session, chat: chat,
                                    channel: item.channel, onChannel: openChannel)
                     .ignoresSafeArea()
+                    // Avis passager (source qui ne répond pas) : la lecture continue.
+                    .overlay(alignment: .top) {
+                        if let notice = model.notice {
+                            Text(notice)
+                                .font(.headline)
+                                .padding(.horizontal, 32).padding(.vertical, 16)
+                                .background(.ultraThinMaterial, in: Capsule())
+                                .padding(.top, 60)
+                        }
+                    }
             } else if let error = model.error {
                 VStack(spacing: 40) {
                     Text(error).font(.title3).multilineTextAlignment(.center)
@@ -86,7 +96,23 @@ final class TVPlayerModel: ObservableObject {
     /// (PlaybackInterruptions) — VOD à l'endroit, direct relu au bord.
     private var interruptions: PlaybackInterruptions?
 
-    func load(_ item: TVPlayback, session: TVSession) async {
+    /// Avis passager par-dessus la lecture (source qui ne répond pas…).
+    @Published private(set) var notice: String?
+    private var noticeTask: Task<Void, Never>?
+
+    private func flash(_ text: String) {
+        notice = text
+        noticeTask?.cancel()
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
+
+    /// false si rien n'a pu être lu.
+    @discardableResult
+    func load(_ item: TVPlayback, session: TVSession) async -> Bool {
         current = item
         error = nil
         switch item {
@@ -98,8 +124,11 @@ final class TVPlayerModel: ObservableObject {
             guard let raw = data.links, !raw.isEmpty else {
                 // Santé du direct (/stats) : hors ligne n'est pas un échec.
                 if data.error != "offline" { TVUsage.count("live_fail") }
-                error = session.t(data.error == "offline" ? "tv_offline" : "tv_error_live")
-                return
+                let message = session.t(data.error == "offline" ? "tv_offline" : "tv_error_live")
+                // Changement de source pendant la lecture : elle continue sur
+                // l'ancienne, l'avis passe par-dessus (rien ne s'affichait).
+                if player != nil { flash(message) } else { error = message }
+                return false
             }
             TVUsage.count("live_\(data.source ?? "unknown")")
             subtitle = data.title
@@ -119,7 +148,7 @@ final class TVPlayerModel: ObservableObject {
                 TVUsage.count("vod_fail")
                 // Code d'erreur (getM3U8) traduit : le texte venait en français.
                 error = session.t(data.error.map(apiErrorKey) ?? "tv_error_vod")
-                return
+                return false
             }
             TVUsage.count("vod")
             // VOD récente avec des passages coupés : le son d'origine est
@@ -130,10 +159,12 @@ final class TVPlayerModel: ObservableObject {
         // Qualité préférée, sinon la plus proche en dessous (même règle que l'iPhone).
         quality = preferredQualityKey(Array(links.keys), pref: session.qualityPref, variants: variants)
         start(at: isLive ? 0 : TVProgress.position(vodId))
+        return true
     }
 
-    /// (Re)lance la qualité choisie, à `seconds` pour une VOD.
-    private func start(at seconds: Double) {
+    /// (Re)lance la qualité choisie, à `seconds` pour une VOD. `play` : false
+    /// pour rester en pause (qualité changée pendant une pause).
+    private func start(at seconds: Double, play: Bool = true) {
         guard let link = links[quality], let url = URL(string: link) else { return }
         let item = VodUnmuteLoader.playerItem(url: url)
         item.externalMetadata = metadata()
@@ -148,7 +179,7 @@ final class TVPlayerModel: ObservableObject {
         }
         let p = player ?? AVPlayer()
         p.replaceCurrentItem(with: item)
-        p.play()
+        if play { p.play() }
         interruptions?.settle()
         if player == nil {
             player = p
@@ -175,13 +206,15 @@ final class TVPlayerModel: ObservableObject {
         if let pref = qualityPreference(for: key, among: Array(links.keys), variants: variants) {
             session.qualityPref = pref
         }
-        start(at: isLive ? 0 : (player?.currentTime().seconds ?? 0))
+        // En pause : elle le reste (la qualité changée relançait la lecture).
+        start(at: isLive ? 0 : (player?.currentTime().seconds ?? 0), play: (player?.rate ?? 1) != 0)
     }
 
     /// Source du direct changée : liens redemandés à la nouvelle source.
-    func reload(session: TVSession) async {
-        guard let current else { return }
-        await load(current, session: session)
+    /// false si elle n'a rien donné (la lecture reste sur l'ancienne).
+    func reload(session: TVSession) async -> Bool {
+        guard let current else { return false }
+        return await load(current, session: session)
     }
 
     /// Fin d'une interruption du son : VOD à l'endroit (rien en fin de VOD),
@@ -274,7 +307,7 @@ struct TVPlayerController: UIViewControllerRepresentable {
     /// Chat posé sur l'image, à la place retenue pour cette chaîne.
     private func overlay() -> TVChatOverlay {
         TVChatOverlay(model: chat, waitingText: session.t(model.isLive ? "tv_chat_waiting" : "tv_chat_loading"),
-                      layout: session.chatLayout(for: channel))
+                      layout: session.chatLayout(for: channel), quietText: session.t("tv_chat_quiet"))
     }
 
     private func showChat(_ context: Context) {
@@ -300,8 +333,10 @@ struct TVPlayerController: UIViewControllerRepresentable {
             let sources: [UIMenuElement] = kLiveSourceChoices.map { id in
                 UIAction(title: session.t("src_\(id)"), state: id == session.liveSource ? .on : .off) { _ in
                     Task { @MainActor in
+                        let before = session.liveSource
                         session.liveSource = id
-                        await model.reload(session: session)
+                        // Rien sur cette source : l'ancienne reste cochée (et lue).
+                        if !(await model.reload(session: session)) { session.liveSource = before }
                     }
                 }
             }
