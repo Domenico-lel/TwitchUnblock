@@ -217,7 +217,15 @@ struct TVFollowingTab: View {
     }
 
     private func load() async {
-        guard let uid = session.user?.id, let token = session.token else { streams = []; offline = []; return }
+        // Compte pas chargé au lancement (Apple TV sortie de veille avant le
+        // Wi-Fi) : relu ici. Sinon « Aucun live » restait toute la séance ;
+        // toujours absent, c'est une erreur (Réessayer en revenant), pas un vide.
+        if session.user == nil, session.token != nil { await session.restore() }
+        guard let uid = session.user?.id, let token = session.token else {
+            streams = []; offline = []
+            failed = session.token != nil
+            return
+        }
         // Deux demandes rapprochées (retour sur l'onglet, puis minuterie) : une seule.
         guard !loading else { return }
         lastLoad = Date()
