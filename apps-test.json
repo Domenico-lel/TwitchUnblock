@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.16",
+          "buildVersion": "316",
+          "date": "2026-10-18",
+          "localizedDescription": "- Logs are kept between launches, so errors from a previous session or right before a crash can still be read and sent, and an abrupt stop of the app is flagged at the next launch\n- Logs screen: number of errors and warnings on each filter, repeated lines grouped (×N), a red error count in Settings, and exported logs start with the version, system and device\n- The player now logs why a stream breaks (segments or playlists refused with their HTTP code, stalls), and failures that used to be silent (account, followed channels and categories, clips) are logged\n- Apple TV: Account → Recent errors lists the latest warnings and errors, and failed lives or VODs are logged",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-316/TwitchUnblock.ipa",
+          "size": 3766749,
+          "commit": "0419353b6041cfa41e2fd49a71de5d7c176949d5"
+        },
+        {
           "version": "1.4.15",
           "buildVersion": "315",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-277/TwitchUnblock.ipa",
           "size": 2932361,
           "commit": "8ee28ab29a6f5243ea60faa14cea2b06430871d5"
-        },
-        {
-          "version": "1.2.52",
-          "buildVersion": "276",
-          "date": "2026-10-11",
-          "localizedDescription": "- Chat: the room's modes (followers only and for how long, subscribers only, slow mode…) show above the message box, the channel's chat rules are shown to accept before your first message, and a message Twitch refuses is removed with the reason.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-276/TwitchUnblock.ipa",
-          "size": 2932362,
-          "commit": "a2fd4eb5d764bc3052d16283183d5dc7b1254df3"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.15",
+      "version": "1.4.16",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-315/TwitchUnblock.ipa",
-      "size": 3751387
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-316/TwitchUnblock.ipa",
+      "size": 3766749
     }
   ],
   "news": []
