@@ -98,7 +98,7 @@ struct ChannelPointsSheet: View {
                         Image(systemName: "crown.fill")
                             .font(.system(size: 11, weight: .bold))
                             .foregroundColor(.tPrimary)
-                        Text(service.formatted(service.balance))
+                        Text(service.balanceKnown ? service.formatted(service.balance) : "—")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundColor(.tText)
                     }
@@ -210,7 +210,8 @@ struct ChannelPointsSheet: View {
                             ForEach(service.rewards) { reward in
                                 RewardRow(
                                     reward:    reward,
-                                    canAfford: service.balance >= reward.cost,
+                                    // Solde inconnu : pas de « Insuff. » sur tout.
+                                    canAfford: !service.balanceKnown || service.balance >= reward.cost,
                                     service:   service,
                                     isRedeeming: isRedeeming
                                 ) { result in

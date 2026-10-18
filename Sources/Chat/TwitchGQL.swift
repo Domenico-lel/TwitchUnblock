@@ -14,6 +14,9 @@ final class TwitchGQL {
     private var integrityTok:    String? = nil
     private var integrityDevice: String  = ""
     private var integrityExpiry: Date    = .distantPast
+    /// Jeton web pour lequel il a été généré : après un changement de compte,
+    /// celui de l'ancien était servi et le premier Suivre/pari/vote échouait.
+    private var integrityFor:    String  = ""
 
     private var deviceId: String {
         if let d = UserDefaults.standard.string(forKey: "twitch_device_id") { return d }
@@ -50,19 +53,24 @@ final class TwitchGQL {
     }
 
     private func validIntegrity(token: String) async -> Bool {
-        if integrityTok != nil, integrityExpiry > Date().addingTimeInterval(60), !integrityDevice.isEmpty {
+        if integrityTok != nil, integrityFor == token, integrityExpiry > Date().addingTimeInterval(60),
+           !integrityDevice.isEmpty {
             return true
         }
         guard let mint = await TwitchWebGQL.shared.mintIntegrity(token: token) else { return false }
         integrityTok    = mint.token
         integrityDevice = mint.deviceId.isEmpty ? deviceId : mint.deviceId
         integrityExpiry = mint.expiry
+        integrityFor    = token
         return true
     }
 
     /// Mutation persisted-query avec Client-Integrity (comme claim/redeem).
+    /// Jeton d'intégrité refusé : régénéré et requête renvoyée une fois (mêmes
+    /// variables, donc même transaction) — le premier Suivre/pari/vote
+    /// échouait, et le second arrivait trop tard pour un pari qui fermait.
     func mutation(_ op: String, variables: [String: Any], sha256: String,
-                  token: String) async -> [String: Any]? {
+                  token: String, retried: Bool = false) async -> [String: Any]? {
         guard await validIntegrity(token: token), let it = integrityTok,
               let url = URL(string: "https://gql.twitch.tv/gql"),
               let payload = persistedBody(op, variables, sha256) else { return nil }
@@ -80,7 +88,13 @@ final class TwitchGQL {
         if let errors = first["errors"] as? [[String: Any]], !errors.isEmpty {
             let msgs = errors.compactMap { $0["message"] as? String }.joined(separator: " · ")
             logger.warn("GQL", "Erreurs \(op)", msgs)
-            if msgs.lowercased().contains("integrity") { integrityTok = nil; integrityExpiry = .distantPast }
+            if msgs.lowercased().contains("integrity") {
+                integrityTok = nil
+                integrityExpiry = .distantPast
+                if !retried {
+                    return await mutation(op, variables: variables, sha256: sha256, token: token, retried: true)
+                }
+            }
         }
         return first
     }

@@ -98,7 +98,8 @@ struct VodChatView: View {
                                 } else if let err = vod.errorMsg {
                                     Image(systemName: "exclamationmark.triangle")
                                         .font(.system(size: 26)).foregroundColor(.tDanger)
-                                    Text(err)
+                                    // Codes du service traduits (« chat », « network » s'affichaient tels quels).
+                                    Text(store.t(["chat": "vod_chat_err_file", "network": "vod_chat_err_network"][err] ?? "vod_chat_err_twitch"))
                                         .font(.system(size: 11)).foregroundColor(.tDanger)
                                         .multilineTextAlignment(.center)
                                         .padding(.horizontal, 20)

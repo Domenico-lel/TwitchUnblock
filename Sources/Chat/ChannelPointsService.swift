@@ -19,7 +19,11 @@ struct ChannelReward: Identifiable, Equatable {
 // MARK: – Service
 @MainActor
 final class ChannelPointsService: ObservableObject {
-    @Published var balance: Int = 0
+    @Published var balance: Int = 0 { didSet { balanceKnown = true } }
+    /// Solde lu au moins une fois pour ce compte et cette chaîne. Inconnu
+    /// (sans session web, lecture ratée), toutes les récompenses passaient
+    /// pour « Insuff. » avec un solde de 0.
+    @Published private(set) var balanceKnown = false
     @Published var rewards: [ChannelReward] = []
     @Published var isLoading = false
     @Published var errorMsg: String? = nil
@@ -58,6 +62,7 @@ final class ChannelPointsService: ObservableObject {
     private var integrityTok:    String? = nil
     private var integrityDevice: String  = ""
     private var integrityExpiry: Date    = .distantPast
+    private var integrityFor:    String  = ""
 
     /// Device-Id persistant (cohérence des requêtes GQL de lecture).
     private var deviceId: String {
@@ -78,11 +83,13 @@ final class ChannelPointsService: ObservableObject {
         // Avant le changement de chaîne : c'est la précédente qui s'arrête
         // (sa session de points se termine).
         stopPolling()
+        let gen = presenceGeneration
         self.channelLogin = channelLogin
         self.channelId    = channelId
         self.token        = token
         self.viewerId     = viewerId ?? ""
         needsWebLogin     = false
+        balanceKnown      = false
 
         isLoading = true; errorMsg = nil
         let start = Date()
@@ -94,6 +101,7 @@ final class ChannelPointsService: ObservableObject {
         // Le solde est privé → nécessite le token de session web (cookie auth-token).
         guard !token.isEmpty else {
             balance = 0; pendingClaimId = nil
+            balanceKnown = false
             needsWebLogin = true
             isLoading = false
             logger.info("POINTS", "Token web absent",
@@ -119,6 +127,9 @@ final class ChannelPointsService: ObservableObject {
         if rewards.isEmpty {
             logger.info("POINTS", "Aucune récompense", "canal sans custom rewards")
         }
+        // Direct quitté pendant le chargement (stopPolling entre-temps) : rien
+        // n'est relancé (minuteries orphelines, présence pour la chaîne quittée).
+        guard gen == presenceGeneration else { isLoading = false; return }
         // On ne lance le polling et la présence que si le token web est valide.
         if !needsWebLogin {
             startPolling()
@@ -165,6 +176,7 @@ final class ChannelPointsService: ObservableObject {
     private func refreshBalance() async {
         // Polling silencieux : on ne logge que les vrais changements (gains/pertes/coffre).
         guard let b = await fetchBalance(quiet: true) else { return }
+        balanceKnown = true
         let delta = b.balance - balance
         if delta > 0 {
             logger.success("POINTS", "Points passifs gagnés",
@@ -389,6 +401,10 @@ final class ChannelPointsService: ObservableObject {
     func redeem(reward: ChannelReward, userInput: String? = nil) async -> Bool {
         logger.info("POINTS", "Tentative rachat « \(reward.title) »",
                     "coût: \(formatted(reward.cost)) · balance: \(formatted(balance))")
+        // Solde inconnu : on le dit, plutôt que « il manque N points ».
+        guard balanceKnown else {
+            errorMsg = t(needsWebLogin ? "points_connect_title" : "points_network_error"); return false
+        }
         guard balance >= reward.cost else {
             let missing = reward.cost - balance
             logger.warn("POINTS", "Solde insuffisant", "manque \(formatted(missing)) pts")
@@ -399,20 +415,20 @@ final class ChannelPointsService: ObservableObject {
         // correspondre EXACTEMENT à la config serveur de la récompense.
         //   - reward SANS saisie → prompt = celui de la récompense (null si vide)
         //   - reward AVEC saisie requise → prompt = texte saisi par le viewer
-        func gqlEscape(_ s: String) -> String {
-            s.replacingOccurrences(of: "\\", with: "\\\\")
-             .replacingOccurrences(of: "\"", with: "\\\"")
-             .replacingOccurrences(of: "\n", with: " ")
+        /// Chaîne GraphQL exacte, guillemets compris (mêmes échappements que
+        /// JSON : retours à la ligne, tabulations…). Une invite sur deux lignes
+        /// devenait une seule : refusée (PROPERTIES_MISMATCH) à chaque rachat.
+        func gqlLiteral(_ s: String) -> String {
+            (try? JSONSerialization.data(withJSONObject: s, options: [.fragmentsAllowed]))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
         }
         let txId      = UUID().uuidString
-        let safeTitle = gqlEscape(reward.title)
         let promptText = reward.isUserInputRequired ? (userInput ?? "") : (reward.prompt ?? "")
-        let promptField = promptText.isEmpty ? "prompt: null"
-                                             : "prompt: \"\(gqlEscape(promptText))\""
+        let promptField = promptText.isEmpty ? "prompt: null" : "prompt: \(gqlLiteral(promptText))"
         let mutation = """
         mutation { redeemCommunityPointsCustomReward(input: {
             channelID: "\(gqlStr(channelId))", cost: \(reward.cost), \(promptField),
-            rewardID: "\(gqlStr(reward.id))", title: "\(safeTitle)", transactionID: "\(txId)"
+            rewardID: "\(gqlStr(reward.id))", title: \(gqlLiteral(reward.title)), transactionID: "\(txId)"
         }) { redemption { id } error { code } } }
         """
         // Rachat en NATIF avec le token integrity.
@@ -574,7 +590,10 @@ final class ChannelPointsService: ObservableObject {
     // MARK: – Mutations integrity (claim / redeem) — token minté via WebView, requête native
     /// Garantit un token Client-Integrity valide (le génère via WebView éphémère si besoin).
     private func validIntegrity() async -> Bool {
-        if let _ = integrityTok, integrityExpiry > Date().addingTimeInterval(60), !integrityDevice.isEmpty {
+        // Lié au jeton web : après un changement de compte, celui de l'ancien
+        // compte faisait échouer le premier coffre ou rachat.
+        if let _ = integrityTok, integrityFor == token, integrityExpiry > Date().addingTimeInterval(60),
+           !integrityDevice.isEmpty {
             return true
         }
         logger.info("POINTS", "Renouvellement du token integrity…", "WebView éphémère ~quelques s")
@@ -585,12 +604,14 @@ final class ChannelPointsService: ObservableObject {
         integrityTok    = mint.token
         integrityDevice = mint.deviceId.isEmpty ? deviceId : mint.deviceId
         integrityExpiry = mint.expiry
+        integrityFor    = token
         return true
     }
 
     /// Exécute une mutation EN NATIF avec le token Client-Integrity (pas de WebView).
     /// `body` = l'objet JSON GQL (persisted query en tableau, ou {query: ...}).
-    private func nativeMutation(body: Any, tag: String) async -> [String: Any]? {
+    /// Jeton refusé : régénéré et requête renvoyée une fois (même transaction).
+    private func nativeMutation(body: Any, tag: String, retried: Bool = false) async -> [String: Any]? {
         guard await validIntegrity(), let it = integrityTok else { return nil }
         guard let url = URL(string: "https://gql.twitch.tv/gql") else { return nil }
         var req = URLRequest(url: url)
@@ -618,6 +639,7 @@ final class ChannelPointsService: ObservableObject {
             // Token integrity probablement expiré → on l'invalide pour re-mint au prochain coup.
             if msgs.lowercased().contains("integrity") {
                 integrityTok = nil; integrityExpiry = .distantPast
+                if !retried { return await nativeMutation(body: body, tag: tag, retried: true) }
             }
         } else {
             logger.debug("POINTS/GQL", "← \(tag) OK (natif)", nil)
