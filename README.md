@@ -24,6 +24,31 @@ no key to paste. The backend is already hosted and shared by every install.
 
 ---
 
+## 📲 Installation
+
+TwitchUnblock isn't on the App Store, so it has to be sideloaded.
+
+<h3 align="center">
+<a href="https://altdirect.app/?url=https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json" target="_blank"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" alt="Add AltSource" width="200"></a>
+&nbsp;
+<a href="https://github.com/MXFia19/TwitchUnblock/releases/latest/download/TwitchUnblock.ipa" target="_blank"><img src="https://altdirect.app/assets/png/Download_Blue.png" alt="Download .ipa" width="200"></a>
+</h3>
+
+**Add AltSource** opens the source in AltStore, SideStore, Feather, LiveContainer,
+StikStore or TrollApps (automatic nightly builds): install **TwitchUnblock** from
+it. It also lists **TU Test**, the test builds (newest features, may be
+unstable), installed next to the normal app. **Download .ipa** gets the latest
+build, for Sideloadly or TrollStore. Source address, to add it by hand:
+
+```
+https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
+```
+
+**Apple TV**: see [Apple TV (test)](#-apple-tv-test) below. **No install**: the
+[web version](https://twitchunblock.vercel.app) runs in any browser.
+
+---
+
 ## ✨ Features
 
 ### Watching
@@ -435,28 +460,6 @@ no key to paste. The backend is already hosted and shared by every install.
   app's language (written in French, translated when shown: numbers and names
   stay as they are). Share them as text or export them as a `.txt` file
   (Files, AirDrop, Mail…).
-
----
-
-## 📲 Installation
-
-TwitchUnblock isn't on the App Store, so it has to be sideloaded.
-
-<h3 align="center">
-<a href="https://altdirect.app/?url=https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json" target="_blank"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" alt="Add AltSource" width="200"></a>
-&nbsp;
-<a href="https://github.com/MXFia19/TwitchUnblock/releases/latest/download/TwitchUnblock.ipa" target="_blank"><img src="https://altdirect.app/assets/png/Download_Blue.png" alt="Download .ipa" width="200"></a>
-</h3>
-
-**Add AltSource** opens the source in AltStore, SideStore, Feather, LiveContainer,
-StikStore or TrollApps (automatic nightly builds): install **TwitchUnblock** from
-it. It also lists **TU Test**, the test builds (newest features, may be
-unstable), installed next to the normal app. **Download .ipa** gets the latest
-build, for Sideloadly or TrollStore. Source address, to add it by hand:
-
-```
-https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
-```
 
 ---
 
