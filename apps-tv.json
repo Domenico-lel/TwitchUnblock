@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.19",
+          "buildVersion": "19",
+          "date": "2026-10-18",
+          "localizedDescription": "- Account → Recent errors lists the latest warnings and errors, and failed lives or VODs are logged",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-19/TwitchUnblockTV.ipa",
+          "size": 2432299,
+          "commit": "0419353b6041cfa41e2fd49a71de5d7c176949d5"
+        },
+        {
           "version": "0.1.18",
           "buildVersion": "18",
           "date": "2026-10-18",
@@ -97,10 +106,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.18",
+      "version": "0.1.19",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-18/TwitchUnblockTV.ipa",
-      "size": 2362373
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-19/TwitchUnblockTV.ipa",
+      "size": 2432299
     }
   ]
 }
