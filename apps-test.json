@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.15",
+          "buildVersion": "315",
+          "date": "2026-10-18",
+          "localizedDescription": "- Downloads: a temporary server error no longer swaps a segment's original audio for the muted version, a downloaded VOD sent with AirPlay keeps playing on your device instead of loading forever, and deleting the download you're watching closes the player\n- Drops: a network hiccup is no longer taken for \"no drops on this channel\" (checked again 45 s later), and a drop that couldn't be claimed automatically is still notified\n- ntfy notifications: turning them off is retried until the server confirms (no more duplicate notifications), even right after turning them on\n- Channel points: rewards with a multi-line description can be redeemed again, an unknown balance shows \"—\" instead of marking every reward \"Not enough\", and after switching accounts the first chest or redemption no longer fails\n- Follow, bets and votes retry once by themselves when Twitch refuses the security token, instead of failing the first time\n- VOD chat waits for the channel's emotes before showing the first messages, and its errors are shown in your language",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-315/TwitchUnblock.ipa",
+          "size": 3751387,
+          "commit": "aafe0294a6d8348b85e8c7261f6be84f42d3dc93"
+        },
+        {
           "version": "1.4.14",
           "buildVersion": "314",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-276/TwitchUnblock.ipa",
           "size": 2932362,
           "commit": "a2fd4eb5d764bc3052d16283183d5dc7b1254df3"
-        },
-        {
-          "version": "1.2.51",
-          "buildVersion": "275",
-          "date": "2026-10-11",
-          "localizedDescription": "- Expert settings (Settings → Other): if the official Workers go down, give the address of your own Worker; it's checked, then tried first for lives, VODs and playlists, or used for everything.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-275/TwitchUnblock.ipa",
-          "size": 2911295,
-          "commit": "31c986b07ee07398146d753a680ace0704a8bc0b"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.14",
+      "version": "1.4.15",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-314/TwitchUnblock.ipa",
-      "size": 3746012
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-315/TwitchUnblock.ipa",
+      "size": 3751387
     }
   ],
   "news": []
