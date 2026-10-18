@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.22",
+          "buildVersion": "322",
+          "date": "2026-10-18",
+          "localizedDescription": "- My reports: a conversation closed by the developer, or one that reached 100 messages, says so instead of showing the reply box and then failing.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-322/TwitchUnblock.ipa",
+          "size": 3814718,
+          "commit": "994eade39442c29826c603a463cf09ae5de17f4f"
+        },
+        {
           "version": "1.4.21",
           "buildVersion": "321",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-285/TwitchUnblock.ipa",
           "size": 3022182,
           "commit": "5b050083c8ad65de8dc13ba3bcf65cccfe04173f"
-        },
-        {
-          "version": "1.3.5",
-          "buildVersion": "284",
-          "date": "2026-10-12",
-          "localizedDescription": "- When the developer replies to one of your reports (or changes its status), you get a notification, even with the app in the background; tap it to open My reports.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-284/TwitchUnblock.ipa",
-          "size": 3005349,
-          "commit": "3bfd0b8b28d565ca92942a2a570c0c193c44cdfa"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.21",
+      "version": "1.4.22",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-321/TwitchUnblock.ipa",
-      "size": 3807544
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-322/TwitchUnblock.ipa",
+      "size": 3814718
     }
   ],
   "news": []
