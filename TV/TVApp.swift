@@ -17,6 +17,9 @@ struct TwitchUnblockTVApp: App {
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        // Journal gardé entre les lancements, erreurs du lecteur comprises.
+        logger.sessionStart()
+        PlaybackDiagnostics.start()
     }
 
     var body: some Scene {

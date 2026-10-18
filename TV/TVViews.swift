@@ -533,6 +533,7 @@ struct TVChannelView: View {
 // MARK: – Compte et réglages
 struct TVAccountTab: View {
     @EnvironmentObject private var session: TVSession
+    @ObservedObject private var appLogger = AppLogger.shared
     /// Signal d'utilisation pour /stats (TVUsage) : coupé, le serveur oublie tout.
     @AppStorage(TVUsage.enabledKey) private var shareUsage = true
 
@@ -617,10 +618,42 @@ struct TVAccountTab: View {
                 }
 
                 hiddenSection
+
+                logsSection
             }
             .padding(64)
         }
         // L'attente du code n'est plus annulée en quittant l'onglet (TVSession).
+    }
+
+    /// Erreurs et alertes récentes du journal (gardé entre les lancements) :
+    /// l'Apple TV n'avait aucun moyen de les voir pour décrire un problème.
+    @ViewBuilder private var logsSection: some View {
+        let recent = Array(appLogger.logs.filter { $0.level == .error || $0.level == .warn }.prefix(30))
+        VStack(alignment: .leading, spacing: 24) {
+            Text(session.t("tv_logs_title")).font(.title3.bold())
+            if recent.isEmpty {
+                Text(session.t("tv_logs_empty")).foregroundColor(.secondary)
+            } else {
+                ForEach(recent) { e in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(e.timestamp) · \(e.category)\(e.repeats > 1 ? " ×\(e.repeats)" : "")")
+                            .font(.caption)
+                            .foregroundColor(e.level == .error ? .red : .orange)
+                        Text(LogTranslator.translate(e.message, session.lang)).font(.callout)
+                        if let d = e.detail {
+                            Text(LogTranslator.translate(d, session.lang))
+                                .font(.caption2).foregroundColor(.secondary).lineLimit(3)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Lignes atteignables à la télécommande : la liste défile.
+                    .focusable()
+                }
+                Button(session.t("logs_clear")) { appLogger.clear() }
+            }
+        }
+        .focusSection()
     }
 
     /// Chaînes et catégories masquées : un bouton par élément pour le

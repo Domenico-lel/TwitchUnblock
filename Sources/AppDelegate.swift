@@ -8,6 +8,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // Journal gardé d'un lancement à l'autre : chaque session y est
+        // marquée (date, version), et les erreurs du lecteur y arrivent.
+        logger.sessionStart()
+        PlaybackDiagnostics.start()
         // Catégorie seulement : la session n'est activée qu'à l'ouverture d'un
         // lecteur (PlaybackAudio). Activée ici, elle coupait la musique des
         // autres apps dès le lancement, même sans rien lire.

@@ -123,7 +123,11 @@ final class TVPlayerModel: ObservableObject {
             let data = await getLive(channelName: login)
             guard let raw = data.links, !raw.isEmpty else {
                 // Santé du direct (/stats) : hors ligne n'est pas un échec.
-                if data.error != "offline" { TVUsage.count("live_fail") }
+                if data.error != "offline" {
+                    TVUsage.count("live_fail")
+                    logger.error("TV/LECTEUR", "Direct impossible à lire : \(login)",
+                                 "\(data.error ?? "?") · source \(session.liveSource)")
+                }
                 let message = session.t(data.error == "offline" ? "tv_offline" : "tv_error_live")
                 // Changement de source pendant la lecture : elle continue sur
                 // l'ancienne, l'avis passe par-dessus (rien ne s'affichait).
@@ -131,6 +135,7 @@ final class TVPlayerModel: ObservableObject {
                 return false
             }
             TVUsage.count("live_\(data.source ?? "unknown")")
+            logger.info("TV/LECTEUR", "Direct : \(login)", "source \(data.source ?? "?")")
             subtitle = data.title
             // Playlists réécrites avec la vraie durée des segments (2 s) : le
             // lecteur tient le bord du direct au lieu de rester ~20 s derrière.
@@ -146,6 +151,7 @@ final class TVPlayerModel: ObservableObject {
             let markers = await markersTask
             guard !data.links.isEmpty else {
                 TVUsage.count("vod_fail")
+                logger.error("TV/LECTEUR", "VOD impossible à lire : \(id)", data.error ?? "?")
                 // Code d'erreur (getM3U8) traduit : le texte venait en français.
                 error = session.t(data.error.map(apiErrorKey) ?? "tv_error_vod")
                 return false

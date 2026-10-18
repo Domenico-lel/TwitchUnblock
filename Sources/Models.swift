@@ -264,7 +264,7 @@ enum PlayerMode {
 }
 
 // MARK: – Log
-enum LogLevel: String, CaseIterable {
+enum LogLevel: String, CaseIterable, Codable {
     case info, success, warn, error, debug
 
     var icon: String {
@@ -287,11 +287,14 @@ enum LogLevel: String, CaseIterable {
     }
 }
 
-struct LogEntry: Identifiable {
+/// Une ligne du journal. Gardée dans un fichier (journal relu au lancement
+/// suivant) ; `repeats` : même ligne arrivée plusieurs fois de suite.
+struct LogEntry: Identifiable, Codable {
     let id: Int
-    let timestamp: String
+    var timestamp: String
     let level: LogLevel
     let category: String
     let message: String
     let detail: String?
+    var repeats = 1
 }

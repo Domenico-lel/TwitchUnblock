@@ -20,11 +20,31 @@ struct LogsView: View {
         return appLogger.logs.filter { $0.level == f }
     }
 
-    // Texte exporté — calculé une seule fois au moment du partage
+    // Texte exporté — calculé une seule fois au moment du partage. En tête :
+    // version, système, appareil et nombre de lignes par niveau, pour situer
+    // un rapport et repérer ses erreurs d'un coup d'œil.
     private var exportText: String {
-        appLogger.logs
-            .map { "[\($0.timestamp)] [\($0.level.rawValue.uppercased())] [\($0.category)] \(tr($0.message))\($0.detail.map { "\n  → \(tr($0))" } ?? "")" }
+        let info = Bundle.main.infoDictionary
+        let version = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+        let counts = LogLevel.allCases.map { "\($0.rawValue) \(appLogger.count($0))" }.joined(separator: " · ")
+        let header = "TwitchUnblock \(version) · \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
+            + " · \(Self.deviceModel) · \(lang.rawValue)\n\(counts)\n\n"
+        return header + appLogger.logs
+            .map { e in
+                let times = e.repeats > 1 ? " (×\(e.repeats))" : ""
+                return "[\(e.timestamp)] [\(e.level.rawValue.uppercased())] [\(e.category)] \(tr(e.message))\(times)"
+                    + (e.detail.map { "\n  → \(tr($0))" } ?? "")
+            }
             .joined(separator: "\n")
+    }
+
+    /// Modèle exact de l'appareil (« iPhone15,2 »).
+    private static var deviceModel: String {
+        var info = utsname()
+        uname(&info)
+        return withUnsafeBytes(of: &info.machine) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
     }
 
     /// « TwitchUnblock-logs-2026-10-16-0215.txt »
@@ -45,8 +65,12 @@ struct LogsView: View {
                                active: filter == nil) {
                         filter = nil
                     }
+                    // Nombre de lignes de chaque niveau : les erreurs se voient
+                    // sans parcourir le journal.
                     ForEach(LogLevel.allCases, id: \.self) { level in
-                        filterChip(label: t("log_level_\(level.rawValue)"), active: filter == level) {
+                        let n = appLogger.count(level)
+                        filterChip(label: n > 0 ? "\(t("log_level_\(level.rawValue)")) \(n)" : t("log_level_\(level.rawValue)"),
+                                   active: filter == level) {
                             filter = (filter == level) ? nil : level
                         }
                     }
@@ -154,6 +178,15 @@ struct LogsView: View {
                 Text(entry.category)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(color)
+                // Même ligne arrivée plusieurs fois de suite.
+                if entry.repeats > 1 {
+                    Text("×\(entry.repeats)")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundColor(color)
+                        .padding(.horizontal, 5)
+                        .background(color.opacity(0.15))
+                        .clipShape(Capsule())
+                }
             }
 
             Text(tr(entry.message))

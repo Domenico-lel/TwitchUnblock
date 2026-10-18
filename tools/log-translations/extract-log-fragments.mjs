@@ -75,7 +75,9 @@ const counts = new Map()
 let calls = 0
 for (const f of files) {
   const src = fs.readFileSync(f, 'utf8')
-  const re = /logger\.(info|success|warn|error|debug)\(/g
+  // Appels au journal (logger., et self. dans AppLogger), et lignes écrites
+  // directement (LogEntry : arrêt brutal, plantage).
+  const re = /(?:logger|self\??)\.(?:info|success|warn|error|debug)\(|LogEntry\(/g
   let m
   while ((m = re.exec(src))) {
     calls++

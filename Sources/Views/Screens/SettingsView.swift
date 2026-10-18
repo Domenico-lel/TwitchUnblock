@@ -1978,6 +1978,16 @@ struct SettingsView: View {
                             .font(.system(size: 13, weight: .semibold))
                         Text(store.t("show_logs")).font(.tLabel)
                         Spacer()
+                        // Erreurs du journal : visibles avant même de l'ouvrir.
+                        let errors = AppLogger.shared.count(.error)
+                        if errors > 0 {
+                            Label("\(errors)", systemImage: "exclamationmark.triangle.fill")
+                                .font(.tBadge)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color.tDanger)
+                                .cornerRadius(8)
+                        }
                         Text("\(AppLogger.shared.logs.count)")
                             .font(.tBadge)
                             .foregroundColor(.white)

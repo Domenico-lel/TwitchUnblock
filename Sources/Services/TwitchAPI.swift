@@ -1039,12 +1039,18 @@ func fetchTwitchUser(token: String) async throws -> TwitchUser? {
     var req = URLRequest(url: url)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-    guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return nil }
+    guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
+        logger.warn("HELIX", "Lecture du compte : pas de réponse (réseau)", nil)
+        return nil
+    }
     let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
     if status == 401 { throw URLError(.userAuthenticationRequired) }
     guard status == 200,
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let arr  = json["data"] as? [[String: Any]], let u = arr.first else { return nil }
+          let arr  = json["data"] as? [[String: Any]], let u = arr.first else {
+        logger.warn("HELIX", "Lecture du compte refusée", "HTTP \(status)")
+        return nil
+    }
     logger.success("HELIX", "Connecté en tant que \"\(u["display_name"] as? String ?? "")\"")
     return TwitchUser(
         id: u["id"] as? String ?? "",
@@ -1709,8 +1715,21 @@ private func gqlRequest(_ query: String, _ variables: [String: Any]) async -> [S
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = body
     guard let (data, _) = try? await URLSession.shared.data(for: req),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        logger.warn("GQL", "Requête sans réponse (réseau)", String(query.prefix(60)))
+        return nil
+    }
+    if json["errors"] != nil { logger.warn("GQL", "Requête refusée", gqlErrorSummary(json)) }
     return json["data"] as? [String: Any]
+}
+
+/// Messages d'erreur d'une réponse GQL (codes compris), pour le journal.
+func gqlErrorSummary(_ json: [String: Any]?) -> String {
+    guard let errors = json?["errors"] as? [[String: Any]], !errors.isEmpty else { return "réponse inattendue" }
+    return errors.prefix(3).map { e in
+        let code = (e["extensions"] as? [String: Any])?["code"] as? String
+        return [e["message"] as? String, code].compactMap { $0 }.joined(separator: " · ")
+    }.joined(separator: " | ")
 }
 
 // MARK: – Pages suivantes des listes (Client-ID Android)
@@ -1865,9 +1884,15 @@ func getFollowedLogins(token: String, userId: String) async -> [String]? {
         var req = URLRequest(url: url)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
+            logger.warn("HELIX", "Chaînes suivies : pas de réponse (réseau)", "page \(logins.count / 100 + 1)")
+            return nil
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            logger.warn("HELIX", "Chaînes suivies refusées", "HTTP \(status)")
+            return nil
+        }
         for f in json["data"] as? [[String: Any]] ?? [] {
             if let l = f["broadcaster_login"] as? String { logins.append(l) }
         }
@@ -1892,9 +1917,15 @@ func getFollowedCategoriesGQL(webToken: String) async -> [TwitchCategory]? {
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = body
     guard let (data, _) = try? await URLSession.shared.data(for: req),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let nodes = (((json["data"] as? [String: Any])?["currentUser"] as? [String: Any])?["followedGames"] as? [String: Any])?["nodes"] as? [[String: Any]]
-    else { return nil }
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        logger.warn("GQL", "Catégories suivies : pas de réponse (réseau)", nil)
+        return nil
+    }
+    guard let nodes = (((json["data"] as? [String: Any])?["currentUser"] as? [String: Any])?["followedGames"] as? [String: Any])?["nodes"] as? [[String: Any]]
+    else {
+        logger.warn("GQL", "Catégories suivies refusées", gqlErrorSummary(json))
+        return nil
+    }
     return nodes.compactMap { n in
         guard let id = n["id"] as? String else { return nil }
         return TwitchCategory(id: id, name: n["displayName"] as? String ?? "",
@@ -2071,9 +2102,15 @@ func getClipsHelix(token: String, broadcasterId: String, period: String,
     var req = URLRequest(url: url)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-    guard let (data, resp) = try? await URLSession.shared.data(for: req),
-          (resp as? HTTPURLResponse)?.statusCode == 200,
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], nil) }
+    guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
+        logger.warn("HELIX", "Clips : pas de réponse (réseau)", nil)
+        return ([], nil)
+    }
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        logger.warn("HELIX", "Clips refusés", "HTTP \(status)")
+        return ([], nil)
+    }
     let arr = json["data"] as? [[String: Any]] ?? []
     let next = (json["pagination"] as? [String: Any])?["cursor"] as? String
     let list: [ClipData] = arr.compactMap { c in
