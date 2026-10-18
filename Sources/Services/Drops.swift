@@ -202,15 +202,21 @@ final class DropsService: ObservableObject {
             return
         }
         var claimedSome = false
+        var unclaimed: [TimedDrop] = []
         for c in campaigns where !c.needsAccountLink {
             for d in c.drops where d.canClaim {
                 guard !ended(token) else { return }
                 if await claim(d, token: token) {
                     claimedSome = true
                     notify(d, claimed: true)
+                } else {
+                    unclaimed.append(d)
                 }
             }
         }
+        // Réclamation ratée (jeton d'intégrité bloqué…) : on prévient quand
+        // même qu'un drop attend — il restait non réclamé sans un mot.
+        for d in unclaimed { notify(d, claimed: false) }
         // Une réclamation se vérifie dans l'inventaire (Twitch peut répondre
         // « éligible » sans rien donner à un compte non lié).
         if claimedSome { await refresh(token: token, autoClaim: false) }
@@ -497,15 +503,21 @@ final class DropsHeartbeat: ObservableObject {
                 lastCheck = Date()
                 let found = await Self.dropsChannelId(login)
                 guard !Task.isCancelled else { return }   // arrêté entre-temps
-                if let id = found {
+                switch found {
+                case .found(let id):
                     channelId = id
                     status = .active(login)
                     logger.success("DROPS", "Drops sur \(login)",
                                    pollSegments ? "progression : HEAD des segments toutes les 10 s"
                                                 : "progression : flux du lecteur (direct par le compte)")
-                } else {
+                case .absent:
                     status = .noDrops(login)
                     logger.debug("DROPS", "Pas de drops sur \(login)", nil)
+                case .unknown:
+                    // Pas de réponse (passage 4G/Wi-Fi…) : rien n'est conclu,
+                    // nouvel essai dans 45 s (« pas de drops » coûtait 10 min).
+                    lastCheck = Date().addingTimeInterval(-600 + 45)
+                    logger.debug("DROPS", "Drops de \(login) : pas de réponse", "nouvel essai dans 45 s")
                 }
             }
             if channelId != nil {
@@ -567,15 +579,18 @@ final class DropsHeartbeat: ObservableObject {
         return .ok
     }
 
-    /// Identifiant de la chaîne si elle a des campagnes de drops, nil sinon.
-    private static func dropsChannelId(_ login: String) async -> String? {
+    private enum ChannelDrops { case found(String), absent, unknown }
+
+    /// Drops de la chaîne : trouvés (son identifiant), aucun, ou inconnu (pas
+    /// de réponse — une panne passait pour « pas de drops »).
+    private static func dropsChannelId(_ login: String) async -> ChannelDrops {
         let q = "query($l: String!) { user(login: $l) { id channel { viewerDropCampaigns { id } } } }"
         guard let json = await webGQL(["query": q, "variables": ["l": login]], token: nil),
-              let user = (json["data"] as? [String: Any])?["user"] as? [String: Any],
-              let id = user["id"] as? String,
+              let data = json["data"] as? [String: Any] else { return .unknown }
+        guard let user = data["user"] as? [String: Any], let id = user["id"] as? String,
               let list = (user["channel"] as? [String: Any])?["viewerDropCampaigns"] as? [Any],
-              !list.isEmpty else { return nil }
-        return id
+              !list.isEmpty else { return .absent }
+        return .found(id)
     }
 
     /// Plus petite qualité du live, lue avec un jeton de lecture lié au compte.

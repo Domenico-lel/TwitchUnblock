@@ -149,6 +149,14 @@ final class VodUnmuteLoader: NSObject, AVAssetResourceLoaderDelegate {
     static func fallBackForAirPlay(_ player: AVPlayer, keepPosition: Bool = true) -> AVPlayerItem? {
         guard player.isExternalPlaybackActive,
               let asset = player.currentItem?.asset as? AVURLAsset else { return nil }
+        // VOD téléchargée (serveur local, 127.0.0.1) : le récepteur ne peut pas
+        // la joindre — chargement sans fin. Elle reste lue sur l'appareil
+        // (recopie de l'écran, ou son seul en AirPlay audio).
+        if asset.url.host == "127.0.0.1" || asset.url.host == "localhost" {
+            player.allowsExternalPlayback = false
+            logger.info("UNMUTE", "AirPlay : VOD téléchargée gardée sur l'appareil", nil)
+            return nil
+        }
         let plain: URL?
         switch asset.url.scheme {
         case scheme, mutedScheme:     plain = unwrap(asset.url)

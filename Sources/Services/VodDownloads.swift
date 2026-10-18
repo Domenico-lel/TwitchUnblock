@@ -297,6 +297,7 @@ final class VodDownloads: ObservableObject {
         try? FileManager.default.removeItem(at: Self.folder(id))
         items.removeAll { $0.id == id }
         save()
+        NotificationCenter.default.post(name: .vodDownloadDeleted, object: id)
     }
 
     private func stopWork(_ id: String) {
@@ -799,17 +800,19 @@ enum VodFetcher {
                     return .saved(name, fileSize(dest) ?? 0)
                 }
                 try? fm.removeItem(at: tmp)
-                // Son d'origine effacé du CDN : la version muette.
+                // Erreur passagère (429, 5xx) : nouvel essai d'abord, original
+                // compris — il passait aussitôt à la version muette, pour de bon.
+                if code == 429 || code >= 500, attempt < 3 {
+                    attempt += 1
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+                    continue
+                }
+                // Son d'origine effacé du CDN (ou toujours refusé) : la version muette.
                 if kind == .original, let fallback = job.fallback {
                     url = fallback
                     name = VodDownloader.mutedName(job.fileName)
                     kind = .muted
                     attempt = 0
-                    continue
-                }
-                if code == 429 || code >= 500, attempt < 3 {
-                    attempt += 1
-                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
                     continue
                 }
                 return .refused("http:\(code)")
@@ -1010,6 +1013,15 @@ final class VodDownloader: NSObject, URLSessionDownloadDelegate {
         }
         if let code = refused.removeValue(forKey: task.taskIdentifier) {
             if code == -1 { return }
+            // Erreur passagère (429, 5xx) : trois nouveaux essais avant de
+            // conclure (un original passait sinon aussitôt en version muette).
+            if code == 429 || code >= 500, (retries[key] ?? 0) < 3, let url = task.originalRequest?.url {
+                retries[key] = (retries[key] ?? 0) + 1
+                start(Job(item: job.item, kind: job.kind, url: url, fallback: job.fallback, fileName: job.fileName),
+                      generation: generation)
+                return
+            }
+            retries[key] = nil
             // Son d'origine refusé (effacé du CDN) : la version muette.
             if job.kind == .original, let fallback = job.fallback {
                 start(Job(item: job.item, kind: .muted, url: fallback, fallback: nil,
@@ -1060,4 +1072,10 @@ private final class Once {
         done = true
         return true
     }
+}
+
+extension Notification.Name {
+    /// Téléchargement supprimé (objet : son identifiant) : le lecteur qui le
+    /// lisait se ferme.
+    static let vodDownloadDeleted = Notification.Name("VodDownloadDeleted")
 }

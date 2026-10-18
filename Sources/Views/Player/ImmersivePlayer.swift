@@ -334,6 +334,9 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
             default:           break
             }
         }
+        // Coupé pour une VOD téléchargée en AirPlay (fallBackForAirPlay) :
+        // rétabli pour la lecture suivante, sur le même lecteur.
+        player.allowsExternalPlayback = true
         player.replaceCurrentItem(with: item)
         // play() rend à la lecture la vitesse par défaut, qui survit au
         // changement d'élément : 1× pour un direct, même après une VOD en

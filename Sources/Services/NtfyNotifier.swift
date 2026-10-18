@@ -41,6 +41,7 @@ enum NtfyNotifier {
     /// est retenté à chaque retour dans l'app. true si c'est déjà parti.
     static func enable(lang: Lang) async -> Bool {
         UserDefaults.standard.set(true, forKey: enabledKey)
+        UserDefaults.standard.removeObject(forKey: unsubPendingKey)
         return await sync(lang: lang, force: true)
     }
 
@@ -50,7 +51,23 @@ enum NtfyNotifier {
         UserDefaults.standard.removeObject(forKey: syncedKey)
         UserDefaults.standard.removeObject(forKey: errorKey)
         UserDefaults.standard.removeObject(forKey: countKey)
-        _ = await post("/api/push/unsubscribe", ["ntfy": topic])
+        UserDefaults.standard.set(true, forKey: unsubPendingKey)
+        await retryUnsubscribe()
+    }
+
+    /// Désabonnement pas encore confirmé par le Worker (hors ligne…) : renvoyé
+    /// à chaque retour dans l'app. Raté une fois, le Worker publiait encore
+    /// jusqu'à 60 jours (notifications en double avec celles de l'app).
+    private static let unsubPendingKey = "ntfy_unsub_pending"
+
+    static func retryUnsubscribe() async {
+        let ud = UserDefaults.standard
+        guard ud.bool(forKey: unsubPendingKey), !isEnabled else { return }
+        guard let code = await post("/api/push/unsubscribe", ["ntfy": topic]) else { return }
+        // 200, ou un refus qui ne changera pas (route absente, sujet inconnu).
+        if code == 200 || ((400 ..< 500).contains(code) && code != 429) {
+            ud.removeObject(forKey: unsubPendingKey)
+        }
     }
 
     /// Activé, mais rien encore d'accepté par le Worker.
@@ -67,7 +84,7 @@ enum NtfyNotifier {
     /// nouvelles, le Worker oublie le sujet).
     @discardableResult
     static func sync(lang: Lang, force: Bool = false) async -> Bool {
-        guard isEnabled else { return false }
+        guard isEnabled else { await retryUnsubscribe(); return false }
         let ud = UserDefaults.standard
         var channels = ud.stringArray(forKey: "local_follows") ?? []
         if let token = Keychain.loadToken("twitch_token"),
@@ -89,7 +106,16 @@ enum NtfyNotifier {
         let last = ud.double(forKey: syncedKey)
         if !force, hash == ud.string(forKey: hashKey), Date().timeIntervalSince1970 - last < 86400,
            ud.string(forKey: errorKey) == nil { return true }
+        // Coupé pendant la lecture des suivis (jusqu'à 10 pages) : rien à envoyer.
+        guard isEnabled else { return false }
         let code = await post("/api/push/subscribe", ["ntfy": topic, "channels": list, "lang": lang.rawValue])
+        // Coupé pendant l'envoi : le désabonnement a pu arriver avant cet
+        // abonnement, et le Worker publiait encore 60 jours. Il est renvoyé.
+        guard isEnabled else {
+            UserDefaults.standard.set(true, forKey: unsubPendingKey)
+            await retryUnsubscribe()
+            return false
+        }
         guard code == 200 else {
             ud.set(code.map { "HTTP \($0)" } ?? "network", forKey: errorKey)
             logger.warn("NTFY", "Abonnement refusé par le Worker", code.map { "HTTP \($0)" } ?? "réseau")

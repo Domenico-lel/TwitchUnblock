@@ -567,6 +567,13 @@ struct MainTabView: View {
             guard let login = note.userInfo?["login"] as? String, !login.isEmpty else { return }
             afterClosingPresentations { playLive(login) }
         }
+        // Téléchargement supprimé pendant qu'on le regarde (mini-lecteur) :
+        // le lecteur se ferme au lieu de rester figé sur des fichiers effacés.
+        .onReceive(NotificationCenter.default.publisher(for: .vodDownloadDeleted)) { note in
+            guard let id = note.object as? String,
+                  case .recovered(let rec)? = playerMode, rec.streamID == "offline-\(id)" else { return }
+            stopPlayer()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openMyFeedback)) { _ in
             guard !showMyFeedback else { return }
             afterClosingPresentations { showMyFeedback = true }
