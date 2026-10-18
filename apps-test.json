@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.11",
+          "buildVersion": "310",
+          "date": "2026-10-18",
+          "localizedDescription": "- Chat: no more duplicate messages with recent history and delay sync on, /me shows as an action, other slash commands no longer show up as messages, and the replied-to message shows its text correctly\n- Chat: mentions and autocomplete use the username when the display name is localized; the chat follows new messages again after tapping the arrow\n- Raids: turning off raids during a live is respected, and a raid banner that never goes away clears itself",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-310/TwitchUnblock.ipa",
+          "size": 3720130,
+          "commit": "403237071463849aa0b49b6fa3ea3638f26adf63"
+        },
+        {
           "version": "1.4.10",
           "buildVersion": "309",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-271/TwitchUnblock.ipa",
           "size": 2894237,
           "commit": "5c61522f21db22dfb59c4da6bd3bf8678a600545"
-        },
-        {
-          "version": "1.2.46",
-          "buildVersion": "270",
-          "date": "2026-10-11",
-          "localizedDescription": "- Pick the order of the live sources in Settings → Player: if one doesn't answer, the next one takes over; picking a source from the player menu moves it to the top.\n- My reports: a new “Seen” status once your message has been read.\n- Fixed a black screen in “Source” on Luminous Europe for channels that stream with multiple encodes (each quality now keeps its own name).",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-270/TwitchUnblock.ipa",
-          "size": 2880302,
-          "commit": "21b7a5e4cba231b3ceb80e492aa848493edaf642"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.10",
+      "version": "1.4.11",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-309/TwitchUnblock.ipa",
-      "size": 3716551
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-310/TwitchUnblock.ipa",
+      "size": 3720130
     }
   ],
   "news": []
