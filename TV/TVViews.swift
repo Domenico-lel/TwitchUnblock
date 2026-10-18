@@ -40,18 +40,31 @@ struct TVRootView: View {
     @State private var pendingChannel: String?
     @State private var channelPage: TVChannelRoute?
 
+    enum Tab: Hashable { case following, top, categories, search, account }
+    @State private var tab = Tab.following
+    /// Suivies choisi de nouveau alors qu'il est affiché : il se recharge.
+    @State private var followingRefresh = 0
+
     var body: some View {
-        TabView {
-            TVFollowingTab(play: play)
+        TabView(selection: Binding(get: { tab }, set: { new in
+            if new == tab, new == .following { followingRefresh += 1 }
+            tab = new
+        })) {
+            TVFollowingTab(play: play, refresh: followingRefresh)
                 .tabItem { Text(session.t("tv_following")) }
+                .tag(Tab.following)
             TVTopTab(play: play)
                 .tabItem { Text(session.t("tv_top")) }
+                .tag(Tab.top)
             TVCategoriesTab(play: play)
                 .tabItem { Text(session.t("tv_categories")) }
+                .tag(Tab.categories)
             TVSearchTab(play: play)
                 .tabItem { Text(session.t("tv_search")) }
+                .tag(Tab.search)
             TVAccountTab()
                 .tabItem { Text(session.t("tv_account")) }
+                .tag(Tab.account)
         }
         .fullScreenCover(item: $playing, onDismiss: openPendingChannel) { item in
             TVPlayerScreen(item: item, onChannel: { login in
@@ -116,7 +129,15 @@ struct TVChannelCover: View {
 // MARK: – Suivies
 struct TVFollowingTab: View {
     let play: (TVPlayback) -> Void
+    /// Change quand l'onglet est choisi de nouveau : rechargement demandé.
+    var refresh = 0
     @EnvironmentObject private var session: TVSession
+    @Environment(\.scenePhase) private var scenePhase
+    /// Chargée une fois, la liste gardait des lives finis jusqu'au
+    /// redémarrage de l'app : relue au retour sur l'onglet ou dans l'app (au
+    /// bout d'une minute), et toutes les 2 minutes tant qu'elle est affichée.
+    @State private var lastLoad = Date.distantPast
+    @State private var visible = false
     @State private var streams: [TwitchStream] = []
     /// Chaînes suivies hors ligne, dernier live le plus récent d'abord : leur
     /// page s'ouvre pour voir leurs vidéos.
@@ -146,6 +167,21 @@ struct TVFollowingTab: View {
         }
         // Relancé quand le compte arrive (connexion, ou lancement).
         .task(id: session.user?.id) { await load() }
+        .onChange(of: refresh) { _ in Task { await load() } }
+        .onAppear {
+            visible = true
+            if Date().timeIntervalSince(lastLoad) > 60 { Task { await load() } }
+        }
+        .onDisappear { visible = false }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active, visible, Date().timeIntervalSince(lastLoad) > 60 { Task { await load() } }
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 120 * 1_000_000_000)
+                if visible, scenePhase == .active { await load() }
+            }
+        }
     }
 
     private var offlineSection: some View {
@@ -182,6 +218,9 @@ struct TVFollowingTab: View {
 
     private func load() async {
         guard let uid = session.user?.id, let token = session.token else { streams = []; offline = []; return }
+        // Deux demandes rapprochées (retour sur l'onglet, puis minuterie) : une seule.
+        guard !loading else { return }
+        lastLoad = Date()
         loading = true
         if let list = try? await getFollowedStreams(token: token, userId: uid) {
             streams = list
