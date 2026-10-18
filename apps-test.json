@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.14",
+          "buildVersion": "314",
+          "date": "2026-10-18",
+          "localizedDescription": "- Channel points: rewards with a multi-line description can be redeemed again, an unknown balance shows \"—\" instead of marking every reward \"Not enough\", and after switching accounts the first chest or redemption no longer fails\n- Follow, bets and votes retry once by themselves when Twitch refuses the security token, instead of failing the first time\n- VOD chat waits for the channel's emotes before showing the first messages, and its errors are shown in your language",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-314/TwitchUnblock.ipa",
+          "size": 3746012,
+          "commit": "6be15afd06dc58df7fa728e8cc59dbcf50aa1f6f"
+        },
+        {
           "version": "1.4.13",
           "buildVersion": "313",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-275/TwitchUnblock.ipa",
           "size": 2911295,
           "commit": "31c986b07ee07398146d753a680ace0704a8bc0b"
-        },
-        {
-          "version": "1.2.49",
-          "buildVersion": "273",
-          "date": "2026-10-11",
-          "localizedDescription": "- Améliorations et corrections",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-273/TwitchUnblock.ipa",
-          "size": 2894308,
-          "commit": "e1182c51813650c434f7923d3fca365ec4e2a3c2"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.13",
+      "version": "1.4.14",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-313/TwitchUnblock.ipa",
-      "size": 3745828
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-314/TwitchUnblock.ipa",
+      "size": 3746012
     }
   ],
   "news": []
