@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.21",
+          "buildVersion": "321",
+          "date": "2026-10-18",
+          "localizedDescription": "- The header margin now follows rotation (no title under the notch, no extra gap after turning the iPhone).\n- Counts agree with their word: 1 viewer, 1 vote, 1 file… (and the three Russian plural forms).\n- TU Test has its own link scheme: tapping a ntfy notification opens the right app when both are installed.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-321/TwitchUnblock.ipa",
+          "size": 3807544,
+          "commit": "0a489cf8d3f3c0c6f69a735dcfa2aef854bec7ad"
+        },
+        {
           "version": "1.4.20",
           "buildVersion": "320",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-284/TwitchUnblock.ipa",
           "size": 3005349,
           "commit": "3bfd0b8b28d565ca92942a2a570c0c193c44cdfa"
-        },
-        {
-          "version": "1.3.4",
-          "buildVersion": "282",
-          "date": "2026-10-12",
-          "localizedDescription": "- In landscape, the chat now shows the pinned message, polls, predictions and raids, plus a card when the channel has drops (reward, watch time, end date, details) that you can dismiss (Settings → Customize → Channel drops).\n- Tap an emote or a badge in the chat to see its exact name and where it comes from (Twitch, BetterTTV, FrankerFaceZ, 7TV), then copy it or add it to your message.\n- BetterTTV: personal emotes of BTTV Pro users show up once BTTV announces them, and emotes added to the channel during the stream appear right away.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-282/TwitchUnblock.ipa",
-          "size": 2999926,
-          "commit": "1be4bc2fd48bd874200f4ac91ba05b67000feef1"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.20",
+      "version": "1.4.21",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-320/TwitchUnblock.ipa",
-      "size": 3803685
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-321/TwitchUnblock.ipa",
+      "size": 3807544
     }
   ],
   "news": []
