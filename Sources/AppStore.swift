@@ -217,6 +217,11 @@ final class AppStore: ObservableObject {
     @Published var preferredQuality: String = "source" {
         didSet { UserDefaults.standard.set(preferredQuality, forKey: "cfg_quality_pref") }
     }
+    /// Qualité au lancement en données mobiles (`kCellularQualityPrefs`) :
+    /// « auto » par défaut, la qualité suit le débit (NetworkStatus).
+    @Published var cellularQuality: String = "auto" {
+        didSet { UserDefaults.standard.set(cellularQuality, forKey: "cfg_quality_cellular") }
+    }
     /// Audio seul préféré : ce que retenaient les versions d'avant (gardé
     /// dans la sauvegarde pour elles).
     var preferAudioOnly: Bool { preferredQuality == "audio" }
@@ -755,6 +760,9 @@ final class AppStore: ObservableObject {
         } else {
             preferredQuality = ud.bool(forKey: "cfg_audio_only") ? "audio" : "source"
             ud.set(preferredQuality, forKey: "cfg_quality_pref")
+        }
+        if let cell = ud.string(forKey: "cfg_quality_cellular"), kCellularQualityPrefs.contains(cell) {
+            cellularQuality = cell
         }
         showLatency        = ud.object(forKey: "dbg_latency")    as? Bool ?? false
         autoChatDelay      = ud.object(forKey: "dbg_chat_delay") as? Bool ?? false

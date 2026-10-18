@@ -1524,7 +1524,26 @@ let kQualityPrefs = ["source", "1080", "720", "480", "360", "160", "audio"]
 func isSourceQuality(_ key: String) -> Bool { ["source", "chunked"].contains(key.lowercased()) }
 func isAudioQuality(_ key: String) -> Bool { key.lowercased().contains("audio") }
 /// « Auto » : la liste maîtresse, que seuls les liens du Worker proposent.
-private func isAutoQuality(_ key: String) -> Bool { key.lowercased() == "auto" }
+func isAutoQuality(_ key: String) -> Bool { key.lowercased() == "auto" }
+
+/// Choix possibles pour les données mobiles : « auto » (la liste adaptative :
+/// la qualité suit le débit), « same » (comme en Wi-Fi), ou un palier.
+let kCellularQualityPrefs = ["auto", "same", "720", "480", "360", "audio"]
+
+/// Qualité à lancer selon la connexion. En données mobiles, la préférence
+/// des données mobiles : « auto » prend la liste adaptative si le flux en a
+/// une, sinon 720p au plus — une qualité fixe trop haute pour le débit
+/// gelait l'image (calages en boucle) pendant que le chat continuait.
+func launchQualityKey(_ keys: [String], pref: String, cellularPref: String, cellular: Bool,
+                      variants: [String: VariantInfo] = [:]) -> String {
+    guard cellular, cellularPref != "same" else { return preferredQualityKey(keys, pref: pref, variants: variants) }
+    if cellularPref == "auto" {
+        if pref == "audio" { return preferredQualityKey(keys, pref: pref, variants: variants) }
+        if let auto = keys.first(where: isAutoQuality) { return auto }
+        return preferredQualityKey(keys, pref: String(min(Int(pref) ?? 720, 720)), variants: variants)
+    }
+    return preferredQualityKey(keys, pref: cellularPref, variants: variants)
+}
 
 /// Hauteur écrite dans le nom : « 720p60 » → 720, « 1920x1080 » → 1080.
 private func nameHeight(_ key: String) -> Int? {

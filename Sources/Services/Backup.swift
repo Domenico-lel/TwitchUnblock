@@ -75,6 +75,7 @@ enum Backup {
             "ios_subAdFree": store.subAdFree,
             "ios_immersivePlayer": store.immersivePlayer,
             "ios_liveActivity": store.liveActivity,
+            "ios_cellularQuality": store.cellularQuality,
             "ios_fillScreen": store.fillScreen,
             "ios_landscapeChat": store.landscapeChat.rawValue,
             "ios_chatFontSize": store.chatFontSize,
@@ -187,6 +188,7 @@ enum Backup {
         bool("ios_subAdFree") { store.subAdFree = $0 }
         bool("ios_immersivePlayer") { store.immersivePlayer = $0 }
         bool("ios_liveActivity") { store.liveActivity = $0 }
+        if let q = s["ios_cellularQuality"] as? String, kCellularQualityPrefs.contains(q) { store.cellularQuality = q }
         bool("ios_fillScreen") { store.fillScreen = $0 }
         if let v = s["ios_landscapeChat"] as? String, let lc = LandscapeChat(rawValue: v) { store.landscapeChat = lc }
         size("ios_chatFontSize", AppStore.chatFontRange) { store.chatFontSize = $0 }

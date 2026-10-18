@@ -1225,6 +1225,34 @@ struct SettingsView: View {
                 logger.settingChanged("Qualité préférée", value: value)
             }
         }
+        // Données mobiles : « Auto » par défaut, la qualité suit le débit (une
+        // qualité fixe trop haute faisait geler l'image, le chat continuant).
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("cellular_quality"))
+                    .font(.tCardTitle)
+                    .foregroundColor(.tText)
+                Text(store.t("cellular_quality_sub"))
+                    .font(.tMeta)
+                    .foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Picker("", selection: $store.cellularQuality) {
+                ForEach(kCellularQualityPrefs, id: \.self) { pref in
+                    Text(pref == "auto" ? store.t("q_auto") : pref == "same" ? store.t("q_same_wifi")
+                         : pref == "audio" ? store.t("q_audio") : "\(pref)p")
+                        .tag(pref)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .tint(.tPrimary)
+            .onChange(of: store.cellularQuality) { value in
+                logger.settingChanged("Qualité en données mobiles", value: value)
+            }
+        }
+        .padding(.top, 8)
     }
 
     /// Audio spatial (AirPods) : seul choix qu'iOS laisse aux apps (voir SpatialAudio).

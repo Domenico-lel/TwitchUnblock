@@ -437,5 +437,11 @@
  "VOD impossible à lire :": ["VOD can't be played:", "No se puede reproducir el VOD:", "Не удаётся воспроизвести VOD:"],
  "Connecté par code": ["Signed in with a code", "Sesión iniciada con un código", "Вход по коду выполнен"],
  "Connexion par code refusée": ["Code sign-in refused", "Inicio de sesión con código rechazado", "Вход по коду отклонён"],
- "━━━ Nouvelle session démarrée ━━━": ["━━━ New session started ━━━", "━━━ Nueva sesión iniciada ━━━", "━━━ Новый сеанс начат ━━━"]
+ "━━━ Nouvelle session démarrée ━━━": ["━━━ New session started ━━━", "━━━ Nueva sesión iniciada ━━━", "━━━ Новый сеанс начат ━━━"],
+ "Avance sur le bord après un calage": ["More margin from the live edge after a stall", "Más margen respecto al directo tras una parada", "Больше запаса от края трансляции после остановки"],
+ "Calages répétés : qualité baissée": ["Repeated stalls: quality lowered", "Paradas repetidas: calidad reducida", "Повторяющиеся остановки: качество снижено"],
+ "Connexion : données mobiles": ["Connection: mobile data", "Conexión: datos móviles", "Подключение: мобильная сеть"],
+ "Connexion : hors ligne": ["Connection: offline", "Conexión: sin conexión", "Подключение: офлайн"],
+ "Connexion : Wi-Fi ou filaire": ["Connection: Wi-Fi or wired", "Conexión: Wi-Fi o por cable", "Подключение: Wi-Fi или кабель"],
+ "mode données réduites": ["Low Data Mode", "modo de datos reducidos", "режим экономии данных"]
 }

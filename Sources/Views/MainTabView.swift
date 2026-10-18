@@ -80,6 +80,8 @@ struct MainTabView: View {
     @State private var feedbackContext: String? = nil
     /// Qualité retenue par le lecteur immersif (vide = meilleure disponible).
     @State private var immersiveQuality = ""
+    /// « Connexion lente » annoncé dans le lecteur après une baisse de qualité.
+    @State private var slowNetworkNotice: String? = nil
     /// Largeur du chat au début d'un glissement : la translation du geste est
     /// relative à son point de départ, que la vue ne connaît plus une fois
     /// qu'elle a commencé à rétrécir.
@@ -574,6 +576,12 @@ struct MainTabView: View {
                   case .recovered(let rec)? = playerMode, rec.streamID == "offline-\(id)" else { return }
             stopPlayer()
         }
+        // Calages répétés dans le lecteur immersif : qualité trop haute pour le
+        // débit (données mobiles, Wi-Fi faible) → Auto, ou un cran en dessous.
+        .onReceive(NotificationCenter.default.publisher(for: .tuPlaybackStalling)) { note in
+            guard note.object as? String == "immersive" else { return }
+            lowerQualityAfterStalls()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openMyFeedback)) { _ in
             guard !showMyFeedback else { return }
             afterClosingPresentations { showMyFeedback = true }
@@ -942,7 +950,7 @@ struct MainTabView: View {
                 nowPlaying: nowPlayingMeta,
                 speed: playbackSpeed,
                 onSpeedChange: { setPlaybackSpeed($0) },
-                notice: accountNotice,
+                notice: slowNetworkNotice ?? accountNotice,
                 onProgress: { time in
                     // Pendant une bascule, `playerMode` désigne déjà la
                     // nouvelle source alors que le lecteur en place joue encore
@@ -995,7 +1003,7 @@ struct MainTabView: View {
                 onLatency: { updateLatency($0) },
                 onBehind: { updateBehind($0) },
                 onPlaying: { playerPlaying = $0 },
-                notice: accountNotice,
+                notice: slowNetworkNotice ?? accountNotice,
                 onChat: nil,
                 onRewind: rewindAction,
                 onBackToLive: backToLiveAction
@@ -1112,11 +1120,34 @@ struct MainTabView: View {
         .padding(.top, TSpace.sm)
     }
 
+    /// Qualité baissée après des calages répétés : « Auto » (la qualité suit
+    /// le débit) si le flux l'a, sinon le cran du dessous. La préférence
+    /// enregistrée ne change pas : seul ce lecteur passe plus bas.
+    private func lowerQualityAfterStalls() {
+        guard let links = qualityLinks, !links.isEmpty else { return }
+        let current = currentQuality(links)
+        guard !isAutoQuality(current), !isAudioQuality(current) else { return }
+        var next = links.keys.first(where: isAutoQuality)
+        if next == nil {
+            let keys = Array(links.keys)
+            let height = { (k: String) in qualityHeight(k, among: keys, variants: qualityVariants) }
+            let video = keys.filter { !isAudioQuality($0) && !isAutoQuality($0) }.sorted { height($0) > height($1) }
+            if let i = video.firstIndex(of: current), i + 1 < video.count { next = video[i + 1] }
+        }
+        guard let next, next != current else { return }
+        logger.warn("LECTEUR", "Calages répétés : qualité baissée", "\(current) → \(next)")
+        immersiveQuality = next
+        slowNetworkNotice = store.t("slow_network_quality")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { slowNetworkNotice = nil }
+    }
+
     /// Qualité en cours pour le lecteur immersif : celle choisie, sinon la
     /// qualité préférée (ou la plus proche en dessous).
     private func currentQuality(_ links: QualityLinks) -> String {
         if !immersiveQuality.isEmpty, links[immersiveQuality] != nil { return immersiveQuality }
-        return preferredQualityKey(Array(links.keys), pref: store.preferredQuality, variants: qualityVariants)
+        // En données mobiles : la qualité choisie pour elles (Auto par défaut).
+        return launchQualityKey(Array(links.keys), pref: store.preferredQuality, cellularPref: store.cellularQuality,
+                                cellular: NetworkStatus.shared.isCellular, variants: qualityVariants)
     }
 
     /// Arrondi à la seconde : sinon la vue se recalculerait à chaque tick.

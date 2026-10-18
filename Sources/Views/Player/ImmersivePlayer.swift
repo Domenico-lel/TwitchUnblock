@@ -146,6 +146,11 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
     /// Échecs : lecture interrompue en route, élément déjà traité (le statut
     /// et la notification arrivent tous deux), relances d'un direct.
     private var failObs: NSObjectProtocol?
+    /// Calages de l'élément en cours (minute écoulée) : répétés, la qualité
+    /// est trop haute pour le débit (.tuPlaybackStalling).
+    private var stallObs: NSObjectProtocol?
+    private var stallTimes: [Date] = []
+    private var lastStallSignal = Date.distantPast
     private weak var failedItem: AVPlayerItem?
     private var autoReloads = 0
     private var lastAutoReload = Date.distantPast
@@ -215,6 +220,14 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         ) { [weak self] note in
             guard let item = note.object as? AVPlayerItem else { return }
             self?.itemFailed(item, error: note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)
+        }
+        // Calage (mémoire tampon vide) : le direct prend de l'avance sur le
+        // bord, et des calages répétés font baisser la qualité.
+        stallObs = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemPlaybackStalled, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self, let item = note.object as? AVPlayerItem, item === self.player.currentItem else { return }
+            self.stalled()
         }
         timeObs = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
@@ -301,12 +314,27 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         }
     }
 
+    /// Calage de l'élément en cours. Deux en une minute (90 s au moins entre
+    /// deux signaux) : MainTabView passe en « Auto » ou un cran en dessous.
+    private func stalled() {
+        if isLive { latency.noteStall() }
+        let now = Date()
+        stallTimes = stallTimes.filter { now.timeIntervalSince($0) < 60 } + [now]
+        // Le calage lui-même est noté par PlaybackDiagnostics.
+        if isLive { logger.debug("LIVE", "Avance sur le bord après un calage", "+\(Int(latency.stallMargin)) s") }
+        guard stallTimes.count >= 2, now.timeIntervalSince(lastStallSignal) > 90 else { return }
+        lastStallSignal = now
+        stallTimes = []
+        NotificationCenter.default.post(name: .tuPlaybackStalling, object: "immersive")
+    }
+
     /// `resume` : `seek` vient de la progression enregistrée (une VOD finie
     /// repart alors du début). `behind` : direct seulement, retard sur le
     /// bord à retrouver une fois l'élément prêt.
     func load(url: URL, seek: Double = 0, isLive: Bool? = nil,
               resume: Bool = false, behind: Double? = nil) {
         if let isLive { self.isLive = isLive }
+        stallTimes = []
         // Repart d'une fenêtre vierge : garder les bornes de la source
         // précédente affichait une barre fantaisiste le temps du chargement.
         startTime = 0; endTime = 0; currentDate = nil
@@ -757,6 +785,7 @@ final class ImmersivePlayerModel: NSObject, ObservableObject {
         if let o = goLiveObs { NotificationCenter.default.removeObserver(o); goLiveObs = nil }
         if let o = rateObs { NotificationCenter.default.removeObserver(o); rateObs = nil }
         if let o = failObs { NotificationCenter.default.removeObserver(o); failObs = nil }
+        if let o = stallObs { NotificationCenter.default.removeObserver(o); stallObs = nil }
         mutedObs = nil
         clearNowPlaying()
     }

@@ -12,6 +12,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // marquée (date, version), et les erreurs du lecteur y arrivent.
         logger.sessionStart()
         PlaybackDiagnostics.start()
+        // Wi-Fi ou données mobiles : qualité de départ et avance du direct.
+        NetworkStatus.start()
         // Catégorie seulement : la session n'est activée qu'à l'ouverture d'un
         // lecteur (PlaybackAudio). Activée ici, elle coupait la musique des
         // autres apps dès le lancement, même sans rien lire.

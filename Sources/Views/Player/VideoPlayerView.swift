@@ -160,6 +160,9 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         private var lastCatchUp = Date.distantPast
         private var latency = LiveLatencyController()
         private var sync = LiveSyncEstimator()
+        private var stallObserver: NSObjectProtocol?
+        private var stallTimes: [Date] = []
+        private var lastStallSignal = Date.distantPast
         private var diagnostics: LiveDiagnostics?
         private var jumpObserver: NSObjectProtocol?
         /// Appel, Siri, autre app qui prend le son : la lecture repart à la
@@ -415,7 +418,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
         /// Observateurs à bloc (audio spatial compris : il n'était jamais
         /// retiré, un par lecteur ouvert restait appelé à chaque changement).
         private func removeObservers() {
-            for token in [stopObserver, spatialObserver, goLiveObserver, jumpObserver, rateObserver] {
+            for token in [stopObserver, spatialObserver, goLiveObserver, jumpObserver, rateObserver, stallObserver] {
                 if let token { NotificationCenter.default.removeObserver(token) }
             }
             stopObserver = nil
@@ -423,6 +426,7 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             goLiveObserver = nil
             jumpObserver = nil
             rateObserver = nil
+            stallObserver = nil
         }
 
         /// Fin d'une interruption du son : la lecture repart. VOD, clip, VOD
@@ -516,6 +520,23 @@ struct NativeVideoPlayer: UIViewControllerRepresentable {
             // AVPlayer (changement de qualité).
             diagnostics = LiveDiagnostics(player: player) { [weak self] in self?.isLive ?? false }
             if isLive { LiveDiagnostics.logAudioRoute("début du direct") }
+            // Calage (mémoire tampon vide) : le direct prend de l'avance sur
+            // le bord ; répétés, la vue baisse la qualité (.tuPlaybackStalling).
+            if let stallObserver { NotificationCenter.default.removeObserver(stallObserver) }
+            stallTimes = []
+            stallObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemPlaybackStalled, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self, let item = note.object as? AVPlayerItem,
+                      item === self.playerRef?.currentItem else { return }
+                if self.isLive { self.latency.noteStall() }
+                let now = Date()
+                self.stallTimes = self.stallTimes.filter { now.timeIntervalSince($0) < 60 } + [now]
+                guard self.stallTimes.count >= 2, now.timeIntervalSince(self.lastStallSignal) > 90 else { return }
+                self.lastStallSignal = now
+                self.stallTimes = []
+                NotificationCenter.default.post(name: .tuPlaybackStalling, object: "native")
+            }
             if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
             jumpObserver = NotificationCenter.default.addObserver(
                 forName: AVPlayerItem.timeJumpedNotification, object: nil, queue: .main
@@ -857,11 +878,31 @@ struct VideoPlayerView: View {
         .onChange(of: qualityLinks) { links in
             if links[selectedQuality] == nil { selectedQuality = preferredSelection(links) }
         }
+        // Calages répétés : qualité trop haute pour le débit (données mobiles,
+        // Wi-Fi faible) → « Auto » (elle suit le débit), ou un cran dessous.
+        // La préférence enregistrée ne change pas.
+        .onReceive(NotificationCenter.default.publisher(for: .tuPlaybackStalling)) { note in
+            guard note.object as? String == "native" else { return }
+            let current = quality
+            guard !isAutoQuality(current), !isAudioQuality(current) else { return }
+            var next = qualityLinks.keys.first(where: isAutoQuality)
+            if next == nil {
+                let keys = Array(qualityLinks.keys)
+                let height = { (k: String) in qualityHeight(k, among: keys, variants: variants) }
+                let video = keys.filter { !isAudioQuality($0) && !isAutoQuality($0) }.sorted { height($0) > height($1) }
+                if let i = video.firstIndex(of: current), i + 1 < video.count { next = video[i + 1] }
+            }
+            guard let next, next != current else { return }
+            logger.warn("LECTEUR", "Calages répétés : qualité baissée", "\(current) → \(next)")
+            selectedQuality = next
+        }
     }
 
     /// Qualité préférée, ou la plus proche en dessous (même règle que le lecteur immersif).
     private func preferredSelection(_ links: QualityLinks) -> String {
-        preferredQualityKey(Array(links.keys), pref: store.preferredQuality, variants: variants)
+        // En données mobiles : la qualité choisie pour elles (Auto par défaut).
+        launchQualityKey(Array(links.keys), pref: store.preferredQuality, cellularPref: store.cellularQuality,
+                         cellular: NetworkStatus.shared.isCellular, variants: variants)
     }
 
     // Lecteur natif (AVPlayerViewController) avec PiP + reprise de position.
