@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.17",
+          "buildVersion": "17",
+          "date": "2026-10-18",
+          "localizedDescription": "- When the account couldn't load at launch, the Following tab loads it again instead of showing \"No live\" all session",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-17/TwitchUnblockTV.ipa",
+          "size": 2356231,
+          "commit": "fd5015e425cac43a5f78e783b3dfefdbf4da2d1f"
+        },
+        {
           "version": "0.1.16",
           "buildVersion": "16",
           "date": "2026-10-18",
@@ -79,10 +88,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.16",
+      "version": "0.1.17",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-16/TwitchUnblockTV.ipa",
-      "size": 2354923
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-17/TwitchUnblockTV.ipa",
+      "size": 2356231
     }
   ]
 }
