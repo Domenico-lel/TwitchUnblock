@@ -129,6 +129,8 @@ no key to paste. The backend is already hosted and shared by every install.
   official Twitch.
 * 🖥 **Fill the screen** — crops the video to remove the black bars in
   landscape. Cuts off the top and bottom: 16:9 in a phone screen can't do both.
+  Otherwise the picture never goes under the Dynamic Island or the notch in
+  landscape, even when the chat takes a column next to it.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
   right in the player. It stops multi-live too. The screen only stays awake
   while a video plays on screen: paused, minimized or in audio only, it
@@ -471,7 +473,10 @@ unsigned `tv-test-N` pre-release:
 
 * Followed channels (sign in with a code or a QR code on twitch.tv/activate):
   the live ones, then the offline ones (most recently live first) to open
-  their videos; top streams, categories, search, a channel's VODs.
+  their videos; top streams, categories, search, a channel's VODs. The
+  Following list refreshes on its own (back on the tab or in the app, every
+  2 minutes while it's shown, and when the tab is picked again), so ended
+  lives don't linger.
 * tvOS's native player, with Quality, **Chat** and, for lives, Source in its
   bar: the chat (read-only, no account needed) sits on the picture — live, or
   a VOD's chat replayed in sync — with Twitch, BTTV, FFZ and 7TV emotes. The

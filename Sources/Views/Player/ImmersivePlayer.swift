@@ -1171,15 +1171,18 @@ struct ImmersivePlayer: View {
                     panBase = pan
                 }
             }
-            // En paysage la surface va toujours jusqu'aux bords physiques,
-            // encoche comprise : sans ça une bande noire restait collée à
-            // l'encoche et l'image n'était pas centrée sur l'écran réel. Le
-            // cadrage, lui, ne change pas — l'image entière tient la hauteur et
-            // laisse des bandes égales sur les côtés.
+            // En paysage la surface va jusqu'en haut et en bas de l'écran
+            // (indicateur d'accueil compris) : l'image reste centrée sur l'écran
+            // réel. Sur les côtés, elle s'arrête à la zone sûre : jusqu'au bord
+            // physique, une image plus étroite que l'écran (chat en colonne)
+            // passait sous la Dynamic Island ou l'encoche. Centrée en 16:9, elle
+            // n'y va pas (bandes égales sur les côtés, l'île dans l'une). Seul
+            // « Remplir l'écran » va jusqu'aux bords, île comprise.
             //
             // En portrait, jamais : la boîte est déjà en 16:9, déborder ne
             // faisait que la rendre plus haute que large et rogner les côtés.
-            .ignoresSafeArea(isLandscape ? SafeAreaRegions.all : [])
+            .ignoresSafeArea(isLandscape ? SafeAreaRegions.all : [],
+                             edges: isLandscape && !croppingFill ? .vertical : .all)
 
             // Double-tap ±10 s, en VOD seulement. En direct, avancer n'a pas
             // de sens (on est au bord, ou presque) : en paysage, le double-tap
