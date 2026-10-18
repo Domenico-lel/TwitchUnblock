@@ -4,6 +4,7 @@ import AVFoundation
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
     @State private var activeTab: TabName = .home
+    @State private var headerSafeTop = HeaderView.windowSafeTop
 
     // ── Player state ─────────────────────────────────────────────────────
     @State private var playerMode: PlayerMode? = nil
@@ -284,7 +285,8 @@ struct MainTabView: View {
             VStack(spacing: 0) {
                 HeaderView(title: activeTab.label(store),
                            onOpenSettings: { showSettings = true },
-                           onFeedback: { feedbackContext = nil; showFeedback = true })
+                           onFeedback: { feedbackContext = nil; showFeedback = true },
+                           safeTop: headerSafeTop)
                     .zIndex(10)
 
                 Group {
@@ -505,6 +507,14 @@ struct MainTabView: View {
                 .zIndex(10)
             }
         }
+        // Marge haute de l'en-tête suivie par la mise en page : elle change
+        // avec la rotation (0 en paysage sur iPhone, l'encoche passe sur le
+        // côté). Un 0 en portrait (lecture ratée) reprend la valeur d'UIKit.
+        .background(GeometryReader { geo in
+            Color.clear
+                .onAppear { updateHeaderSafeTop(geo.safeAreaInsets.top) }
+                .onChange(of: geo.safeAreaInsets.top) { updateHeaderSafeTop($0) }
+        })
         // Visite guidée (premier lancement, ou revue depuis les réglages) :
         // par-dessus tout, elle éclaire les vrais boutons de l'app, dont les
         // positions remontent par `TourAnchorKey`.
@@ -644,6 +654,11 @@ struct MainTabView: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
                                             to: nil, from: nil, for: nil)
         }
+    }
+
+    private func updateHeaderSafeTop(_ top: CGFloat) {
+        let value = top > 0 ? top : HeaderView.windowSafeTop
+        if abs(value - headerSafeTop) > 0.5 { headerSafeTop = value }
     }
 
     /// Feuilles et mosaïque attachées à cet écran : une notification touchée

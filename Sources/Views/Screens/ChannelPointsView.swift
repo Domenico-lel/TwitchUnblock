@@ -450,7 +450,7 @@ private struct UserInputSheet: View {
             HStack(spacing: 4) {
                 Image(systemName: "crown.fill")
                     .font(.system(size: 13, weight: .bold))
-                Text("\(reward.cost) \(store.t("points_unit"))")
+                Text("\(reward.cost) \(store.tn("points_unit", reward.cost))")
                     .font(.system(size: 14, weight: .bold))
             }
             .foregroundColor(.tPrimary)

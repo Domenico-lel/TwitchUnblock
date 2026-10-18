@@ -111,7 +111,7 @@ struct LogsView: View {
                 .disabled(appLogger.logs.isEmpty)
 
                 Spacer()
-                Text(t("logs_count").replacingOccurrences(of: "{n}", with: "\(filtered.count)"))
+                Text(translatePlural("logs_count", filtered.count, lang).replacingOccurrences(of: "{n}", with: "\(filtered.count)"))
                     .font(.system(size: 11)).foregroundColor(.tMuted)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)

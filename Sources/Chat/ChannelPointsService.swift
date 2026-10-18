@@ -408,7 +408,7 @@ final class ChannelPointsService: ObservableObject {
         guard balance >= reward.cost else {
             let missing = reward.cost - balance
             logger.warn("POINTS", "Solde insuffisant", "manque \(formatted(missing)) pts")
-            errorMsg = "\(t("points_missing")) \(formatted(missing)) \(t("points_unit"))"; return false
+            errorMsg = "\(t("points_missing")) \(formatted(missing)) \(translatePlural("points_unit", missing, lang))"; return false
         }
         // Le vrai champ GQL Twitch est `redeemCommunityPointsCustomReward`.
         // ⚠️ Anti-triche `PROPERTIES_MISMATCH` : cost + title + prompt doivent

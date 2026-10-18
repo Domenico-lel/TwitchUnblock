@@ -822,6 +822,10 @@ final class AppStore: ObservableObject {
 
     // MARK: – Translation
     func t(_ key: String) -> String { translate(key, lang) }
+    /// Texte accordé au nombre `n` (voir `translatePlural`).
+    func tn(_ key: String, _ n: Int, abbreviated: Bool = false) -> String {
+        translatePlural(key, n, lang, abbreviated: abbreviated)
+    }
 
     // MARK: – Auth
     /// Nouveau jeton après une connexion. S'il change, l'identité gardée

@@ -108,8 +108,12 @@ final class AdminFeedbackService: ObservableObject {
     }
 
     func load() async {
+        let asked = token
         guard isAdmin, let data = await request("GET", "/api/admin/feedback"),
               let r = try? JSONDecoder().decode(ListResponse.self, from: data) else { return }
+        // Déconnecté (ou autre compte) pendant la lecture : la liste des
+        // retours et contacts ne doit pas réapparaître.
+        guard token == asked, isAdmin else { return }
         items = r.items
         webhook = r.webhook
     }

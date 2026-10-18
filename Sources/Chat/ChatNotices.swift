@@ -122,7 +122,7 @@ struct DropsNoticeCard: View {
                     .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 Text([campaign.name, campaign.game].filter { !$0.isEmpty }.joined(separator: " · ")
-                     + (campaign.more > 0 ? " · " + store.t("drops_notice_more").replacingOccurrences(of: "{n}", with: "\(campaign.more)") : ""))
+                     + (campaign.more > 0 ? " · " + store.tn("drops_notice_more", campaign.more).replacingOccurrences(of: "{n}", with: "\(campaign.more)") : ""))
                     .font(.system(size: 11)).foregroundColor(.tMuted).lineLimit(1)
                 HStack(spacing: 10) {
                     if let end = campaign.endsAt {

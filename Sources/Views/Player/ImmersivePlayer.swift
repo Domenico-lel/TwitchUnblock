@@ -1391,7 +1391,7 @@ struct ImmersivePlayer: View {
                     Section {
                         if !info.game.isEmpty { infoRow("gamecontroller.fill", info.game) }
                         if info.viewers > 0 {
-                            infoRow("eye.fill", "\(formatViewers(info.viewers)) \(store.t("viewers"))")
+                            infoRow("eye.fill", "\(formatViewers(info.viewers)) \(store.tn("viewers", info.viewers, abbreviated: info.viewers >= 1000))")
                         }
                         if !info.uptime.isEmpty { infoRow("clock.fill", info.uptime) }
                     }

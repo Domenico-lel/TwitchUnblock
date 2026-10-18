@@ -1411,7 +1411,7 @@ struct SettingsView: View {
                         Text(store.t("cache_size"))
                             .font(.tCardTitle)
                             .foregroundColor(.tText)
-                        Text("\(cacheSizeText) · \(cacheFiles) \(store.t("cache_files"))")
+                        Text("\(cacheSizeText) · \(cacheFiles) \(store.tn("cache_files", cacheFiles))")
                             .font(.tMeta)
                             .foregroundColor(.tMuted)
                     }
@@ -1811,8 +1811,8 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if ntfySynced {
-                Text(store.t("ntfy_status").replacingOccurrences(
-                    of: "{n}", with: "\(UserDefaults.standard.integer(forKey: NtfyNotifier.countKey))"))
+                let count = UserDefaults.standard.integer(forKey: NtfyNotifier.countKey)
+                Text(store.tn("ntfy_status", count).replacingOccurrences(of: "{n}", with: "\(count)"))
                     .font(.tMeta).foregroundColor(.tMuted)
             } else if ntfyResult == nil {
                 Text(ntfyPendingText).font(.tMeta).foregroundColor(.orange)

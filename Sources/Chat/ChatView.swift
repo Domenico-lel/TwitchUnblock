@@ -267,7 +267,7 @@ struct ChatView: View {
                             Text("🚀 \(store.t("raid_to")) \(r.targetName)")
                                 .font(.system(size: 12, weight: .bold)).foregroundColor(.tText)
                             if r.viewers > 0 {
-                                Text("\(r.viewers) \(store.t("viewers"))")
+                                Text("\(r.viewers) \(store.tn("viewers", r.viewers))")
                                     .font(.system(size: 10)).foregroundColor(.tMuted)
                             }
                         }

@@ -123,13 +123,17 @@ enum NtfyNotifier {
         let list = Array(all.prefix(500))
         // La langue en fait partie : changée, la liste repart tout de suite
         // (sinon les notifications gardaient l'ancienne langue jusqu'à 24 h).
-        let hash = lang.rawValue + "|" + list.joined(separator: ",")
+        // Le schéma de TU Test aussi : le lien de clic suit dès sa mise à jour.
+        let hash = lang.rawValue + "|" + (kAppURLScheme == "twitchunblock" ? "" : kAppURLScheme + "|")
+            + list.joined(separator: ",")
         let last = ud.double(forKey: syncedKey)
         if !force, hash == ud.string(forKey: hashKey), Date().timeIntervalSince1970 - last < 86400,
            ud.string(forKey: errorKey) == nil { return true }
         // Coupé pendant la lecture des suivis (jusqu'à 10 pages) : rien à envoyer.
         guard isEnabled else { return false }
-        let code = await post("/api/push/subscribe", ["ntfy": topic, "channels": list, "lang": lang.rawValue])
+        // `scheme` : lien de clic des notifications (celui de TU Test diffère).
+        let code = await post("/api/push/subscribe", ["ntfy": topic, "channels": list, "lang": lang.rawValue,
+                                                      "scheme": kAppURLScheme])
         // Coupé pendant l'envoi : le désabonnement a pu arriver avant cet
         // abonnement, et le Worker publiait encore 60 jours. Il est renvoyé.
         guard isEnabled else {
@@ -165,7 +169,8 @@ enum NtfyNotifier {
     /// Notification de test. `limited` : le Worker a répondu, mais ntfy.sh
     /// refuse les messages pour l'instant (limite d'envoi atteinte).
     static func sendTest(lang: Lang) async -> TestResult {
-        guard let (code, data) = await send("/api/push/test", ["ntfy": topic, "lang": lang.rawValue]) else { return .failed }
+        guard let (code, data) = await send("/api/push/test", ["ntfy": topic, "lang": lang.rawValue,
+                                                               "scheme": kAppURLScheme]) else { return .failed }
         if code == 200 { return .sent }
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         return json?["limit"] as? Bool == true ? .limited : .failed

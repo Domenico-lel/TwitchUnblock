@@ -12,7 +12,13 @@ let kGQLClientID     = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 /// un jeton, jamais pour les jetons de lecture. La page 1 reste sur le web.
 let kGQLNextClientID = "kd1unb4b3q4t58fwlpcbzcbnm76a8fp"
 let kRedirectURI     = "https://mxfia19.github.io/TwitchUnblock/auth.html"
-let kDeepLinkScheme  = "twitchunblock://"
+/// Schéma des liens de l'app, lu dans l'Info.plist : « twitchunblock », ou
+/// « twitchunblock-test » pour TU Test (changé par la CI : avec le même, iOS
+/// ouvrait l'une ou l'autre app au toucher d'une notification ntfy).
+let kAppURLScheme: String = {
+    let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]]
+    return (types?.first?["CFBundleURLSchemes"] as? [String])?.first ?? "twitchunblock"
+}()
 
 /// Workers de secours, sur un autre compte Cloudflare : le principal est
 /// limité à 100 000 requêtes par jour (« error code: 1027 » au-delà, jusqu'à
@@ -378,11 +384,20 @@ private let translations: [Lang: [String: String]] = [
         "hype_level_done": "Niveau {n} terminé !", "hype_ended": "Train de la Hype terminé ! Niveau {n}, {p} %",
         "hype_golden": "Train de kappa doré", "hype_treasure": "Train au trésor",
         "raid_to": "Raid vers", "join": "Rejoindre", "viewers": "spectateurs",
+        "logs_count_one": "{n} log",
+        "dl_chat_count_one": "chat : {n} message",
+        "ntfy_status_one": "{n} chaîne suivie prise en compte (compte Twitch et cet appareil).",
+        "viewers_one": "spectateur",
+        "followers_one": "follower",
+        "poll_votes_one": "vote",
+        "points_unit_one": "pt",
+        "cache_files_one": "fichier",
+        "drops_notice_more_one": "+{n} récompense",
         "customize": "Personnalisation",
         "cfg_title": "Titre du live", "cfg_title_sub": "Afficher le titre au-dessus du chat",
         "cfg_pinned": "Messages épinglés", "cfg_pinned_sub": "Afficher le bandeau des messages épinglés",
         "cfg_drops_notice": "Drops de la chaîne", "cfg_drops_notice_sub": "Une carte en haut du chat quand la chaîne a des drops (à fermer)",
-        "drops_notice_title": "Regarde {m} min pour obtenir {r}", "drops_notice_ends": "Jusqu'au {d}", "drops_notice_details": "Détails", "drops_notice_more": "+{n} récompense(s)",
+        "drops_notice_title": "Regarde {m} min pour obtenir {r}", "drops_notice_ends": "Jusqu'au {d}", "drops_notice_details": "Détails", "drops_notice_more": "+{n} récompenses",
         "chat_info_copy": "Copier le nom", "chat_info_copied": "Copié", "chat_info_insert": "Ajouter au message", "chat_info_badge": "Badge",
         "emote_src_twitch": "Emote Twitch", "emote_src_bttv_personal": "BetterTTV · emote personnelle (Pro)",
         "emote_scope_global": "Emote globale", "emote_scope_channel": "Emote de la chaîne", "emote_by": "Par {u}", "emote_original": "Nom d'origine : {n}",
@@ -989,11 +1004,20 @@ private let translations: [Lang: [String: String]] = [
         "hype_level_done": "Level {n} complete!", "hype_ended": "Hype Train complete! Level {n}, {p}%",
         "hype_golden": "Golden Kappa Train", "hype_treasure": "Treasure Train",
         "raid_to": "Raid to", "join": "Join", "viewers": "viewers",
+        "logs_count_one": "{n} log",
+        "dl_chat_count_one": "chat: {n} message",
+        "ntfy_status_one": "{n} followed channel taken into account (Twitch account and this device).",
+        "viewers_one": "viewer",
+        "followers_one": "follower",
+        "poll_votes_one": "vote",
+        "points_unit_one": "pt",
+        "cache_files_one": "file",
+        "drops_notice_more_one": "+{n} reward",
         "customize": "Customization",
         "cfg_title": "Stream title", "cfg_title_sub": "Show the title above the chat",
         "cfg_pinned": "Pinned messages", "cfg_pinned_sub": "Show the pinned message banner",
         "cfg_drops_notice": "Channel drops", "cfg_drops_notice_sub": "A card at the top of the chat when the channel has drops (dismissable)",
-        "drops_notice_title": "Watch {m} min to get {r}", "drops_notice_ends": "Until {d}", "drops_notice_details": "Details", "drops_notice_more": "+{n} reward(s)",
+        "drops_notice_title": "Watch {m} min to get {r}", "drops_notice_ends": "Until {d}", "drops_notice_details": "Details", "drops_notice_more": "+{n} rewards",
         "chat_info_copy": "Copy name", "chat_info_copied": "Copied", "chat_info_insert": "Add to message", "chat_info_badge": "Badge",
         "emote_src_twitch": "Twitch emote", "emote_src_bttv_personal": "BetterTTV · personal emote (Pro)",
         "emote_scope_global": "Global emote", "emote_scope_channel": "Channel emote", "emote_by": "By {u}", "emote_original": "Original name: {n}",
@@ -1600,11 +1624,20 @@ private let translations: [Lang: [String: String]] = [
         "hype_level_done": "¡Nivel {n} completado!", "hype_ended": "¡Tren del Hype completado! Nivel {n}, {p} %",
         "hype_golden": "Tren del Kappa dorado", "hype_treasure": "Tren del tesoro",
         "raid_to": "Raid a", "join": "Unirse", "viewers": "espectadores",
+        "logs_count_one": "{n} registro",
+        "dl_chat_count_one": "chat: {n} mensaje",
+        "ntfy_status_one": "{n} canal seguido tenido en cuenta (cuenta de Twitch y este dispositivo).",
+        "viewers_one": "espectador",
+        "followers_one": "seguidor",
+        "poll_votes_one": "voto",
+        "points_unit_one": "pt",
+        "cache_files_one": "archivo",
+        "drops_notice_more_one": "+{n} recompensa",
         "customize": "Personalización",
         "cfg_title": "Título del directo", "cfg_title_sub": "Mostrar el título encima del chat",
         "cfg_pinned": "Mensajes fijados", "cfg_pinned_sub": "Mostrar el mensaje fijado",
         "cfg_drops_notice": "Drops del canal", "cfg_drops_notice_sub": "Una tarjeta arriba del chat cuando el canal tiene drops (se puede cerrar)",
-        "drops_notice_title": "Mira {m} min para conseguir {r}", "drops_notice_ends": "Hasta el {d}", "drops_notice_details": "Detalles", "drops_notice_more": "+{n} recompensa(s)",
+        "drops_notice_title": "Mira {m} min para conseguir {r}", "drops_notice_ends": "Hasta el {d}", "drops_notice_details": "Detalles", "drops_notice_more": "+{n} recompensas",
         "chat_info_copy": "Copiar el nombre", "chat_info_copied": "Copiado", "chat_info_insert": "Añadir al mensaje", "chat_info_badge": "Insignia",
         "emote_src_twitch": "Emote de Twitch", "emote_src_bttv_personal": "BetterTTV · emote personal (Pro)",
         "emote_scope_global": "Emote global", "emote_scope_channel": "Emote del canal", "emote_by": "Por {u}", "emote_original": "Nombre original: {n}",
@@ -2125,4 +2158,22 @@ private let translations: [Lang: [String: String]] = [
 /// elle-même : une traduction en retard n'affiche jamais un identifiant.
 func translate(_ key: String, _ lang: Lang) -> String {
     translations[lang]?[key] ?? translations[.en]?[key] ?? key
+}
+
+/// Texte accordé au nombre : « 1 spectateur », « 2 зрителя », « 5 зрителей »
+/// (le nombre et le mot étaient collés, « 1 viewers », « 1 зрителей »). Lit
+/// `clé_one`, ou `clé_few` en russe, quand la langue l'a ; sinon `clé`, la
+/// forme du pluriel. Nombre abrégé (« 1.2k ») : pluriel.
+func translatePlural(_ key: String, _ n: Int, _ lang: Lang, abbreviated: Bool = false) -> String {
+    guard !abbreviated else { return translate(key, lang) }
+    let form: String
+    switch lang {
+    case .ru:
+        let d = abs(n) % 10, h = abs(n) % 100
+        form = d == 1 && h != 11 ? "one"
+            : (2...4).contains(d) && !(12...14).contains(h) ? "few" : "many"
+    case .fr: form = abs(n) < 2 ? "one" : "other"
+    default:  form = abs(n) == 1 ? "one" : "other"
+    }
+    return translations[lang]?["\(key)_\(form)"] ?? translate(key, lang)
 }

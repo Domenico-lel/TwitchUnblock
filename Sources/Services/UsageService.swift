@@ -108,6 +108,8 @@ final class UsageService: ObservableObject {
 
     /// Jeton de comptage propre au build officiel (clé `TUPingKey` d'Info.plist,
     /// posée par la CI depuis un secret). nil ou vide dans tout autre build.
+    /// Un marqueur, pas une protection : il se lit dans l'IPA publique (le
+    /// Worker plafonne les nouvelles installations par adresse et par jour).
     private var buildPingKey: String? {
         let key = (Bundle.main.infoDictionary?["TUPingKey"] as? String ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)

@@ -27,9 +27,10 @@ struct TwitchUnblockApp: App {
                     FeedbackStore.shared.startForegroundChecks()
                     await FeedbackStore.shared.refresh(force: true)
                 }
-                // Notification ntfy touchée : twitchunblock://live/<chaîne>.
+                // Notification ntfy touchée : twitchunblock://live/<chaîne>
+                // (twitchunblock-test:// pour TU Test).
                 .onOpenURL { url in
-                    guard url.scheme == "twitchunblock", url.host == "live",
+                    guard url.scheme == kAppURLScheme || url.scheme == "twitchunblock", url.host == "live",
                           let login = url.pathComponents.dropFirst().first, !login.isEmpty else { return }
                     NotificationCenter.default.post(name: .openLiveChannel, object: nil,
                                                     userInfo: ["login": login.lowercased()])

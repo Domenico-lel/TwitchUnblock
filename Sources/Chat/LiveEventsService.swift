@@ -829,7 +829,8 @@ private struct PollCard: View {
                     .disabled(events.voting || !poll.isActive || voted || c.id.isEmpty
                               || (!poll.multichoice && !events.votedChoiceIds.isEmpty))
                 }
-                Text("\(poll.choices.reduce(0) { $0 + $1.votes }) \(store.t("poll_votes"))")
+                let votes = poll.choices.reduce(0) { $0 + $1.votes }
+                Text("\(votes) \(store.tn("poll_votes", votes))")
                     .font(.system(size: 10)).foregroundColor(.tMuted)
                 if poll.isActive, let e = events.voteError {
                     Text(store.t(e == "NO_SESSION" ? "pred_need_login" : "poll_vote_failed"))
@@ -922,10 +923,10 @@ private struct PredictionCard: View {
             if let mine = myOutcome {
                 // Gain possible si l'issue gagne : la mise × la cote (mise comprise).
                 let win = pred.winnerId == nil ? pred.ratio(mine.points).map { Int((Double(pred.myPoints) * $0).rounded(.down)) } : nil
-                Text(store.t("pred_my_bet")
+                Text(store.tn("pred_my_bet", pred.myPoints)
                         .replacingOccurrences(of: "{n}", with: points.formatted(pred.myPoints))
                         .replacingOccurrences(of: "{o}", with: mine.title)
-                     + (win.map { " · " + store.t("pred_potential").replacingOccurrences(of: "{n}", with: points.formatted($0)) } ?? ""))
+                     + (win.map { " · " + store.tn("pred_potential", $0).replacingOccurrences(of: "{n}", with: points.formatted($0)) } ?? ""))
                     .font(.system(size: 10, weight: .semibold)).foregroundColor(.tSuccess)
             }
             if open {
