@@ -97,7 +97,7 @@ struct MessageSheet: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if canSend {
+            if canSend, !message.id.hasPrefix("local-") {
                 actionButton(icon: "arrowshape.turn.up.left.fill") {
                     replying = true
                     focused  = true
@@ -116,7 +116,8 @@ struct MessageSheet: View {
                 }
                 if canSend {
                     Button {
-                        onMention(message.displayName)
+                        onMention(message.displayName.lowercased() == message.userName.lowercased()
+                                  ? message.displayName : message.userName)
                         dismiss()
                     } label: {
                         Label(store.t("mention_user"), systemImage: "at")

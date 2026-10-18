@@ -291,9 +291,6 @@ struct IRCMessage {
 
     /// Corps du message auquel on répond (Twitch échappe les espaces en \s)
     var replyParentBody: String? {
-        tags["reply-parent-msg-body"]?
-            .replacingOccurrences(of: "\\s", with: " ")
-            .replacingOccurrences(of: "\\:", with: ";")
-            .replacingOccurrences(of: "\\\\", with: "\\")
+        tags["reply-parent-msg-body"].map(ircUnescape)
     }
 }

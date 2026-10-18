@@ -103,6 +103,9 @@ final class ChatService: NSObject, ObservableObject {
     }
 
     private func insert(_ message: ChatMessage) {
+        // Déjà affiché (historique rejoué, puis le même message sorti du délai
+        // de synchro) : pas deux fois.
+        guard !messages.prefix(300).contains(where: { $0.id == message.id }) else { return }
         var message = message
         if let purgedAt, message.timestamp <= purgedAt { return }
         if deletedIds[message.id] != nil
@@ -334,13 +337,19 @@ final class ChatService: NSObject, ObservableObject {
         }
         logger.info("CHAT", "Message envoyé → #\(channelName)", String(sanitized.prefix(80)))
 
-        let tokens = await tokenizeText(sanitized, channelId: channelId)
+        // Écho : « /me texte » s'affiche comme une action, sans « /me » ; les
+        // autres commandes (« /w », « /ban »…) n'en ont pas — ce ne sont pas
+        // des messages, Twitch les exécute ou les refuse.
+        let isMe = sanitized.lowercased().hasPrefix("/me ")
+        if sanitized.hasPrefix("/"), !isMe { return }
+        let shownText = isMe ? String(sanitized.dropFirst(4)) : sanitized
+        let tokens = await tokenizeText(shownText, channelId: channelId)
         let localMsg = ChatMessage(
             id: "local-\(UUID().uuidString)",
             userId: localLogin, userName: localLogin,
             displayName: localDisplayName.isEmpty ? localLogin : localDisplayName,
             color: localColor, badges: localBadges, tokens: tokens,
-            timestamp: Date(), isAction: false, isHighlight: false,
+            timestamp: Date(), isAction: isMe, isHighlight: false,
             isFirstMessage: false,
             replyTo: replyToName, replyBody: nil,
             systemMsg: nil,

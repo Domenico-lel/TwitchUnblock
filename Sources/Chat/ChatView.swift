@@ -16,6 +16,9 @@ struct ChatView: View {
     /// « Voir la chaîne » dans la fiche d'une emote. Faux en multi-live : la
     /// mosaïque est plein écran, la page s'ouvrirait dessous.
     var opensChannelPages = true
+    /// « Chat seul » dans le menu du chat. Faux en multi-live : il n'y a pas
+    /// de lecteur à couper, l'interrupteur ne faisait rien.
+    var allowsChatOnly = true
 
     @EnvironmentObject private var store: AppStore
     @StateObject private var chat          = ChatService()
@@ -506,6 +509,7 @@ struct ChatView: View {
                             if !autoScroll {
                                 Button {
                                     autoScroll = true
+                                    isDragging = false
                                     proxy.scrollTo(bottomAnchor, anchor: .bottom)
                                 } label: {
                                     HStack(spacing: 4) {
@@ -568,6 +572,7 @@ struct ChatView: View {
                 channelName: channelName,
                 isAuthenticated: chat.isAuthenticated,
                 chatOnly: $chatOnly,
+                allowsChatOnly: allowsChatOnly,
                 chat: chat,
                 onReloadEmotes: { Task { await reloadEmotesAndBadges() } },
                 onReconnect: {
@@ -660,7 +665,7 @@ struct ChatView: View {
         .onChange(of: chatDelay) { chat.displayDelay = $0 }
         .onChange(of: raidService.joinTarget) { target in
             // Raid parti → on suit automatiquement vers la chaîne raidée.
-            guard let target = target else { return }
+            guard let target = target, store.enableRaids else { return }
             raidService.disconnect()
             onJoinChannel(target)
         }
@@ -830,7 +835,7 @@ struct ChatView: View {
         var out: [String] = []
         for m in chat.messages where !m.userName.isEmpty {
             if m.userName.lowercased().hasPrefix(kw), seen.insert(m.userName).inserted {
-                out.append(m.displayName.isEmpty ? m.userName : m.displayName)
+                out.append(m.displayName.lowercased() == m.userName.lowercased() ? m.displayName : m.userName)
             }
             if out.count == 12 { break }
         }

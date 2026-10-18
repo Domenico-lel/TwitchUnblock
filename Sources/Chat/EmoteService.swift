@@ -218,12 +218,17 @@ actor EmoteService {
     }
 
     // MARK: – BTTV en direct (BTTVLive)
+    func removePersonalBTTV(userId: String) {
+        guard personalBTTV.removeValue(forKey: userId) != nil else { return }
+        personalOrder.removeAll { $0 == userId }
+    }
+
     func setPersonalBTTV(userId: String, emotes: [[String: Any]]) {
         var map: [String: TwitchEmote] = [:]
         for obj in emotes {
             if var e = bttvEmote(obj, scope: .personal) { e.personal = true; map[e.name] = e }
         }
-        guard !map.isEmpty else { return }
+        guard !map.isEmpty else { removePersonalBTTV(userId: userId); return }
         if personalBTTV[userId] == nil { personalOrder.append(userId) }
         personalBTTV[userId] = map
         if personalOrder.count > 500 { personalBTTV[personalOrder.removeFirst()] = nil }

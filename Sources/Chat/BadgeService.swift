@@ -141,8 +141,10 @@ actor BadgeService {
         if let cid = channelId, let url = channel[cid]?[setId]?[version] { return url }
         if let url = global[setId]?[version] { return url }
 
-        // CDN statique : fonctionne pour broadcaster, moderator, staff, vip…
-        return "https://static-cdn.jtvnw.net/badges/v1/\(setId)/\(version)/2"
+        // Inconnu : rien. L'adresse « badges/v1/<set>/<version>/2 » n'existe
+        // pas chez Twitch (les badges ont des identifiants) : une requête
+        // perdue (404) par badge, à chaque ligne du chat.
+        return ""
     }
 
     /// Titre et description d'un badge (canal d'abord), nil si inconnu.

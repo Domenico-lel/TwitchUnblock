@@ -10,6 +10,7 @@ struct ChatMenuSheet: View {
     /// Peut-on agir sur le compte (couleur du pseudo) ?
     let isAuthenticated: Bool
     @Binding var chatOnly: Bool
+    var allowsChatOnly = true
     /// Service IRC : sert à lister les personnes présentes (tags `membership`).
     @ObservedObject var chat: ChatService
 
@@ -46,12 +47,14 @@ struct ChatMenuSheet: View {
                 VStack(spacing: 0) {
 
                     // Chat seul : coupe la vidéo, garde la conversation.
-                    row(icon: chatOnly ? "bubble.left.fill" : "bubble.left",
-                        title: store.t("menu_chat_only"),
-                        subtitle: store.t("menu_chat_only_sub"),
-                        trailing: .toggle($chatOnly))
+                    if allowsChatOnly {
+                        row(icon: chatOnly ? "bubble.left.fill" : "bubble.left",
+                            title: store.t("menu_chat_only"),
+                            subtitle: store.t("menu_chat_only_sub"),
+                            trailing: .toggle($chatOnly))
 
-                    divider
+                        divider
+                    }
 
                     row(icon: "arrow.triangle.2.circlepath",
                         title: store.t("menu_reload_emotes"),
