@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.16",
+          "buildVersion": "16",
+          "date": "2026-10-18",
+          "localizedDescription": "- The Following tab refreshes on its own (when you come back to it or to the app, every 2 minutes while it's shown, and when you pick the tab again), so ended lives no longer linger",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-16/TwitchUnblockTV.ipa",
+          "size": 2354923,
+          "commit": "f0f73f5e29d67f3d87b6462d38973216097857ba"
+        },
+        {
           "version": "0.1.15",
           "buildVersion": "15",
           "date": "2026-10-17",
@@ -70,10 +79,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.15",
-      "versionDate": "2026-10-17",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-15/TwitchUnblockTV.ipa",
-      "size": 2342832
+      "version": "0.1.16",
+      "versionDate": "2026-10-18",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-16/TwitchUnblockTV.ipa",
+      "size": 2354923
     }
   ]
 }
