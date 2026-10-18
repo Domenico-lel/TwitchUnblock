@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.13",
+          "buildVersion": "313",
+          "date": "2026-10-18",
+          "localizedDescription": "- Feedback: each report is read from the server that received it (switching to your own Worker no longer drops followed reports), unread replies no longer depend on your phone's clock, a reply you just sent no longer disappears for a moment, and more than 30 followed reports all stay up to date\n- Announcements disappear when they expire even if the app stays open, and quick reactions no longer end up out of sync\n- \"Check for updates\" says when it couldn't check instead of \"up to date\", two builds of the same version are told apart, and the update card fits on screen in landscape\n- Your own Worker: checking an address no longer gets mixed up when you change it, and the Worker in use stays shown; \"Manage feedback\" no longer comes back after logging out\n- Usage sharing: turning it off is retried until the server confirms, including on the Worker that received the counts, and counts are no longer sent twice\n- Logs screen fully translated, with timestamps no longer rewritten by region settings\n- Russian wording made consistent (\"follow\", \"emotes\"), Top lives in Traditional Chinese (Taiwan) shows Chinese streams, and system elements (Cancel, Copy, share sheet, video player) follow your language",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-313/TwitchUnblock.ipa",
+          "size": 3745828,
+          "commit": "c11d520f738d273a74e10f3f6b0f3434f1710dd2"
+        },
+        {
           "version": "1.4.12",
           "buildVersion": "312",
           "date": "2026-10-18",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-273/TwitchUnblock.ipa",
           "size": 2894308,
           "commit": "e1182c51813650c434f7923d3fca365ec4e2a3c2"
-        },
-        {
-          "version": "1.2.48",
-          "buildVersion": "272",
-          "date": "2026-10-11",
-          "localizedDescription": "- Icônes : « Merge Entitlements » n'existe pas encore dans Feather publié",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-272/TwitchUnblock.ipa",
-          "size": 2894312,
-          "commit": "8be9a8761a1ccaca77f3870e1bc1dcccbd71c3f7"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.12",
+      "version": "1.4.13",
       "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-312/TwitchUnblock.ipa",
-      "size": 3720450
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-313/TwitchUnblock.ipa",
+      "size": 3745828
     }
   ],
   "news": []
