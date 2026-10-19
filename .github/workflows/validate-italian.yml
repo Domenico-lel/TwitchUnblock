@@ -1,4 +1,4 @@
-name: Validate Italian localization
+name: Build Italian IPA
 on:
   push:
     branches: [validation/italian-localization]
@@ -6,38 +6,102 @@ permissions:
   contents: read
 jobs:
   build:
-    name: Build ${{ matrix.scheme }}
+    name: Package Italian iPhone IPA
     runs-on: macos-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - scheme: TwitchUnblock
-            platform: iOS
-          - scheme: TwitchUnblockTV
-            platform: tvOS
     steps:
       - uses: actions/checkout@v4
-      - name: Generate project
+      - name: Create App Icon Folder
+        run: |
+          echo "--- Icône iOS par défaut et aperçus des icônes au choix ---"
+          CAT=Sources/Assets.xcassets
+          # Une icône : normale, sombre et teintée (iOS 18+ ; iOS 26 tire aussi
+          # ses icônes transparentes de la version teintée). $1 : catalogue,
+          # $2 : image normale, $3 : préfixe des variantes dans assets/icons.
+          make_icon() {
+          dir="$CAT/$1.appiconset"
+          mkdir -p "$dir"
+          cp "$2" "$dir/icon.png"
+          cp "assets/icons/$3-dark.png" "$dir/icon-dark.png"
+          cp "assets/icons/$3-tinted.png" "$dir/icon-tinted.png"
+          cat <<EOF > "$dir/Contents.json"
+          {
+            "images" : [
+              { "filename" : "icon.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" },
+              { "appearances" : [ { "appearance" : "luminosity", "value" : "dark" } ],
+                "filename" : "icon-dark.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" },
+              { "appearances" : [ { "appearance" : "luminosity", "value" : "tinted" } ],
+                "filename" : "icon-tinted.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
+            ],
+            "info" : { "author" : "xcode", "version" : 1 }
+          }
+          EOF
+          }
+          # Aperçu pour Réglages → Apparence → Icône de l'app.
+          make_preview() {
+          dir="$CAT/IconPreview-$1.imageset"
+          mkdir -p "$dir"
+          cp "assets/icons/previews/$1.png" "$dir/preview.png"
+          cat <<EOF > "$dir/Contents.json"
+          {
+            "images" : [ { "filename" : "preview.png", "idiom" : "universal" } ],
+            "info" : { "author" : "xcode", "version" : 1 }
+          }
+          EOF
+          }
+          make_icon AppIcon assets/icon.png AppIcon
+          make_preview Default
+          # Icônes au choix : fichiers séparés, ajoutés à l'app par buildipa.sh.
+          for name in Purple Night Light Contrast Neon; do
+            make_preview "$name"
+          done
+
+      - name: Configure installation package
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          from pathlib import Path
+          version, build = "1.5.2", "10003"
+          for file in ("Info.plist", "Widgets/Info.plist"):
+              p = Path(file)
+              data = plistlib.loads(p.read_bytes())
+              data["CFBundleShortVersionString"] = version
+              data["CFBundleVersion"] = build
+              if file == "Info.plist":
+                  data["CFBundleIdentifier"] = "com.mxfia19.TwitchUnblock"
+                  data["TUChannel"] = "stable"
+                  data["CFBundleIconName"] = "AppIcon"
+                  data["TUPingKey"] = ""
+                  data.pop("UILaunchStoryboardName", None)
+                  data["UILaunchScreen"] = {}
+                  data["UIBackgroundModes"] = ["audio", "fetch"]
+                  assert "it" in data["CFBundleLocalizations"]
+              p.write_bytes(plistlib.dumps(data, sort_keys=False))
+          p = Path("project.yml")
+          text = p.read_text()
+          marker = "        PRODUCT_NAME: TwitchUnblock\n"
+          assert text.count(marker) == 1
+          text = text.replace(marker, marker + f"        MARKETING_VERSION: {version}\n        CURRENT_PROJECT_VERSION: {build}\n        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon\n")
+          p.write_text(text)
+          PY
+      - name: Generate Xcode project
         run: |
           brew install xcodegen
           xcodegen generate --spec project.yml
-      - name: Compile without signing or publishing
+      - name: Build and package IPA
         shell: bash
         run: |
           set -o pipefail
-          xcodebuild -project TwitchUnblock.xcodeproj \
-            -scheme '${{ matrix.scheme }}' -configuration Release \
-            -destination 'generic/platform=${{ matrix.platform }}' \
-            -derivedDataPath build/DerivedData \
-            -skipPackagePluginValidation build \
-            CODE_SIGN_IDENTITY='' CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_ENTITLEMENTS='' CODE_SIGNING_ALLOWED=NO \
-            MARKETING_VERSION=1.5.0 CURRENT_PROJECT_VERSION=1 \
-            2>&1 | tee build.log
+          chmod +x buildipa.sh
+          ./buildipa.sh 2>&1 | tee build-italian.log
+      - name: Upload installable IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TwitchUnblock-Italiano-IPA
+          path: build/TwitchUnblock.ipa
+          if-no-files-found: error
       - name: Keep build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.scheme }}-build-log
-          path: build.log
+          name: Italian-IPA-build-log
+          path: build-italian.log
