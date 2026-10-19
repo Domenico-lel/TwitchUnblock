@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.24",
+          "buildVersion": "324",
+          "date": "2026-10-19",
+          "localizedDescription": "- Discover: the Clips feed loads again (Twitch refused the request)\n- Discover: the preview no longer fills and crops the whole screen, and the channel name, title, Follow and side buttons are visible again",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-324/TwitchUnblock.ipa",
+          "size": 3891258,
+          "commit": "52a771bbda917fbdab27d9fdbcbf8605c71cfc36"
+        },
+        {
           "version": "1.4.23",
           "buildVersion": "323",
           "date": "2026-10-19",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-287/TwitchUnblock.ipa",
           "size": 3046205,
           "commit": "b7032f0476e1e6ba9e622bb6c5c0ad52bf9cb787"
-        },
-        {
-          "version": "1.3.7",
-          "buildVersion": "286",
-          "date": "2026-10-12",
-          "localizedDescription": "- A reply to your report, a drop ready or claimed, a finished download: with the app open, a banner inside the app tells you, even if notifications aren't allowed; one that arrives while the app is in the background without permission shows up when you come back.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-286/TwitchUnblock.ipa",
-          "size": 3044523,
-          "commit": "2bd12e5af3f92761b18416a39c8a5d3f4dda4ad0"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.23",
+      "version": "1.4.24",
       "versionDate": "2026-10-19",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-323/TwitchUnblock.ipa",
-      "size": 3889630
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-324/TwitchUnblock.ipa",
+      "size": 3891258
     }
   ],
   "news": []
