@@ -176,6 +176,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.5.5",
+          "buildVersion": "333",
+          "date": "2026-10-19",
+          "localizedDescription": "- Home: a new \"Continue watching\" row shows the VODs you started (up to 10, latest first) with their progress; a tap resumes where you stopped (hide it in Settings → General → Customize the app)\n- Player: when the connection comes back after a drop, a player stopped on Retry (or on a loading error) and failed multi-live tiles restart on their own, once\n- Downloads: the download sheet shows the estimated size and the free space, and refuses with a clear message when there isn't enough room\n- Downloads: new \"Download on Wi-Fi only\" option (Settings → Player, or in the download sheet; off by default): downloads wait for Wi-Fi, then resume on their own\n- Downloads: paused downloads now show a Resume button (▶), failed ones Retry (⟳)\n- Apple TV: a \"Continue watching\" row at the top of Following lists the VODs started on this Apple TV, with their progress\n- Apple TV: during a channel's ad break, a banner explains the purple screen with a countdown to the stream's return",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-333/TwitchUnblock.ipa",
+          "size": 4000187,
+          "commit": "b9586f3240a859942040ffb538776ed3e877ad4f"
+        },
+        {
           "version": "1.5.4",
           "buildVersion": "332",
           "date": "2026-10-19",
@@ -255,25 +264,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-323/TwitchUnblock.ipa",
           "size": 3889630,
           "commit": "cc9a75b1258b9f24e2ca3c3d1c3c56df7daedb80"
-        },
-        {
-          "version": "1.4.22",
-          "buildVersion": "322",
-          "date": "2026-10-18",
-          "localizedDescription": "- My reports: a conversation closed by the developer, or one that reached 100 messages, says so instead of showing the reply box and then failing.",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-322/TwitchUnblock.ipa",
-          "size": 3814718,
-          "commit": "994eade39442c29826c603a463cf09ae5de17f4f"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.5.4",
+      "version": "1.5.5",
       "versionDate": "2026-10-19",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-332/TwitchUnblock.ipa",
-      "size": 3967181
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-333/TwitchUnblock.ipa",
+      "size": 4000187
     }
   ],
   "news": []
