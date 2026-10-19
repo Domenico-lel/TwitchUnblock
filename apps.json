@@ -176,6 +176,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.5.1",
+          "buildVersion": "329",
+          "date": "2026-10-19",
+          "localizedDescription": "- Chat: the Return key now hides the keyboard instead of sending (the send button is right next to it); Settings → Chat → \"Return sends the message\" brings the old behavior back\n- Chat: tapping the chat while the keyboard is open only hides the keyboard, without opening the message or emote card",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-329/TwitchUnblock.ipa",
+          "size": 3898972,
+          "commit": "ec357e5b1bf0464cc186d94f066ea834541518ed"
+        },
+        {
           "version": "1.5.0",
           "buildVersion": "328",
           "date": "2026-10-19",
@@ -255,25 +264,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-319/TwitchUnblock.ipa",
           "size": 3797716,
           "commit": "4f936e2de844d8cb8ccb55150665fd381b6d7c1d"
-        },
-        {
-          "version": "1.4.18",
-          "buildVersion": "318",
-          "date": "2026-10-18",
-          "localizedDescription": "- On mobile data, lives and VODs now start in Auto quality, which follows your connection speed (new setting: Quality on mobile data), so the picture no longer freezes while the chat keeps going\n- After a stall, the live keeps more margin from the edge instead of jumping straight back (which froze it again), and repeated stalls switch the player to Auto quality (or one step down) automatically\n- Logs show the connection type (Wi-Fi, mobile data, Low Data Mode) and when the quality is lowered because of stalls",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-318/TwitchUnblock.ipa",
-          "size": 3782156,
-          "commit": "af85c66bafc2e6cfd062a6ef2519fa546795f663"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.5.0",
+      "version": "1.5.1",
       "versionDate": "2026-10-19",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-328/TwitchUnblock.ipa",
-      "size": 3896306
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-329/TwitchUnblock.ipa",
+      "size": 3898972
     }
   ],
   "news": []
