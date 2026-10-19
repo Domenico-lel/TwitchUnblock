@@ -1,0 +1,43 @@
+name: Validate Italian localization
+on:
+  push:
+    branches: [validation/italian-localization]
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build ${{ matrix.scheme }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scheme: TwitchUnblock
+            platform: iOS
+          - scheme: TwitchUnblockTV
+            platform: tvOS
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate --spec project.yml
+      - name: Compile without signing or publishing
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild -project TwitchUnblock.xcodeproj \
+            -scheme '${{ matrix.scheme }}' -configuration Release \
+            -destination 'generic/platform=${{ matrix.platform }}' \
+            -derivedDataPath build/DerivedData \
+            -skipPackagePluginValidation build \
+            CODE_SIGN_IDENTITY='' CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_ENTITLEMENTS='' CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION=1.5.0 CURRENT_PROJECT_VERSION=1 \
+            2>&1 | tee build.log
+      - name: Keep build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.scheme }}-build-log
+          path: build.log
