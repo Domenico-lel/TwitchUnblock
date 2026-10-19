@@ -25,6 +25,15 @@
       },
       "versions": [
         {
+          "version": "0.1.20",
+          "buildVersion": "20",
+          "date": "2026-10-19",
+          "localizedDescription": "- The remote's Play button starts the focused live or VOD, like Select\n- Play on an offline channel (Following, Search) opens it and plays its latest broadcast\n- Following reloads when you come back to it from the tab bar",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-20/TwitchUnblockTV.ipa",
+          "size": 2448068,
+          "commit": "5a576edaf32ad79ca29af01fa92909a0b58b67be"
+        },
+        {
           "version": "0.1.19",
           "buildVersion": "19",
           "date": "2026-10-18",
@@ -106,10 +115,10 @@
           "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
         }
       ],
-      "version": "0.1.19",
-      "versionDate": "2026-10-18",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-19/TwitchUnblockTV.ipa",
-      "size": 2432299
+      "version": "0.1.20",
+      "versionDate": "2026-10-19",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-20/TwitchUnblockTV.ipa",
+      "size": 2448068
     }
   ]
 }
