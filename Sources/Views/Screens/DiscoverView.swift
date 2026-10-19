@@ -354,6 +354,7 @@ private struct VerticalPager<Page: View>: View {
             ForEach(0..<count, id: \.self) { i in
                 page(i)
                     .frame(width: size.width, height: size.height)
+                    .clipped()
                     .rotationEffect(.degrees(-90))
                     .frame(width: size.height, height: size.width)
                     .tag(i)
@@ -495,22 +496,28 @@ private struct DiscoverClipPage: View {
 }
 
 // MARK: – Éléments communs
-/// Fond de page : la miniature, floutée et assombrie.
+/// Fond de page : la miniature, floutée et assombrie. L'image « remplir »
+/// est dans un calque : seule, elle prenait sa propre taille (bien plus
+/// large que l'écran), la page s'élargissait d'autant, la vidéo devenait
+/// géante et les infos partaient hors de l'écran.
 private struct DiscoverBackdrop: View {
     let url: String
 
     var body: some View {
-        AsyncImage(url: URL(string: url)) { img in
-            img.resizable().scaledToFill()
-        } placeholder: {
-            Color.black
-        }
-        .blur(radius: 30)
-        .overlay(Color.black.opacity(0.55))
-        .overlay(
-            LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
-        )
-        .clipped()
+        Color.black
+            .overlay(
+                AsyncImage(url: URL(string: url)) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Color.black
+                }
+                .blur(radius: 30)
+            )
+            .overlay(Color.black.opacity(0.55))
+            .overlay(
+                LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
+            )
+            .clipped()
     }
 }
 
@@ -523,39 +530,41 @@ private struct DiscoverScreen: View {
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
-        ZStack {
-            AsyncImage(url: URL(string: thumb)) { img in
-                img.resizable().scaledToFill()
-            } placeholder: {
-                Color.white.opacity(0.06)
-            }
-            if isCurrent, feed.playing == key {
-                DiscoverVideoLayer(player: feed.player)
-            }
-            if isCurrent, feed.preview[key] == .loading {
-                ProgressView().tint(.white)
-            }
-            if feed.preview[key] == .failed {
-                Text(store.t("discover_no_preview"))
-                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Color.black.opacity(0.6)).clipShape(Capsule())
-            }
-            // Son coupé : le lecteur complet l'a, d'un toucher.
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Image(systemName: "speaker.slash.fill")
-                        .font(.system(size: 12, weight: .bold)).foregroundColor(.white)
-                        .padding(7)
-                        .background(Color.black.opacity(0.55)).clipShape(Circle())
-                        .padding(8)
+        // Boîte 16:9 de la largeur de la page ; la miniature et la vidéo sont
+        // des calques, qui ne changent pas sa taille.
+        Color.white.opacity(0.06)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .overlay(
+                AsyncImage(url: URL(string: thumb)) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    Color.clear
+                }
+            )
+            .overlay {
+                if isCurrent, feed.playing == key {
+                    DiscoverVideoLayer(player: feed.player)
                 }
             }
-        }
-        .aspectRatio(16 / 9, contentMode: .fit)
-        .clipped()
+            .overlay {
+                if isCurrent, feed.preview[key] == .loading {
+                    ProgressView().tint(.white)
+                } else if feed.preview[key] == .failed {
+                    Text(store.t("discover_no_preview"))
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Color.black.opacity(0.6)).clipShape(Capsule())
+                }
+            }
+            // Son coupé : le lecteur complet l'a, d'un toucher.
+            .overlay(alignment: .bottomTrailing) {
+                Image(systemName: "speaker.slash.fill")
+                    .font(.system(size: 12, weight: .bold)).foregroundColor(.white)
+                    .padding(7)
+                    .background(Color.black.opacity(0.55)).clipShape(Circle())
+                    .padding(8)
+            }
+            .clipped()
         .contentShape(Rectangle())
         .accessibilityLabel(store.t("discover_tap"))
         .accessibilityAddTraits(.isButton)

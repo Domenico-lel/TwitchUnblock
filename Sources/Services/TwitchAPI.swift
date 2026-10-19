@@ -2103,12 +2103,28 @@ func getClipsPage(login: String, period: String,
     return (list, gqlNextCursor(clips), more, false)
 }
 
-/// Clips les plus vus des dernières 24 h de quelques chaînes (fil Découvrir),
-/// en une seule requête : deux par chaîne au plus, les plus vus d'abord. nil
-/// si Twitch n'a pas répondu.
+/// Clips les plus vus des dernières 24 h de quelques chaînes (fil Découvrir) :
+/// deux par chaîne au plus, les plus vus d'abord. Twitch refuse plus de 15
+/// alias par requête (« root field aliases limit ») : par paquets de 10,
+/// envoyés en même temps. nil si aucun paquet n'a eu de réponse.
 func getTopClipsGQL(logins: [String]) async -> [FeedClip]? {
     let list = Array(logins.prefix(20))
     guard !list.isEmpty else { return [] }
+    let chunks = stride(from: 0, to: list.count, by: 10).map { Array(list[$0..<min($0 + 10, list.count)]) }
+    var results: [[FeedClip]?] = Array(repeating: nil, count: chunks.count)
+    await withTaskGroup(of: (Int, [FeedClip]?).self) { group in
+        for (i, chunk) in chunks.enumerated() {
+            group.addTask { (i, await topClipsChunk(chunk)) }
+        }
+        for await (i, r) in group { results[i] = r }
+    }
+    let answered = results.compactMap { $0 }
+    guard !answered.isEmpty else { return nil }
+    return answered.flatMap { $0 }.sorted { $0.viewCount > $1.viewCount }
+}
+
+/// Un paquet de getTopClipsGQL : une requête, un alias par chaîne.
+private func topClipsChunk(_ list: [String]) async -> [FeedClip]? {
     let fields = "id login displayName profileImageURL(width: 70) "
         + "clips(first: 2, criteria: { period: LAST_DAY, sort: VIEWS_DESC }) { edges { node { "
         + "slug title viewCount durationSeconds thumbnailURL(width: 480, height: 272) game { displayName } } } }"
@@ -2134,7 +2150,7 @@ func getTopClipsGQL(logins: [String]) async -> [FeedClip]? {
                                 avatar: u["profileImageURL"] as? String))
         }
     }
-    return out.sorted { $0.viewCount > $1.viewCount }
+    return out
 }
 
 /// Suite des clips avec le compte (Helix) : même période, même ordre (vues
