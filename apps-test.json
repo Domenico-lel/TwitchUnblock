@@ -21,6 +21,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.4.25",
+          "buildVersion": "325",
+          "date": "2026-10-19",
+          "localizedDescription": "- Discover: the speaker button turns the preview's sound on and off (lives and clips)\n- Discover: tap a channel's name or picture to open its page\n- A live opened from Discover now always has sound\n- On iPhone the app stays in portrait, except in the player and multi-live where landscape still works",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-325/TwitchUnblock.ipa",
+          "size": 3895957,
+          "commit": "b8870431fc74f6dd2a0a37039efcbf74bcc629fd"
+        },
+        {
           "version": "1.4.24",
           "buildVersion": "324",
           "date": "2026-10-19",
@@ -280,25 +289,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-288/TwitchUnblock.ipa",
           "size": 3046362,
           "commit": "90dbcbdd424e0526277e8e31514d26afa85241c1"
-        },
-        {
-          "version": "1.3.8",
-          "buildVersion": "287",
-          "date": "2026-10-12",
-          "localizedDescription": "- Signalements : réponses relues toutes les minutes app ouverte",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-287/TwitchUnblock.ipa",
-          "size": 3046205,
-          "commit": "b7032f0476e1e6ba9e622bb6c5c0ad52bf9cb787"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.4.24",
+      "version": "1.4.25",
       "versionDate": "2026-10-19",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-324/TwitchUnblock.ipa",
-      "size": 3891258
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-325/TwitchUnblock.ipa",
+      "size": 3895957
     }
   ],
   "news": []
