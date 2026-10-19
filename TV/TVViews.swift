@@ -32,6 +32,12 @@ struct TVChannelRoute: Identifiable {
     var id: String { login }
 }
 
+/// Chaîne hors ligne choisie avec le bouton Play : sa page s'ouvre et sa
+/// dernière vidéo (ou son live, s'il a commencé entre-temps) se lance.
+struct TVAutoplay: Hashable {
+    let login: String
+}
+
 struct TVRootView: View {
     @EnvironmentObject private var session: TVSession
     @Environment(\.scenePhase) private var scenePhase
@@ -42,15 +48,13 @@ struct TVRootView: View {
 
     enum Tab: Hashable { case following, top, categories, search, account }
     @State private var tab = Tab.following
-    /// Suivies choisi de nouveau alors qu'il est affiché : il se recharge.
-    @State private var followingRefresh = 0
 
     var body: some View {
-        TabView(selection: Binding(get: { tab }, set: { new in
-            if new == tab, new == .following { followingRefresh += 1 }
-            tab = new
-        })) {
-            TVFollowingTab(play: play, refresh: followingRefresh)
+        // Choisir de nouveau « Suivies » ne passe pas par la sélection sur
+        // tvOS (elle suit le focus) : l'onglet se recharge quand le focus
+        // revient de la barre des onglets (TVFollowingTab.cardFocus).
+        TabView(selection: $tab) {
+            TVFollowingTab(play: play)
                 .tabItem { Text(session.t("tv_following")) }
                 .tag(Tab.following)
             TVTopTab(play: play)
@@ -129,8 +133,6 @@ struct TVChannelCover: View {
 // MARK: – Suivies
 struct TVFollowingTab: View {
     let play: (TVPlayback) -> Void
-    /// Change quand l'onglet est choisi de nouveau : rechargement demandé.
-    var refresh = 0
     @EnvironmentObject private var session: TVSession
     @Environment(\.scenePhase) private var scenePhase
     /// Chargée une fois, la liste gardait des lives finis jusqu'au
@@ -144,10 +146,15 @@ struct TVFollowingTab: View {
     @State private var offline: [ChannelBrief] = []
     @State private var loading = false
     @State private var failed = false
+    @State private var path = NavigationPath()
+    /// Cartes de la liste qui ont le focus (0 : il est dans la barre des
+    /// onglets, ou sur une page ouverte d'ici), et depuis quand aucune.
+    @State private var focusedCards = 0
+    @State private var unfocusedSince = Date.distantPast
     private let offlineColumns = Array(repeating: GridItem(.flexible(), spacing: 40), count: 6)
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 if session.token == nil {
                     TVMessage(text: session.t("tv_need_login"))
@@ -161,13 +168,16 @@ struct TVFollowingTab: View {
                     if !offline.isEmpty { offlineSection }
                 }
             }
+            .environment(\.tvCardFocusReport, cardFocus)
             .navigationDestination(for: String.self) { login in
                 TVChannelView(login: login, play: play)
+            }
+            .navigationDestination(for: TVAutoplay.self) { target in
+                TVChannelView(login: target.login, play: play, autoplay: true)
             }
         }
         // Relancé quand le compte arrive (connexion, ou lancement).
         .task(id: session.user?.id) { await load() }
-        .onChange(of: refresh) { _ in Task { await load() } }
         .onAppear {
             visible = true
             if Date().timeIntervalSince(lastLoad) > 60 { Task { await load() } }
@@ -201,11 +211,30 @@ struct TVFollowingTab: View {
                         .frame(maxWidth: .infinity)
                     }
                     .tvCard()
+                    // Play : la page de la chaîne, et sa dernière vidéo lancée.
+                    .onPlayPauseCommand { path.append(TVAutoplay(login: c.login)) }
                 }
             }
         }
         .padding(.horizontal, 64)
         .padding(.vertical, 32)
+    }
+
+    /// Le focus revient sur la liste depuis la barre des onglets (Sélection
+    /// sur « Suivies » déjà affiché), ou depuis une page ouverte d'ici : la
+    /// liste est relue, au plus toutes les 10 s. Passer d'une carte à
+    /// l'autre ne laisse aucune carte sans focus plus d'un instant.
+    private func cardFocus(_ on: Bool) {
+        if on {
+            if focusedCards == 0, Date().timeIntervalSince(unfocusedSince) > 0.4,
+               Date().timeIntervalSince(lastLoad) > 10 {
+                Task { await load() }
+            }
+            focusedCards += 1
+        } else {
+            focusedCards = max(0, focusedCards - 1)
+            if focusedCards == 0 { unfocusedSince = Date() }
+        }
     }
 
     /// « il y a 2 j » : fin du dernier live, dans la langue de l'app.
@@ -421,9 +450,10 @@ struct TVSearchTab: View {
     @EnvironmentObject private var session: TVSession
     @State private var query = ""
     @State private var results: [AutocompleteSuggestion] = []
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(results) { r in
@@ -442,6 +472,12 @@ struct TVSearchTab: View {
                             }
                             .padding(12)
                         }
+                        // Play : le live s'il y en a un, sinon la page de la
+                        // chaîne et sa dernière vidéo.
+                        .onPlayPauseCommand {
+                            if r.viewers != nil { play(.live(login: r.login, name: r.name)) }
+                            else { path.append(TVAutoplay(login: r.login)) }
+                        }
                     }
                 }
                 .padding(.horizontal, 64)
@@ -449,6 +485,9 @@ struct TVSearchTab: View {
             .searchable(text: $query, prompt: session.t("tv_search_prompt"))
             .navigationDestination(for: String.self) { login in
                 TVChannelView(login: login, play: play)
+            }
+            .navigationDestination(for: TVAutoplay.self) { target in
+                TVChannelView(login: target.login, play: play, autoplay: true)
             }
         }
         .task(id: query) {
@@ -466,11 +505,15 @@ struct TVSearchTab: View {
 struct TVChannelView: View {
     let login: String
     let play: (TVPlayback) -> Void
+    /// Ouverte avec le bouton Play : le live, sinon la dernière vidéo, se
+    /// lance une fois chargée (une seule fois : pas à chaque retour du lecteur).
+    var autoplay = false
     @EnvironmentObject private var session: TVSession
     @State private var videos: [VodData] = []
     @State private var avatar: String?
     @State private var live: TwitchStream?
     @State private var loaded = false
+    @State private var autoplayed = false
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 4)
 
     var body: some View {
@@ -491,6 +534,7 @@ struct TVChannelView: View {
                         } label: {
                             Label(session.t("tv_watch_live"), systemImage: "play.fill")
                         }
+                        .onPlayPauseCommand { play(.live(login: login, name: live.userName)) }
                     }
                 }
                 // Toute la largeur reçoit le focus : « Regarder le live », à
@@ -510,6 +554,7 @@ struct TVChannelView: View {
                                 TVVodCard(video: v)
                             }
                             .tvCard()
+                            .onPlayPauseCommand { play(.vod(id: v.id, title: v.title, channel: login)) }
                         }
                     }
                 }
@@ -526,6 +571,15 @@ struct TVChannelView: View {
             avatar = result.avatar
             live = streams?.first
             loaded = true
+            if autoplay, !autoplayed {
+                autoplayed = true
+                if let live {
+                    play(.live(login: login, name: live.userName))
+                } else if let last = videos.first {
+                    // Vidéos du plus récent au plus ancien : le dernier live.
+                    play(.vod(id: last.id, title: last.title, channel: login))
+                }
+            }
         }
     }
 }
@@ -789,6 +843,8 @@ struct TVStreamGrid: View {
                     TVStreamCard(stream: s)
                 }
                 .tvCard()
+                // Bouton Play de la télécommande : comme Sélection.
+                .onPlayPauseCommand { play(.live(login: s.userLogin, name: s.userName)) }
                 .contextMenu {
                     if hideable {
                         Button(role: .destructive) {
@@ -912,16 +968,31 @@ struct TVThumbnail: View {
     }
 }
 
+/// Focus d'une carte, signalé à l'écran qui veut savoir quand la
+/// télécommande revient sur ses cartes (Suivies : rechargement).
+private struct TVCardFocusReportKey: EnvironmentKey {
+    static let defaultValue: ((Bool) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var tvCardFocusReport: ((Bool) -> Void)? {
+        get { self[TVCardFocusReportKey.self] }
+        set { self[TVCardFocusReportKey.self] = newValue }
+    }
+}
+
 /// Carte à la télécommande (style « card » de tvOS) : celle qui a le focus
 /// grandit et passe devant ses voisines, au lieu de glisser dessous.
 private struct TVCardFocus: ViewModifier {
     @FocusState private var focused: Bool
+    @Environment(\.tvCardFocusReport) private var report
 
     func body(content: Content) -> some View {
         content
             .buttonStyle(.card)
             .focused($focused)
             .zIndex(focused ? 1 : 0)
+            .onChange(of: focused) { on in report?(on) }
     }
 }
 
