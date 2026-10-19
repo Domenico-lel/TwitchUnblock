@@ -242,39 +242,48 @@ struct MainTabView: View {
         return currentVodId
     }
 
-    /// Trois destinations seulement. « Streamer » et « Lien / ID » ont fusionné
-    /// dans Recherche, et les Réglages sont passés derrière l'avatar de l'en-tête.
+    /// « Streamer » et « Lien / ID » ont fusionné dans Recherche, et les
+    /// Réglages sont passés derrière l'avatar de l'en-tête. Découvrir (fil de
+    /// lives et de clips) se masque dans les Réglages.
     enum TabName: String, CaseIterable {
-        case home, search, library
+        case home, discover, search, library
 
         var icon: String {
             switch self {
-            case .home:    return "play.tv"
-            case .search:  return "magnifyingglass"
-            case .library: return "clock.arrow.circlepath"
+            case .home:     return "play.tv"
+            case .discover: return "play.rectangle.on.rectangle"
+            case .search:   return "magnifyingglass"
+            case .library:  return "clock.arrow.circlepath"
             }
         }
         var iconFilled: String {
             switch self {
-            case .home:    return "play.tv.fill"
-            case .search:  return "magnifyingglass"
-            case .library: return "clock.arrow.circlepath"
+            case .home:     return "play.tv.fill"
+            case .discover: return "play.rectangle.on.rectangle.fill"
+            case .search:   return "magnifyingglass"
+            case .library:  return "clock.arrow.circlepath"
             }
         }
         func label(_ store: AppStore) -> String {
             switch self {
-            case .home:    return store.t("tab_home")
-            case .search:  return store.t("tab_search")
-            case .library: return store.t("tab_library")
+            case .home:     return store.t("tab_home")
+            case .discover: return store.t("tab_discover")
+            case .search:   return store.t("tab_search")
+            case .library:  return store.t("tab_library")
             }
         }
         /// Onglets que la visite guidée fait toucher.
         var tourTarget: TourTarget? {
             switch self {
-            case .home:    return nil
+            case .home, .discover: return nil
             case .search:  return .tabSearch
             case .library: return .tabLibrary
             }
+        }
+
+        /// Onglets de la barre : Découvrir seulement s'il n'est pas masqué.
+        static func visible(_ store: AppStore) -> [TabName] {
+            allCases.filter { $0 != .discover || store.showDiscoverTab }
         }
     }
 
@@ -296,6 +305,10 @@ struct MainTabView: View {
                     // comme valeur, donc `playLive` vaudrait ici
                     // `(String, Bool) -> Void` et ne collerait pas au callback.
                     case .home:    HomeView(onPlayStream: { playLive($0) })
+                    // Aperçus seulement sans lecteur ouvert (ni réduit, ni multi-live).
+                    case .discover: DiscoverView(active: playerMode == nil && !showMultiLive,
+                                                 onPlayLive: { playLive($0) },
+                                                 onPlayClip: { playClip($0, $1) })
                     case .search:  SearchView(onPlayVod: { playVod($0, $1, $2, $3) },
                                               onPlayLive: { playLive($0) },
                                               onPlayClip: { playClip($0, $1) },
@@ -323,6 +336,10 @@ struct MainTabView: View {
             // pour qu'aucune vue ne garde les anciennes couleurs. Le lecteur et
             // la feuille des réglages, hors de ce bloc, restent en place.
             .id(store.themeID)
+            // Découvrir masqué pendant qu'il est affiché : retour à l'accueil.
+            .onChange(of: store.showDiscoverTab) { on in
+                if !on, activeTab == .discover { activeTab = .home }
+            }
 
             // ── Mini bar ──────────────────────────────────────────────
             // `!closingPlayer` : sans lui, la mini-barre apparaîtrait le temps du
@@ -1941,7 +1958,7 @@ struct CustomTabBar: View {
 
     private var tabs: some View {
         HStack(spacing: 0) {
-            ForEach(MainTabView.TabName.allCases, id: \.self) { tab in
+            ForEach(MainTabView.TabName.visible(store), id: \.self) { tab in
                 let isActive = activeTab == tab
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) { activeTab = tab }

@@ -556,6 +556,10 @@ final class AppStore: ObservableObject {
     @Published var showRecentChannels: Bool = true {
         didSet { UserDefaults.standard.set(showRecentChannels, forKey: "cfg_recent") }
     }
+    /// Onglet Découvrir (fil de lives et de clips) dans la barre d'onglets.
+    @Published var showDiscoverTab: Bool = true {
+        didSet { UserDefaults.standard.set(showDiscoverTab, forKey: "cfg_discover_tab") }
+    }
 
     /// Langue du top des lives ; nil = celle de l'appareil.
     @Published var topLang: String? = nil {
@@ -754,6 +758,7 @@ final class AppStore: ObservableObject {
         }
         homeListLayout     = ud.bool(forKey: "cfg_home_list")
         showRecentChannels = ud.object(forKey: "cfg_recent") as? Bool ?? true
+        showDiscoverTab = ud.object(forKey: "cfg_discover_tab") as? Bool ?? true
         // Qualité préférée ; avant elle, seul l'audio seul était retenu.
         if let pref = ud.string(forKey: "cfg_quality_pref"), kQualityPrefs.contains(pref) {
             preferredQuality = pref

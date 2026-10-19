@@ -80,6 +80,20 @@ struct VodMarkers {
     var createdAt: Date? = nil
 }
 
+/// Clip du fil Découvrir : un clip populaire d'une chaîne du top.
+struct FeedClip: Identifiable, Equatable {
+    let id: String            // slug
+    let title: String
+    let thumbnailURL: String
+    let viewCount: Int
+    let durationSeconds: Int
+    let game: String
+    let login: String
+    let channelId: String
+    let channelName: String
+    let avatar: String?
+}
+
 /// Clip d'une chaîne (liste de la page chaîne).
 struct ClipData: Identifiable {
     let id: String            // slug

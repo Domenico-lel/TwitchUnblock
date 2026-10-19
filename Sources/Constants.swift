@@ -293,6 +293,10 @@ private let translations: [Lang: [String: String]] = [
     .fr: [
         "title": "Regarder Twitch sans Sub",
         "tab_home": "Accueil", "tab_search": "Recherche", "tab_library": "Mes VODs",
+        "tab_discover": "Découvrir", "discover_live": "Live", "discover_clips": "Clips",
+        "discover_empty": "Rien à découvrir pour l'instant.", "discover_no_preview": "Aperçu indisponible",
+        "discover_tap": "Ouvrir le lecteur", "discover_tab": "Onglet Découvrir",
+        "discover_tab_sub": "Un live par écran, qu'on fait défiler, avec un aperçu muet ; et les clips du jour. Un toucher ouvre le lecteur avec le son et le chat.",
         "tab_direct": "Lien / ID", "settings": "Paramètres",
         "tab_history": "VODs",
         "ph_streamer": "Streamer (ex: squeezie)", "ph_keyword": "Mot-clé (ex: horreur)",
@@ -915,6 +919,10 @@ private let translations: [Lang: [String: String]] = [
     .en: [
         "title": "Watch Twitch No Sub",
         "tab_home": "Home", "tab_search": "Search", "tab_library": "My VODs",
+        "tab_discover": "Discover", "discover_live": "Live", "discover_clips": "Clips",
+        "discover_empty": "Nothing to discover right now.", "discover_no_preview": "Preview unavailable",
+        "discover_tap": "Open the player", "discover_tab": "Discover tab",
+        "discover_tab_sub": "One live per screen to swipe through, with a muted preview, plus today's clips. Tap to open the player with sound and chat.",
         "tab_direct": "Link / ID", "settings": "Settings",
         "tab_history": "VODs",
         "ph_streamer": "Streamer (ex: shroud)", "ph_keyword": "Keyword (ex: horror)",
@@ -1537,6 +1545,10 @@ private let translations: [Lang: [String: String]] = [
     .es: [
         "title": "Ver Twitch sin Sub",
         "tab_home": "Inicio", "tab_search": "Buscar", "tab_library": "Mis VODs",
+        "tab_discover": "Descubrir", "discover_live": "Directos", "discover_clips": "Clips",
+        "discover_empty": "Nada que descubrir por ahora.", "discover_no_preview": "Vista previa no disponible",
+        "discover_tap": "Abrir el reproductor", "discover_tab": "Pestaña Descubrir",
+        "discover_tab_sub": "Un directo por pantalla para deslizar, con vista previa sin sonido, y los clips del día. Toca para abrir el reproductor con sonido y chat.",
         "tab_direct": "Enlace / ID", "settings": "Ajustes",
         "tab_history": "VODs",
         "ph_streamer": "Streamer (ej: ibai)", "ph_keyword": "Palabra (ej: horror)",

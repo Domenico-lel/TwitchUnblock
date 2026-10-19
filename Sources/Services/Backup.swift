@@ -50,6 +50,7 @@ enum Backup {
             "topLang": store.topLang.map { siteTopLang($0) as Any } ?? NSNull(),
             "homeList": store.homeListLayout,
             "showRecent": store.showRecentChannels,
+            "ios_showDiscoverTab": store.showDiscoverTab,
             "timestamps": store.chatTimestamps,
             "keepDeleted": store.chatShowDeleted,
             "loadHistory": store.chatLoadRecent,
@@ -164,6 +165,7 @@ enum Backup {
         }
         bool("homeList") { store.homeListLayout = $0 }
         bool("showRecent") { store.showRecentChannels = $0 }
+        bool("ios_showDiscoverTab") { store.showDiscoverTab = $0 }
         bool("timestamps") { store.chatTimestamps = $0 }
         bool("keepDeleted") { store.chatShowDeleted = $0 }
         bool("loadHistory") { store.chatLoadRecent = $0 }

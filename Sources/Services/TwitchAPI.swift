@@ -2103,6 +2103,40 @@ func getClipsPage(login: String, period: String,
     return (list, gqlNextCursor(clips), more, false)
 }
 
+/// Clips les plus vus des dernières 24 h de quelques chaînes (fil Découvrir),
+/// en une seule requête : deux par chaîne au plus, les plus vus d'abord. nil
+/// si Twitch n'a pas répondu.
+func getTopClipsGQL(logins: [String]) async -> [FeedClip]? {
+    let list = Array(logins.prefix(20))
+    guard !list.isEmpty else { return [] }
+    let fields = "id login displayName profileImageURL(width: 70) "
+        + "clips(first: 2, criteria: { period: LAST_DAY, sort: VIEWS_DESC }) { edges { node { "
+        + "slug title viewCount durationSeconds thumbnailURL(width: 480, height: 272) game { displayName } } } }"
+    let q = "query { " + list.enumerated().map { i, login in
+        "c\(i): user(login: \"\(gqlStr(login.lowercased()))\") { \(fields) }"
+    }.joined(separator: " ") + " }"
+    guard let d = await gqlRequest(q, [:]) else { return nil }
+    var out: [FeedClip] = []
+    for i in list.indices {
+        guard let u = d["c\(i)"] as? [String: Any], let login = u["login"] as? String else { continue }
+        let edges = (u["clips"] as? [String: Any])?["edges"] as? [[String: Any]] ?? []
+        for e in edges {
+            guard let n = e["node"] as? [String: Any], let slug = n["slug"] as? String else { continue }
+            out.append(FeedClip(id: slug,
+                                title: n["title"] as? String ?? "",
+                                thumbnailURL: n["thumbnailURL"] as? String ?? "",
+                                viewCount: n["viewCount"] as? Int ?? 0,
+                                durationSeconds: n["durationSeconds"] as? Int ?? 0,
+                                game: (n["game"] as? [String: Any])?["displayName"] as? String ?? "",
+                                login: login,
+                                channelId: u["id"] as? String ?? "",
+                                channelName: u["displayName"] as? String ?? login,
+                                avatar: u["profileImageURL"] as? String))
+        }
+    }
+    return out.sorted { $0.viewCount > $1.viewCount }
+}
+
 /// Suite des clips avec le compte (Helix) : même période, même ordre (vues
 /// décroissantes). Helix repart du début : ses 100 premiers recouvrent ceux
 /// de GQL, l'appelant écarte les doublons. `cursor` nil = depuis le début.

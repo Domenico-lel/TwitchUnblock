@@ -697,6 +697,9 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("show_recent"), store.t("show_recent_sub"),
                           $store.showRecentChannels, log: "Streamers récents")
+                Divider().background(Color.tBorder)
+                toggleRow(store.t("discover_tab"), store.t("discover_tab_sub"),
+                          $store.showDiscoverTab, log: "Onglet Découvrir")
             }
         }
     }
