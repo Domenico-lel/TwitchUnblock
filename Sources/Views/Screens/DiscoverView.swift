@@ -42,6 +42,12 @@ final class DiscoverFeed: ObservableObject {
     private var resolved: [String: (url: URL, at: Date)] = [:]
     private var resolveTask: Task<Void, Never>?
     private var endObserver: NSObjectProtocol?
+    /// Son des aperçus coupé (par défaut). Rallumé, il le reste d'une page à
+    /// l'autre jusqu'à la sortie de l'onglet.
+    @Published private(set) var muted = true
+    /// Son rallumé : les aperçus tiennent la session audio (« discover »).
+    private var holdsSession = false
+    /// Catégorie « ambient » posée pour les aperçus muets.
     private var ambient = false
 
     // MARK: Lives du top
@@ -125,7 +131,7 @@ final class DiscoverFeed: ObservableObject {
         }
         resolveTask?.cancel()
         playing = key
-        setAmbient(true)
+        applyAudio()
         player.pause()
         player.replaceCurrentItem(with: nil)
         if let r = resolved[key], Date().timeIntervalSince(r.at) < 300 {
@@ -175,19 +181,38 @@ final class DiscoverFeed: ObservableObject {
         player.pause()
         player.replaceCurrentItem(with: nil)
         playing = nil
-        setAmbient(false)
+        // Session rendue avant qu'un lecteur ne s'ouvre (même file d'attente
+        // que la sienne : l'ordre est garanti).
+        if holdsSession {
+            holdsSession = false
+            PlaybackAudio.shared.release("discover")
+        } else if ambient {
+            PlaybackAudio.shared.previewAmbient(false)
+        }
+        ambient = false
     }
 
-    /// Aperçus muets : la musique d'une autre app continue (« ambient »). La
-    /// catégorie du lecteur est rendue dès qu'ils s'arrêtent, avant qu'un
-    /// lecteur ne s'ouvre.
-    private func setAmbient(_ on: Bool) {
-        guard on != ambient else { return }
-        ambient = on
-        if on {
-            try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .default)
-        } else {
-            PlaybackAudio.configure()
+    /// Bouton du son de l'aperçu.
+    func toggleSound() {
+        muted.toggle()
+        player.isMuted = muted
+        // Rallumé : la session passe aux aperçus. Recoupé, elle leur reste
+        // jusqu'à la sortie de l'onglet (la relâcher arrêterait l'aperçu).
+        if !muted, playing != nil { applyAudio() }
+    }
+
+    /// Son coupé : catégorie « ambient », la musique d'une autre app
+    /// continue. Rallumé : la session des lecteurs, comme pour une vidéo.
+    private func applyAudio() {
+        player.isMuted = muted
+        if muted {
+            guard !holdsSession, !ambient else { return }
+            ambient = true
+            PlaybackAudio.shared.previewAmbient(true)
+        } else if !holdsSession {
+            holdsSession = true
+            ambient = false
+            PlaybackAudio.shared.claim("discover")
         }
     }
 }
@@ -265,11 +290,11 @@ struct DiscoverView: View {
             }
         } else {
             VerticalPager(count: feed.lives.count, index: $liveIndex, size: size) { i in
-                DiscoverLivePage(stream: feed.lives[i], isCurrent: i == liveIndex, feed: feed) {
+                DiscoverLivePage(stream: feed.lives[i], isCurrent: i == liveIndex, feed: feed, onOpen: {
                     let login = feed.lives[i].userLogin
                     feed.stop()
                     onPlayLive(login)
-                }
+                }, onChannel: { openChannel(feed.lives[i].userLogin) })
             }
         }
     }
@@ -285,13 +310,19 @@ struct DiscoverView: View {
             }
         } else {
             VerticalPager(count: feed.clips.count, index: $clipIndex, size: size) { i in
-                DiscoverClipPage(clip: feed.clips[i], isCurrent: i == clipIndex, feed: feed) {
+                DiscoverClipPage(clip: feed.clips[i], isCurrent: i == clipIndex, feed: feed, onOpen: {
                     let c = feed.clips[i]
                     feed.stop()
                     onPlayClip(c.id, c.title)
-                }
+                }, onChannel: { openChannel(feed.clips[i].login) })
             }
         }
+    }
+
+    /// Page de la chaîne, dans la feuille de MainTabView (store.pendingChannel).
+    private func openChannel(_ login: String) {
+        feed.stop()
+        store.pendingChannel = login.lowercased()
     }
 
     /// Chargement, échec (avec Réessayer) ou fil vide.
@@ -373,6 +404,8 @@ private struct DiscoverLivePage: View {
     let isCurrent: Bool
     @ObservedObject var feed: DiscoverFeed
     let onOpen: () -> Void
+    /// Page de la chaîne (nom ou photo touchés).
+    let onChannel: () -> Void
     @EnvironmentObject private var store: AppStore
 
     private var login: String { stream.userLogin.lowercased() }
@@ -398,7 +431,7 @@ private struct DiscoverLivePage: View {
                 Spacer(minLength: 0)
                 DiscoverSideBar(login: login, name: stream.userName, avatar: feed.avatars[login],
                                 viewers: stream.viewerCount, gameId: stream.gameId, gameName: stream.gameName,
-                                link: "https://www.twitch.tv/\(login)")
+                                link: "https://www.twitch.tv/\(login)", onChannel: onChannel)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 18)
@@ -416,8 +449,11 @@ private struct DiscoverLivePage: View {
                     .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.85))
             }
             HStack(spacing: 10) {
-                Text(stream.userName)
-                    .font(.system(size: 19, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                Button(action: onChannel) {
+                    Text(stream.userName)
+                        .font(.system(size: 19, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                }
+                .buttonStyle(.plain)
                 DiscoverFollowButton(login: login, channelId: stream.id)
             }
             if !stream.title.isEmpty {
@@ -451,6 +487,8 @@ private struct DiscoverClipPage: View {
     let isCurrent: Bool
     @ObservedObject var feed: DiscoverFeed
     let onOpen: () -> Void
+    /// Page de la chaîne (nom ou photo touchés).
+    let onChannel: () -> Void
     @EnvironmentObject private var store: AppStore
 
     private var key: String { "clip:" + clip.id }
@@ -470,8 +508,11 @@ private struct DiscoverClipPage: View {
                     Text("▶ " + formatViewers(clip.viewCount) + " · " + formatDuration(clip.durationSeconds))
                         .font(.system(size: 12, weight: .semibold)).foregroundColor(.white.opacity(0.85))
                     HStack(spacing: 10) {
-                        Text(clip.channelName)
-                            .font(.system(size: 19, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                        Button(action: onChannel) {
+                            Text(clip.channelName)
+                                .font(.system(size: 19, weight: .bold)).foregroundColor(.white).lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
                         DiscoverFollowButton(login: clip.login.lowercased(), channelId: clip.channelId)
                     }
                     if !clip.title.isEmpty {
@@ -487,7 +528,7 @@ private struct DiscoverClipPage: View {
                 Spacer(minLength: 0)
                 DiscoverSideBar(login: clip.login.lowercased(), name: clip.channelName, avatar: clip.avatar,
                                 viewers: nil, gameId: "", gameName: "",
-                                link: "https://clips.twitch.tv/\(clip.id)")
+                                link: "https://clips.twitch.tv/\(clip.id)", onChannel: onChannel)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 18)
@@ -556,13 +597,20 @@ private struct DiscoverScreen: View {
                         .background(Color.black.opacity(0.6)).clipShape(Capsule())
                 }
             }
-            // Son coupé : le lecteur complet l'a, d'un toucher.
+            // Son de l'aperçu (coupé au départ), d'un toucher.
             .overlay(alignment: .bottomTrailing) {
-                Image(systemName: "speaker.slash.fill")
-                    .font(.system(size: 12, weight: .bold)).foregroundColor(.white)
-                    .padding(7)
-                    .background(Color.black.opacity(0.55)).clipShape(Circle())
-                    .padding(8)
+                Button {
+                    feed.toggleSound()
+                } label: {
+                    Image(systemName: feed.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.system(size: 14, weight: .bold)).foregroundColor(.white)
+                        .frame(width: 34, height: 34)
+                        .background(Color.black.opacity(0.55)).clipShape(Circle())
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(store.t(feed.muted ? "discover_unmute" : "discover_mute"))
             }
             .clipped()
         .contentShape(Rectangle())
@@ -580,19 +628,24 @@ private struct DiscoverSideBar: View {
     let gameId: String
     let gameName: String
     let link: String
+    /// Page de la chaîne (photo touchée).
+    let onChannel: () -> Void
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
         VStack(spacing: 18) {
             VStack(spacing: 4) {
-                AsyncImage(url: URL(string: avatar ?? "")) { img in
-                    img.resizable().scaledToFill()
-                } placeholder: {
-                    Circle().fill(Color.white.opacity(0.12))
+                Button(action: onChannel) {
+                    AsyncImage(url: URL(string: avatar ?? "")) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: {
+                        Circle().fill(Color.white.opacity(0.12))
+                    }
+                    .frame(width: 48, height: 48)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
                 }
-                .frame(width: 48, height: 48)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Color.white.opacity(0.6), lineWidth: 1))
+                .buttonStyle(.plain)
                 if let viewers {
                     HStack(spacing: 3) {
                         Circle().fill(Color.tLive).frame(width: 7, height: 7)

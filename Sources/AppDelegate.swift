@@ -28,6 +28,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return true
     }
 
+    /// Orientations permises : voir OrientationLock.
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        OrientationLock.mask
+    }
+
     /// Fichiers d'une VOD arrivés pendant que l'app était fermée : iOS la
     /// relance en arrière-plan le temps de les ranger.
     func application(_ application: UIApplication,
@@ -72,5 +78,34 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // iOS la laisserait affichée des heures.
         PlayerActivity.end()
         PlayerActivity.endOthers(wait: true)
+    }
+}
+
+// MARK: – Orientation
+/// iPhone : l'app reste en portrait, sauf le lecteur (ouvert en grand) et le
+/// multi-live, où le paysage reste pratique. L'iPad et le Mac gardent toutes
+/// les orientations. Fil principal seulement.
+enum OrientationLock {
+    private static var landscapeAllowed = false
+
+    static var mask: UIInterfaceOrientationMask {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
+        return landscapeAllowed ? .allButUpsideDown : .portrait
+    }
+
+    static func allowLandscape(_ on: Bool) {
+        guard on != landscapeAllowed else { return }
+        landscapeAllowed = on
+        guard UIDevice.current.userInterfaceIdiom == .phone,
+              let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        for window in scene.windows {
+            window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+        // Lecteur fermé ou réduit en paysage : retour au portrait.
+        if !on, scene.effectiveGeometry.interfaceOrientation.isLandscape {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { error in
+                logger.warn("APP", "Retour au portrait refusé", error.localizedDescription)
+            }
+        }
     }
 }

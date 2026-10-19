@@ -14,6 +14,8 @@ let kRussianStrings: [String: String] = [
     "discover_empty": "Пока нечего показать.",
     "discover_no_preview": "Предпросмотр недоступен",
     "discover_tap": "Открыть плеер",
+    "discover_unmute": "Включить звук",
+    "discover_mute": "Выключить звук",
     "discover_tab": "Вкладка «Обзор»",
     "discover_tab_sub": "По одной трансляции на экран с беззвучным предпросмотром и клипы дня. Нажмите, чтобы открыть плеер со звуком и чатом.",
     "tab_direct": "Ссылка / ID",

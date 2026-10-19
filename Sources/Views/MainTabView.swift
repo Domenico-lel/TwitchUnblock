@@ -237,6 +237,11 @@ struct MainTabView: View {
     }
 
     /// Y a-t-il un chat à afficher sous le lecteur ?
+    /// Paysage permis (iPhone) : lecteur ouvert en grand, ou multi-live.
+    private var landscapeAllowed: Bool {
+        (playerMode != nil && playerVisible && !closingPlayer) || showMultiLive
+    }
+
     private var chatTarget: String? {
         if let ch = currentChannelName { return ch }
         return currentVodId
@@ -306,7 +311,8 @@ struct MainTabView: View {
                     // `(String, Bool) -> Void` et ne collerait pas au callback.
                     case .home:    HomeView(onPlayStream: { playLive($0) })
                     // Aperçus seulement sans lecteur ouvert (ni réduit, ni multi-live).
-                    case .discover: DiscoverView(active: playerMode == nil && !showMultiLive,
+                    case .discover: DiscoverView(active: playerMode == nil && !showMultiLive
+                                                     && channelSheet == nil && !showSettings,
                                                  onPlayLive: { playLive($0) },
                                                  onPlayClip: { playClip($0, $1) })
                     case .search:  SearchView(onPlayVod: { playVod($0, $1, $2, $3) },
@@ -340,6 +346,9 @@ struct MainTabView: View {
             .onChange(of: store.showDiscoverTab) { on in
                 if !on, activeTab == .discover { activeTab = .home }
             }
+            // iPhone : portrait, sauf lecteur ouvert en grand ou multi-live.
+            .onChange(of: landscapeAllowed) { OrientationLock.allowLandscape($0) }
+            .onAppear { OrientationLock.allowLandscape(landscapeAllowed) }
 
             // ── Mini bar ──────────────────────────────────────────────
             // `!closingPlayer` : sans lui, la mini-barre apparaîtrait le temps du

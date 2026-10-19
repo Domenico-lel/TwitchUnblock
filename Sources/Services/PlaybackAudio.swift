@@ -56,6 +56,10 @@ final class PlaybackAudio {
             owners.insert(owner)
             generation += 1
             quiet = false
+            // Catégorie des lecteurs reposée à chaque ouverture : les aperçus
+            // muets de Découvrir passent en « ambient », qui se tait en mode
+            // silencieux — un lecteur ouvert juste après restait sans son.
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
             } catch {
@@ -82,6 +86,26 @@ final class PlaybackAudio {
             quiet = false
             queue.asyncAfter(deadline: .now() + 1.5) { [self] in
                 deactivate(notifyOthers: notify, generation: wanted)
+            }
+        }
+    }
+
+    /// Aperçus muets (onglet Découvrir). `on` : catégorie « ambient », la
+    /// musique d'une autre app continue ; jamais quand un lecteur tient la
+    /// session. `off` : la session est relâchée PUIS la catégorie des lecteurs
+    /// reposée — changer la catégorie d'une session active coupait la musique
+    /// des autres apps.
+    func previewAmbient(_ on: Bool) {
+        queue.async { [self] in
+            guard owners.isEmpty else { return }
+            let session = AVAudioSession.sharedInstance()
+            if on {
+                // Une relâche prévue (lecteur fermé à l'instant) n'arrête pas l'aperçu.
+                generation += 1
+                try? session.setCategory(.ambient, mode: .default)
+            } else {
+                try? session.setActive(false)
+                try? session.setCategory(.playback, mode: .moviePlayback)
             }
         }
     }
