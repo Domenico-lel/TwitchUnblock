@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Combine
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Onglet Découvrir : un live (ou un clip) par écran, qu'on fait défiler
@@ -8,9 +9,29 @@ import AVFoundation
 //  (son, chat). Masquable dans les Réglages (AppStore.showDiscoverTab).
 // ═══════════════════════════════════════════════════════════════════════════
 
+// MARK: – Verrou des aperçus
+/// Lecteur ou multi-live ouvert : aucun aperçu ne joue, quel que soit l'ordre
+/// des mises à jour de l'écran — l'aperçu arrêté au toucher pouvait être
+/// relancé juste après, avant que l'écran ne voie le lecteur (son en double).
+/// Posé par MainTabView au lancement d'une lecture, retiré à sa fermeture ;
+/// toujours sur le fil principal.
+final class DiscoverGate: ObservableObject {
+    static let shared = DiscoverGate()
+    @Published var blocked = false
+}
+
 // MARK: – Données et aperçus
 @MainActor
 final class DiscoverFeed: ObservableObject {
+    /// Lecteur ouvert : l'aperçu en cours s'arrête aussitôt.
+    private var gateWatch: AnyCancellable?
+
+    init() {
+        gateWatch = DiscoverGate.shared.$blocked.sink { [weak self] blocked in
+            if blocked { self?.stop() }
+        }
+    }
+
     enum Preview: Equatable { case loading, ready, failed }
 
     @Published private(set) var lives: [TwitchStream] = []
@@ -125,6 +146,8 @@ final class DiscoverFeed: ObservableObject {
 
     private func start(_ key: String, loop: Bool, avatarFor login: String?,
                        resolve: @escaping () async -> (URL?, String?)) {
+        // Un lecteur est ouvert : rien ne repart dessous.
+        guard !DiscoverGate.shared.blocked else { return }
         guard playing != key else {
             if player.timeControlStatus == .paused, player.currentItem != nil { player.play() }
             return
@@ -143,7 +166,7 @@ final class DiscoverFeed: ObservableObject {
             let (url, avatar) = await resolve()
             guard let self, !Task.isCancelled else { return }
             if let login, let avatar { self.avatars[login] = avatar }
-            guard self.playing == key else { return }
+            guard self.playing == key, !DiscoverGate.shared.blocked else { return }
             guard let url else {
                 self.preview[key] = .failed
                 return
@@ -154,6 +177,7 @@ final class DiscoverFeed: ObservableObject {
     }
 
     private func attach(_ url: URL, key: String, loop: Bool) {
+        guard !DiscoverGate.shared.blocked else { return }
         let item = AVPlayerItem(url: url)
         item.preferredForwardBufferDuration = 2
         if let o = endObserver {
@@ -226,13 +250,14 @@ struct DiscoverView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var feed = DiscoverFeed()
+    @ObservedObject private var gate = DiscoverGate.shared
     @State private var mode = Mode.live
     @State private var liveIndex = 0
     @State private var clipIndex = 0
 
     enum Mode: Hashable { case live, clips }
 
-    private var canPlay: Bool { active && scenePhase == .active }
+    private var canPlay: Bool { active && scenePhase == .active && !gate.blocked }
     private var lang: String { TopLanguage.resolved(store.topLang) }
 
     var body: some View {

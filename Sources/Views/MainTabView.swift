@@ -346,6 +346,8 @@ struct MainTabView: View {
             .onChange(of: store.showDiscoverTab) { on in
                 if !on, activeTab == .discover { activeTab = .home }
             }
+            // Multi-live ouvert ou fermé : aperçus de Découvrir bloqués ou permis.
+            .onChange(of: showMultiLive) { on in DiscoverGate.shared.blocked = on || playerMode != nil }
             // iPhone : portrait, sauf lecteur ouvert en grand ou multi-live.
             .onChange(of: landscapeAllowed) { OrientationLock.allowLandscape($0) }
             .onAppear { OrientationLock.allowLandscape(landscapeAllowed) }
@@ -1492,6 +1494,7 @@ struct MainTabView: View {
     /// Un seul son à la fois : le lecteur se ferme.
     private func openMultiLive() {
         if playerMode != nil { stopPlayer() }
+        DiscoverGate.shared.blocked = true
         showMultiLive = true
     }
 
@@ -1561,6 +1564,8 @@ struct MainTabView: View {
     /// résout, au lieu d'être démonté et remplacé par un écran d'attente.
     /// `keepVisibility` : voir playVod.
     private func startPlayback(_ mode: PlayerMode, soft: Bool = false, keepVisibility: Bool = false) {
+        // Plus d'aperçu de Découvrir sous le lecteur (son en double).
+        DiscoverGate.shared.blocked = true
         // Referme le clavier s'il était ouvert (recherche en cours) : sinon il
         // restait affiché par-dessus le lecteur.
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
@@ -1852,6 +1857,8 @@ struct MainTabView: View {
             liveGame           = ""
             liveSourceUsed     = nil
             playerMode         = nil
+            // Lecteur fermé : les aperçus de Découvrir peuvent reprendre.
+            DiscoverGate.shared.blocked = showMultiLive
             qualityLinks       = nil
             linksContentID     = ""
             linksAreLive       = false
