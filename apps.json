@@ -154,6 +154,117 @@
       "versionDate": "2026-10-15",
       "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/nightly-298/TwitchUnblock.ipa",
       "size": 3607485
+    },
+    {
+      "name": "TU Test",
+      "bundleIdentifier": "com.mxfia19.TwitchUnblock.test",
+      "developerName": "MXFia19",
+      "subtitle": "Builds de test (branche test-17d298)",
+      "localizedDescription": "Version de test de TwitchUnblock : nouveautés en cours, peut être instable. Installée à côté de l’app normale.",
+      "iconURL": "https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/assets/icon.png",
+      "tintColor": "#9146ff",
+      "category": "entertainment",
+      "screenshots": [],
+      "versions": [
+        {
+          "version": "1.5.0",
+          "buildVersion": "328",
+          "date": "2026-10-19",
+          "localizedDescription": "- Improvements and fixes",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-328/TwitchUnblock.ipa",
+          "size": 3896306,
+          "commit": "490136b5df2cb138e958a6b9737f6cce14586d11"
+        },
+        {
+          "version": "1.4.26",
+          "buildVersion": "326",
+          "date": "2026-10-19",
+          "localizedDescription": "- Discover: opening a live or clip no longer leaves the preview playing underneath (no more double sound)",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-326/TwitchUnblock.ipa",
+          "size": 3896302,
+          "commit": "5a70b5b10bcf1f8cfa37876b559e07ad26ebd104"
+        },
+        {
+          "version": "1.4.25",
+          "buildVersion": "325",
+          "date": "2026-10-19",
+          "localizedDescription": "- Discover: the speaker button turns the preview's sound on and off (lives and clips)\n- Discover: tap a channel's name or picture to open its page\n- A live opened from Discover now always has sound\n- On iPhone the app stays in portrait, except in the player and multi-live where landscape still works",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-325/TwitchUnblock.ipa",
+          "size": 3895957,
+          "commit": "b8870431fc74f6dd2a0a37039efcbf74bcc629fd"
+        },
+        {
+          "version": "1.4.24",
+          "buildVersion": "324",
+          "date": "2026-10-19",
+          "localizedDescription": "- Discover: the Clips feed loads again (Twitch refused the request)\n- Discover: the preview no longer fills and crops the whole screen, and the channel name, title, Follow and side buttons are visible again",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-324/TwitchUnblock.ipa",
+          "size": 3891258,
+          "commit": "52a771bbda917fbdab27d9fdbcbf8605c71cfc36"
+        },
+        {
+          "version": "1.4.23",
+          "buildVersion": "323",
+          "date": "2026-10-19",
+          "localizedDescription": "- New Discover tab: one live per screen to swipe through, with a muted preview, plus today's top clips; tap to open the player with sound and chat\n- Discover: follow, share or hide a channel or category right from the feed\n- Settings → Discover tab hides it if you don't want it",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-323/TwitchUnblock.ipa",
+          "size": 3889630,
+          "commit": "cc9a75b1258b9f24e2ca3c3d1c3c56df7daedb80"
+        },
+        {
+          "version": "1.4.22",
+          "buildVersion": "322",
+          "date": "2026-10-18",
+          "localizedDescription": "- My reports: a conversation closed by the developer, or one that reached 100 messages, says so instead of showing the reply box and then failing.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-322/TwitchUnblock.ipa",
+          "size": 3814718,
+          "commit": "994eade39442c29826c603a463cf09ae5de17f4f"
+        },
+        {
+          "version": "1.4.21",
+          "buildVersion": "321",
+          "date": "2026-10-18",
+          "localizedDescription": "- The header margin now follows rotation (no title under the notch, no extra gap after turning the iPhone).\n- Counts agree with their word: 1 viewer, 1 vote, 1 file… (and the three Russian plural forms).\n- TU Test has its own link scheme: tapping a ntfy notification opens the right app when both are installed.",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-321/TwitchUnblock.ipa",
+          "size": 3807544,
+          "commit": "0a489cf8d3f3c0c6f69a735dcfa2aef854bec7ad"
+        },
+        {
+          "version": "1.4.20",
+          "buildVersion": "320",
+          "date": "2026-10-18",
+          "localizedDescription": "- Downloads: original audio is still tried when the first check gets no answer, leaving the app right after tapping Download no longer fails it, a chat that can't be fetched no longer stays \"in progress\" forever, and other apps can no longer read your downloads list through the local server\n- Drops: a short streamer disconnection no longer stops progress for the session, and repeated refusals are shown as failing instead of retrying every 10 seconds\n- ntfy notifications: up to 500 channels kept in a sensible order (no longer cut alphabetically), the last known follow list is used when Twitch doesn't answer, and your subscription stays alive even if you don't open the app\n- Notifications are no longer lost when the app is woken in the background, and in-app notices now show above the player menu, sleep timer and chat sheets",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-320/TwitchUnblock.ipa",
+          "size": 3803685,
+          "commit": "a87a8d04051698137d7fffde5f8e13d2e97836a3"
+        },
+        {
+          "version": "1.4.19",
+          "buildVersion": "319",
+          "date": "2026-10-18",
+          "localizedDescription": "- Multi-live: tiles change quality when you add or remove lives, a tile stuck loading retries by itself then offers Retry, a light spinner shows while a tile buffers, and raids no longer stop being detected\n- Chat: messages waiting for the delay sync are no longer lost when the chat reconnects, your own Twitch emotes show as emotes, highlight words can be several words or emote names, the ⋯ menu is available without an account, and closing the emote picker brings the keyboard back\n- Chat: switching or logging out of your account reconnects the chat correctly, a reply from a thread that couldn't be sent stays in the field with the reason, and chat name colors are translated\n- Polls and predictions keep showing when your web session has expired, a refused vote says why, and the emote picker fills in as emotes finish loading",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-319/TwitchUnblock.ipa",
+          "size": 3797716,
+          "commit": "4f936e2de844d8cb8ccb55150665fd381b6d7c1d"
+        },
+        {
+          "version": "1.4.18",
+          "buildVersion": "318",
+          "date": "2026-10-18",
+          "localizedDescription": "- On mobile data, lives and VODs now start in Auto quality, which follows your connection speed (new setting: Quality on mobile data), so the picture no longer freezes while the chat keeps going\n- After a stall, the live keeps more margin from the edge instead of jumping straight back (which froze it again), and repeated stalls switch the player to Auto quality (or one step down) automatically\n- Logs show the connection type (Wi-Fi, mobile data, Low Data Mode) and when the quality is lowered because of stalls",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-318/TwitchUnblock.ipa",
+          "size": 3782156,
+          "commit": "af85c66bafc2e6cfd062a6ef2519fa546795f663"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      },
+      "version": "1.5.0",
+      "versionDate": "2026-10-19",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-328/TwitchUnblock.ipa",
+      "size": 3896306
     }
   ],
   "news": []
