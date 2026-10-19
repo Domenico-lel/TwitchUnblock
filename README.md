@@ -56,8 +56,9 @@ https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
 * 🚫 **No subscription required** — watch any VOD or live stream at full quality.
 * 🎬 **Immersive player** — custom controls drawn over the picture, the way
   Twitch does it. Play/pause, scrubbing, quality, refresh, a speaker button to
-  mute the stream, orientation (on iPhone, leaving the player after the
-  rotation button brings the app back to portrait). Apple's
+  mute the stream, orientation. On iPhone the app stays in portrait;
+  landscape is for the player opened full size and multi-live, and closing
+  or shrinking the player in landscape brings the app back to portrait. Apple's
   native player stays available as a fallback in Settings. Changing quality
   keeps your place, in Apple's player too (a live you rewound keeps its delay);
   a VOD you had finished starts over from the beginning; when the stream drops for good, the
@@ -324,6 +325,17 @@ https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
 
 ### Finding things
 
+* 🎞️ **Discover** — a tab with one live per screen to swipe up through, like
+  Twitch's feed: top streams in your top language (hidden channels and
+  categories left out), each playing a muted preview (360p, 160p on mobile
+  data) through the usual live sources. The speaker button turns the sound
+  on (it stays on from one page to the next until you leave the tab). **Clips**
+  shows the most viewed clips of the last 24 hours from those channels, on a
+  loop. Name, title, tags, category, viewers, **Follow**, share, and hide the
+  channel or its category; tap the video for the full player (sound, chat), or
+  the name or picture for the channel's page. Previews stop as soon as a player
+  or multi-live opens, and come back when it closes. Settings → General →
+  **Discover tab** hides it.
 * 🏠 **Home** — your followed channels that are live (up to 300 at once), top
   streams (France or worldwide; without an account, **Load more** adds 30 at a
   time).
@@ -473,8 +485,11 @@ unsigned `tv-test-N` pre-release:
   the live ones, then the offline ones (most recently live first) to open
   their videos; top streams, categories, search, a channel's VODs. The
   Following list refreshes on its own (back on the tab or in the app, every
-  2 minutes while it's shown, and when the tab is picked again), so ended
-  lives don't linger.
+  2 minutes while it's shown, and when you come back down from the tab bar),
+  so ended lives don't linger.
+* The remote's **Play** button starts the focused live or VOD, like Select; on
+  an offline channel (Following, Search) it opens the channel and plays its
+  latest broadcast (or its live, if it just started).
 * tvOS's native player, with Quality, **Chat** and, for lives, Source in its
   bar: the chat (read-only, no account needed) sits on the picture — live, or
   a VOD's chat replayed in sync — with Twitch, BTTV, FFZ and 7TV emotes. The
