@@ -12,11 +12,13 @@ struct SettingsView: View {
     @ObservedObject private var updater = UpdateChecker.shared
     @State private var checkingUpdate  = false
     @State private var upToDate        = false
+    @State private var updateCheckFailed = false
     @State private var highlightDraft  = ""
     @State private var mutedDraft      = ""
     @State private var liveNotif       = LiveNotifier.isEnabled
     @State private var notifTestResult: String? = nil
     @State private var ntfyOn          = NtfyNotifier.isEnabled
+    @State private var showNotifChannels = false
     @State private var ntfyResult: String? = nil
     @State private var ntfyCopied      = false
     @State private var ntfySynced      = !NtfyNotifier.isPending
@@ -27,6 +29,8 @@ struct SettingsView: View {
     @AppStorage(APIConfig.allKey) private var customWorkerAll = false
     @State private var workerInput = ""
     @State private var workerChecking = false
+    /// Adresse (nettoyée) à laquelle se rapporte `workerResult`.
+    @State private var workerResultFor: String? = nil
     /// Dernière vérification du Worker personnel (nil : rien à dire).
     @State private var workerResult: APIConfig.CheckResult? = nil
     /// « Tout par ce Worker » refusé : il n'a pas de base D1.
@@ -147,10 +151,12 @@ struct SettingsView: View {
         .sheet(isPresented: $showSleepSheet) {
             SleepTimerSheet()
                 .presentationDetents([.medium, .large])
+                .inAppNoticeHost()
         }
         // ── Chaînes et catégories masquées ───────────────────────────
         .sheet(isPresented: $showHidden) {
             HiddenContentSheet().environmentObject(store)
+                .inAppNoticeHost()
         }
         // ── Logs sheet ───────────────────────────────────────────────
         .sheet(isPresented: $showLogs) {
@@ -159,11 +165,11 @@ struct SettingsView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "terminal.fill")
                             .foregroundColor(.tPrimary)
-                        Text("Logs")
+                        Text(store.t("logs_title"))
                             .font(.tSection).foregroundColor(.tText)
                     }
                     Spacer()
-                    Button("Fermer") { showLogs = false }
+                    Button(store.t("close")) { showLogs = false }
                         .foregroundColor(.tPrimary).fontWeight(.semibold)
                 }
                 .padding(16)
@@ -540,6 +546,10 @@ struct SettingsView: View {
                     .keyboardType(.URL)
                     .submitLabel(.done)
                     .onSubmit { checkWorker() }
+                    // Résultat d'une autre adresse : effacé dès qu'on la change.
+                    .onChange(of: workerInput) { v in
+                        if !workerChecking, APIConfig.normalize(v) != workerResultFor { workerResult = nil }
+                    }
                     .font(.tBody)
                     .foregroundColor(.tText)
                     .padding(10)
@@ -565,7 +575,10 @@ struct SettingsView: View {
                     Text(store.t(result.messageKey))
                         .font(.tMeta).foregroundColor(result == .ok ? .tSuccess : .tDanger)
                         .fixedSize(horizontal: false, vertical: true)
-                } else if !customWorker.isEmpty {
+                }
+                // Le Worker en service reste affiché après l'échec d'une autre
+                // adresse : c'est toujours lui qui sert.
+                if !customWorker.isEmpty, workerResult != .ok {
                     Text(store.t("expert_using").replacingOccurrences(of: "{u}", with: customWorker))
                         .font(.tMeta).foregroundColor(.tMuted)
                 }
@@ -608,12 +621,18 @@ struct SettingsView: View {
 
     /// Adresse vérifiée (c'est bien un Worker TwitchUnblock) avant d'être gardée.
     private func checkWorker() {
+        // Une vérification à la fois (Entrée pendant la vérification en
+        // lançait une autre, et la plus lente remettait son adresse).
+        guard !workerChecking else { return }
         guard let base = APIConfig.normalize(workerInput) else { workerResult = .notAWorker; return }
         workerChecking = true
         workerResult = nil
         Task {
             let result = await APIConfig.check(base)
             workerChecking = false
+            // Adresse modifiée pendant la vérification : résultat périmé.
+            guard APIConfig.normalize(workerInput) == base else { return }
+            workerResultFor = base
             workerResult = result
             guard result == .ok else {
                 logger.warn("SETTINGS", "Worker personnel refusé (\(result))", base)
@@ -678,6 +697,9 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("show_recent"), store.t("show_recent_sub"),
                           $store.showRecentChannels, log: "Streamers récents")
+                Divider().background(Color.tBorder)
+                toggleRow(store.t("discover_tab"), store.t("discover_tab_sub"),
+                          $store.showDiscoverTab, log: "Onglet Découvrir")
             }
         }
     }
@@ -1000,6 +1022,9 @@ struct SettingsView: View {
                 toggleRow(store.t("cfg_autocomplete"), store.t("cfg_autocomplete_sub"),
                           $store.chatAutocomplete, log: "Autocomplétion")
                 Divider().background(Color.tBorder)
+                toggleRow(store.t("cfg_kbd_suggest"), store.t("cfg_kbd_suggest_sub"),
+                          $store.chatKeyboardSuggestions, log: "Suggestions du clavier")
+                Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_deleted"), store.t("cfg_deleted_sub"),
                           $store.chatShowDeleted, log: "Messages supprimés")
                 Divider().background(Color.tBorder)
@@ -1093,6 +1118,20 @@ struct SettingsView: View {
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("cfg_timestamps"), store.t("cfg_timestamps_sub"),
                           $store.chatTimestamps, log: "Horodatage du chat")
+                // 12 h ou 24 h : « Auto » suit le réglage de l'appareil.
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(store.t("cfg_time_format")).font(.tBody).foregroundColor(.tText)
+                    Text(store.t("cfg_time_format_sub"))
+                        .font(.tMeta).foregroundColor(.tMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Picker("", selection: $store.timeFormat) {
+                        Text(store.t("time_auto")).tag("auto")
+                        Text("12 h").tag("12")
+                        Text("24 h").tag("24")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
                 Divider().background(Color.tBorder)
 
                 // Mêmes bornes que l'import d'une sauvegarde (AppStore).
@@ -1152,6 +1191,11 @@ struct SettingsView: View {
                           $store.multiLiveChat, log: "Chat dans le multi-live")
                 Divider().background(Color.tBorder)
                 spatialAudioRow
+                if #available(iOS 16.2, *) {
+                    Divider().background(Color.tBorder)
+                    toggleRow(store.t("live_activity"), store.t("live_activity_sub"),
+                              $store.liveActivity, log: "Activité en direct")
+                }
                 Divider().background(Color.tBorder)
                 toggleRow(store.t("dbg_latency"), store.t("dbg_latency_sub"),
                           $store.showLatency, log: "Afficher la latence")
@@ -1186,6 +1230,34 @@ struct SettingsView: View {
                 logger.settingChanged("Qualité préférée", value: value)
             }
         }
+        // Données mobiles : « Auto » par défaut, la qualité suit le débit (une
+        // qualité fixe trop haute faisait geler l'image, le chat continuant).
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(store.t("cellular_quality"))
+                    .font(.tCardTitle)
+                    .foregroundColor(.tText)
+                Text(store.t("cellular_quality_sub"))
+                    .font(.tMeta)
+                    .foregroundColor(.tMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Picker("", selection: $store.cellularQuality) {
+                ForEach(kCellularQualityPrefs, id: \.self) { pref in
+                    Text(pref == "auto" ? store.t("q_auto") : pref == "same" ? store.t("q_same_wifi")
+                         : pref == "audio" ? store.t("q_audio") : "\(pref)p")
+                        .tag(pref)
+                }
+            }
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .tint(.tPrimary)
+            .onChange(of: store.cellularQuality) { value in
+                logger.settingChanged("Qualité en données mobiles", value: value)
+            }
+        }
+        .padding(.top, 8)
     }
 
     /// Audio spatial (AirPods) : seul choix qu'iOS laisse aux apps (voir SpatialAudio).
@@ -1342,7 +1414,7 @@ struct SettingsView: View {
                         Text(store.t("cache_size"))
                             .font(.tCardTitle)
                             .foregroundColor(.tText)
-                        Text("\(cacheSizeText) · \(cacheFiles) \(store.t("cache_files"))")
+                        Text("\(cacheSizeText) · \(cacheFiles) \(store.tn("cache_files", cacheFiles))")
                             .font(.tMeta)
                             .foregroundColor(.tMuted)
                     }
@@ -1625,7 +1697,10 @@ struct SettingsView: View {
                           Binding(get: { liveNotif }, set: { on in
                               liveNotif = on
                               if on {
-                                  Task { let ok = await LiveNotifier.enable(); await MainActor.run { liveNotif = ok } }
+                                  Task {
+                                      let ok = await LiveNotifier.enable()
+                                      await MainActor.run { liveNotif = ok && LiveNotifier.isEnabled }
+                                  }
                               } else {
                                   LiveNotifier.disable()
                               }
@@ -1652,8 +1727,39 @@ struct SettingsView: View {
                               }
                           }), log: "Notifications ntfy")
                 if ntfyOn { ntfyTools }
+                // Lesquelles des chaînes suivies préviennent (les deux modes).
+                if liveNotif || ntfyOn {
+                    Divider().background(Color.tBorder)
+                    notifChannelsRow
+                }
             }
         }
+        .sheet(isPresented: $showNotifChannels) {
+            NotifChannelsView().environmentObject(store)
+        }
+    }
+
+    private var notifChannelsRow: some View {
+        let muted = NotifChannels.muted.count
+        return Button { showNotifChannels = true } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(store.t("notif_channels"))
+                        .font(.tCardTitle)
+                        .foregroundColor(.tText)
+                    Text(muted == 0 ? store.t("notif_channels_all")
+                         : store.t("notif_channels_muted").replacingOccurrences(of: "{n}", with: "\(muted)"))
+                        .font(.tMeta)
+                        .foregroundColor(.tMuted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.tMuted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Activé, mais pas encore accepté par le serveur : pourquoi, et la suite.
@@ -1708,8 +1814,8 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if ntfySynced {
-                Text(store.t("ntfy_status").replacingOccurrences(
-                    of: "{n}", with: "\(UserDefaults.standard.integer(forKey: NtfyNotifier.countKey))"))
+                let count = UserDefaults.standard.integer(forKey: NtfyNotifier.countKey)
+                Text(store.tn("ntfy_status", count).replacingOccurrences(of: "{n}", with: "\(count)"))
                     .font(.tMeta).foregroundColor(.tMuted)
             } else if ntfyResult == nil {
                 Text(ntfyPendingText).font(.tMeta).foregroundColor(.orange)
@@ -1795,15 +1901,19 @@ struct SettingsView: View {
                     Button {
                         checkingUpdate = true
                         Task {
-                            await updater.checkIfDue(force: true)
+                            // Hors ligne (ou build local) : « vérification
+                            // impossible », plus « déjà à jour ».
+                            let outcome = await updater.checkIfDue(force: true)
                             checkingUpdate = false
-                            upToDate = updater.available == nil
+                            upToDate = outcome == .upToDate
+                            updateCheckFailed = outcome == .failed
                         }
                     } label: {
                         HStack(spacing: TSpace.sm) {
-                            Image(systemName: upToDate ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+                            Image(systemName: upToDate ? "checkmark.circle.fill"
+                                  : updateCheckFailed ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath")
                                 .font(.system(size: 13, weight: .semibold))
-                            Text(store.t(upToDate ? "update_none" : "update_check")).font(.tLabel)
+                            Text(store.t(upToDate ? "update_none" : updateCheckFailed ? "update_check_failed" : "update_check")).font(.tLabel)
                             Spacer()
                             if checkingUpdate { ProgressView().scaleEffect(0.8) }
                         }
@@ -1901,6 +2011,16 @@ struct SettingsView: View {
                             .font(.system(size: 13, weight: .semibold))
                         Text(store.t("show_logs")).font(.tLabel)
                         Spacer()
+                        // Erreurs du journal : visibles avant même de l'ouvrir.
+                        let errors = AppLogger.shared.count(.error)
+                        if errors > 0 {
+                            Label("\(errors)", systemImage: "exclamationmark.triangle.fill")
+                                .font(.tBadge)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Color.tDanger)
+                                .cornerRadius(8)
+                        }
                         Text("\(AppLogger.shared.logs.count)")
                             .font(.tBadge)
                             .foregroundColor(.white)

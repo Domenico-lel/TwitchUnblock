@@ -8,6 +8,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // Journal gardé d'un lancement à l'autre : chaque session y est
+        // marquée (date, version), et les erreurs du lecteur y arrivent.
+        logger.sessionStart()
+        PlaybackDiagnostics.start()
+        // Wi-Fi ou données mobiles : qualité de départ et avance du direct.
+        NetworkStatus.start()
         // Catégorie seulement : la session n'est activée qu'à l'ouverture d'un
         // lecteur (PlaybackAudio). Activée ici, elle coupait la musique des
         // autres apps dès le lancement, même sans rien lire.
@@ -20,6 +26,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // VODs en téléchargement : iOS rend à la session les fichiers arrivés.
         VodDownloader.shared.activate()
         return true
+    }
+
+    /// Orientations permises : voir OrientationLock.
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        OrientationLock.mask
     }
 
     /// Fichiers d'une VOD arrivés pendant que l'app était fermée : iOS la
@@ -66,5 +78,34 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // iOS la laisserait affichée des heures.
         PlayerActivity.end()
         PlayerActivity.endOthers(wait: true)
+    }
+}
+
+// MARK: – Orientation
+/// iPhone : l'app reste en portrait, sauf le lecteur (ouvert en grand) et le
+/// multi-live, où le paysage reste pratique. L'iPad et le Mac gardent toutes
+/// les orientations. Fil principal seulement.
+enum OrientationLock {
+    private static var landscapeAllowed = false
+
+    static var mask: UIInterfaceOrientationMask {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return .all }
+        return landscapeAllowed ? .allButUpsideDown : .portrait
+    }
+
+    static func allowLandscape(_ on: Bool) {
+        guard on != landscapeAllowed else { return }
+        landscapeAllowed = on
+        guard UIDevice.current.userInterfaceIdiom == .phone,
+              let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        for window in scene.windows {
+            window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+        // Lecteur fermé ou réduit en paysage : retour au portrait.
+        if !on, scene.effectiveGeometry.interfaceOrientation.isLandscape {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { error in
+                logger.warn("APP", "Retour au portrait refusé", error.localizedDescription)
+            }
+        }
     }
 }

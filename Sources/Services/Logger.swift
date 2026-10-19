@@ -1,35 +1,180 @@
 import Foundation
 import Combine
+import UIKit
+
+// MARK: – Heure affichée (12 h / 24 h)
+/// Format de l'heure du chat et du journal : réglage `cfg_time_format`
+/// (« auto », « 12 », « 24 ») ; « auto » suit l'appareil (Réglages iOS →
+/// Général → Date et heure, ou la région).
+enum ClockFormat {
+    static let key = "cfg_time_format"
+    /// Format de l'appareil, lu une fois : 12 h si son modèle d'heure a AM/PM.
+    static let device12h: Bool =
+        (DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current) ?? "").contains("a")
+
+    static func uses12h(_ pref: String? = UserDefaults.standard.string(forKey: ClockFormat.key)) -> Bool {
+        switch pref ?? "auto" {
+        case "12": return true
+        case "24": return false
+        default:   return device12h
+        }
+    }
+
+    /// « 8:05 PM » ou « 20:05 » ; le journal ajoute secondes et millièmes.
+    static func pattern(seconds: Bool = false, twelve: Bool = ClockFormat.uses12h()) -> String {
+        let time = twelve ? "h:mm" : "HH:mm"
+        let rest = seconds ? ":ss.SSS" : ""
+        return twelve ? "\(time)\(rest) a" : "\(time)\(rest)"
+    }
+}
 
 final class AppLogger: ObservableObject {
     static let shared = AppLogger()
-    private init() {}
 
     @Published private(set) var logs: [LogEntry] = []
     private var counter = 0
-    private let maxLogs = 500
+    /// Gardées d'un lancement à l'autre : de quoi couvrir plusieurs sessions.
+    private let maxLogs = 1000
+    /// Ajout de la dernière ligne (regroupement des répétitions).
+    private var lastAddedAt = Date.distantPast
+
+    /// Fichier du journal : les erreurs d'une session précédente, ou d'avant
+    /// un plantage, restent lisibles (il ne vivait qu'en mémoire et
+    /// disparaissait avec l'app). Caches : seul dossier inscriptible sur tvOS.
+    private static let fileURL: URL? = FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("twitchunblock-logs.json")
+    private let saveQueue = DispatchQueue(label: "twitchunblock.logs.save", qos: .utility)
+    private var saveScheduled = false
+    /// Vrai tant que l'app est au premier plan. Encore vrai au lancement
+    /// suivant : la session précédente s'est arrêtée d'un coup (plantage,
+    /// mémoire épuisée…), et non par une sortie normale.
+    private static let foregroundKey = "log_in_foreground"
+
+    private init() {
+        if let url = Self.fileURL, let data = try? Data(contentsOf: url),
+           let saved = try? JSONDecoder().decode([LogEntry].self, from: data) {
+            logs = Array(saved.prefix(maxLogs))
+            counter = (saved.map(\.id).max() ?? -1) + 1
+        }
+        let ud = UserDefaults.standard
+        if ud.bool(forKey: Self.foregroundKey) {
+            ud.set(false, forKey: Self.foregroundKey)
+            logs.insert(LogEntry(id: counter, timestamp: Self.stamp(Date()), level: .error, category: "APP",
+                                 message: "Arrêt brutal de l'app pendant la session précédente (plantage probable)",
+                                 detail: "Elle était au premier plan : les lignes juste en dessous montrent ce qui se passait."),
+                        at: 0)
+            counter += 1
+        }
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            UserDefaults.standard.set(true, forKey: Self.foregroundKey)
+            self?.debug("APP", "Premier plan", nil)
+        }
+        nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            UserDefaults.standard.set(false, forKey: Self.foregroundKey)
+            self?.debug("APP", "Arrière-plan", nil)
+            self?.saveNow()
+        }
+        nc.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            UserDefaults.standard.set(false, forKey: Self.foregroundKey)
+            self?.saveNow(sync: true)
+        }
+        // Exception non rattrapée : notée et écrite avant l'arrêt de l'app.
+        NSSetUncaughtExceptionHandler { exception in
+            AppLogger.shared.recordCrash(exception)
+        }
+    }
+
+    private static func stamp(_ date: Date) -> String {
+        stampFormatters[ClockFormat.uses12h()]?.string(from: date) ?? ""
+    }
+
+    /// Écrit le journal dans son fichier (en tâche de fond ; `sync` : tout de
+    /// suite, l'app va s'arrêter). À appeler sur le fil principal.
+    func saveNow(sync: Bool = false) {
+        guard let url = Self.fileURL else { return }
+        let snapshot = logs
+        let write = {
+            guard let data = try? JSONEncoder().encode(snapshot) else { return }
+            try? data.write(to: url, options: .atomic)
+        }
+        if sync { write() } else { saveQueue.async(execute: write) }
+    }
+
+    /// Une écriture au plus toutes les 10 s pendant que le journal se remplit.
+    private func scheduleSave() {
+        guard !saveScheduled else { return }
+        saveScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            self?.saveScheduled = false
+            self?.saveNow()
+        }
+    }
+
+    fileprivate func recordCrash(_ e: NSException) {
+        let detail = ([e.reason ?? ""] + e.callStackSymbols.prefix(12)).joined(separator: "\n")
+        var snapshot = logs
+        snapshot.insert(LogEntry(id: counter, timestamp: Self.stamp(Date()), level: .error, category: "CRASH",
+                                 message: "Plantage : \(e.name.rawValue)", detail: detail), at: 0)
+        if let url = Self.fileURL, let data = try? JSONEncoder().encode(snapshot) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Nombre de lignes d'un niveau (comptées avec leurs répétitions).
+    func count(_ level: LogLevel) -> Int {
+        logs.reduce(0) { $0 + ($1.level == level ? $1.repeats : 0) }
+    }
+
+    /// Un formateur par format (12 h, 24 h), gardé : en créer un à chaque ligne
+    /// coûtait cher. Locale POSIX : iOS ne réécrit plus le format fixe selon
+    /// la région (« 3:04:05 PM.123 »).
+    private static let stampFormatters: [Bool: DateFormatter] = {
+        var out: [Bool: DateFormatter] = [:]
+        for twelve in [false, true] {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = ClockFormat.pattern(seconds: true, twelve: twelve)
+            out[twelve] = f
+        }
+        return out
+    }()
 
     // ─── Core add ───────────────────────────────────────────────
     private func add(_ level: LogLevel, _ category: String, _ message: String, _ detail: String? = nil) {
         let now = Date()
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        let ms = Calendar.current.component(.nanosecond, from: now) / 1_000_000
-        let timestamp = formatter.string(from: now) + String(format: ".%03d", ms)
+        // 12 h ou 24 h selon le réglage (millièmes compris).
+        let timestamp = Self.stampFormatters[ClockFormat.uses12h()]?.string(from: now) ?? ""
         // Identifiant attribué sur le fil principal : incrémenté depuis
         // plusieurs fils, le compteur pouvait donner deux fois le même id.
         DispatchQueue.main.async {
-            let entry = LogEntry(id: self.counter, timestamp: timestamp, level: level,
-                                 category: category, message: message, detail: detail)
-            self.counter += 1
-            self.logs.insert(entry, at: 0)
-            if self.logs.count > self.maxLogs {
-                self.logs = Array(self.logs.prefix(self.maxLogs))
+            // Même ligne que la précédente, moins de 30 s après : comptée
+            // (« ×3 ») au lieu d'être répétée — une rafale d'erreurs ne
+            // repousse plus tout le reste hors du journal.
+            if var last = self.logs.first, last.level == level, last.category == category,
+               last.message == message, last.detail == detail,
+               now.timeIntervalSince(self.lastAddedAt) < 30 {
+                last.repeats += 1
+                last.timestamp = timestamp
+                self.logs[0] = last
+            } else {
+                let entry = LogEntry(id: self.counter, timestamp: timestamp, level: level,
+                                     category: category, message: message, detail: detail)
+                self.counter += 1
+                self.logs.insert(entry, at: 0)
+                if self.logs.count > self.maxLogs {
+                    self.logs.removeLast(self.logs.count - self.maxLogs)
+                }
             }
+            self.lastAddedAt = now
+            self.scheduleSave()
         }
+        #if DEBUG
         let icons = ["info": "ℹ️", "success": "✅", "warn": "⚠️", "error": "❌", "debug": "🔍"]
         let icon = icons[level.rawValue] ?? "•"
         print("\(icon) [\(category)] \(message)\(detail.map { " → \($0)" } ?? "")")
+        #endif
     }
 
     func info   (_ c: String, _ m: String, _ d: String? = nil) { add(.info,    c, m, d) }
@@ -37,15 +182,19 @@ final class AppLogger: ObservableObject {
     func warn   (_ c: String, _ m: String, _ d: String? = nil) { add(.warn,    c, m, d) }
     func error  (_ c: String, _ m: String, _ d: String? = nil) { add(.error,   c, m, d) }
     func debug  (_ c: String, _ m: String, _ d: String? = nil) { add(.debug,   c, m, d) }
-    func clear() { DispatchQueue.main.async { self.logs = [] } }
+    func clear() { DispatchQueue.main.async { self.logs = []; self.saveNow() } }
 
     // ─── Session ─────────────────────────────────────────────────
+    /// Début d'une session : date complète (le journal garde plusieurs
+    /// sessions, ses lignes n'ont que l'heure), version et système.
     func sessionStart() {
         let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .medium
-        formatter.locale = Locale(identifier: "fr_FR")
-        info("SESSION", "━━━ Nouvelle session démarrée ━━━", formatter.string(from: Date()))
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let info = Bundle.main.infoDictionary
+        let version = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+        self.info("SESSION", "━━━ Nouvelle session démarrée ━━━",
+                  "\(formatter.string(from: Date())) · \(version) · \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)")
     }
 
     // ─── Réseau ──────────────────────────────────────────────────

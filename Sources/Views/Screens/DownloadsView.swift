@@ -236,7 +236,7 @@ struct DownloadRow: View {
             if item.muted > 0 { parts.append(store.t("dl_muted").replacingOccurrences(of: "{d}", with: dlClock(item.muted))) }
         }
         if item.withChat == true {
-            parts.append(item.chatCount.map { store.t("dl_chat_count").replacingOccurrences(of: "{n}", with: "\($0)") }
+            parts.append(item.chatCount.map { store.tn("dl_chat_count", $0).replacingOccurrences(of: "{n}", with: "\($0)") }
                          ?? store.t("dl_chat_pending"))
         }
         return parts.joined(separator: " · ")

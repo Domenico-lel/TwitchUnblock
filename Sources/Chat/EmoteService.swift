@@ -55,11 +55,29 @@ actor EmoteService {
     func loadChannel(channelId: String, channelName: String) async {
         guard !loadedChannels.contains(channelId) else { return }
         loadedChannels.insert(channelId)
+        await loadChannelSources(channelId: channelId, channelName: channelName, onlyMissing: false)
+        // Un service sans réponse (coupure, erreur 5xx) : nouvel essai 30 s plus
+        // tard, une seule fois — « catJAM » restait en texte jusqu'au
+        // redémarrage. Une chaîne sans compte FFZ ou 7TV ne répond pas non
+        // plus : un essai de plus, pas une boucle.
+        if channelBTTV[channelId] == nil || channelFFZ[channelId] == nil || channel7TV[channelId] == nil {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                await self?.loadChannelSources(channelId: channelId, channelName: channelName, onlyMissing: true)
+            }
+        }
+    }
+
+    private func loadChannelSources(channelId: String, channelName: String, onlyMissing: Bool) async {
+        let bttv = !onlyMissing || channelBTTV[channelId] == nil
+        let ffz  = !onlyMissing || channelFFZ[channelId] == nil
+        let stv  = !onlyMissing || channel7TV[channelId] == nil
+        guard bttv || ffz || stv else { return }
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.loadBTTVChannel(channelId: channelId, channelName: channelName) }
+            if bttv { group.addTask { await self.loadBTTVChannel(channelId: channelId, channelName: channelName) } }
             // FFZ reçoit maintenant les deux : channelId pour stocker, channelName pour l'API
-            group.addTask { await self.loadFFZChannel(channelId: channelId, channelName: channelName) }
-            group.addTask { await self.load7TVChannel(channelId: channelId) }
+            if ffz { group.addTask { await self.loadFFZChannel(channelId: channelId, channelName: channelName) } }
+            if stv { group.addTask { await self.load7TVChannel(channelId: channelId) } }
         }
         // Auteur des emotes BTTV de la chaîne : le login passé en repli
         // (« trymacs ») devient le nom affiché, comme pour les emotes partagées.
@@ -115,6 +133,13 @@ actor EmoteService {
     }
 
     func resolveById(_ id: String) -> TwitchEmote? { twitchById[id] }
+
+    /// Emote Twitch par son nom, parmi celles déjà vues dans ce chat (celles
+    /// que les suggestions proposent) : pour l'écho de nos propres messages,
+    /// qui n'a pas de balises d'emotes.
+    func twitchEmote(named name: String) -> TwitchEmote? {
+        twitchById.values.first { $0.name == name }
+    }
 
     // MARK: – Grouped emotes for the picker
     func groupedEmotes(channelId: String?) -> [(label: String, emotes: [TwitchEmote])] {
@@ -200,12 +225,17 @@ actor EmoteService {
     }
 
     // MARK: – BTTV en direct (BTTVLive)
+    func removePersonalBTTV(userId: String) {
+        guard personalBTTV.removeValue(forKey: userId) != nil else { return }
+        personalOrder.removeAll { $0 == userId }
+    }
+
     func setPersonalBTTV(userId: String, emotes: [[String: Any]]) {
         var map: [String: TwitchEmote] = [:]
         for obj in emotes {
             if var e = bttvEmote(obj, scope: .personal) { e.personal = true; map[e.name] = e }
         }
-        guard !map.isEmpty else { return }
+        guard !map.isEmpty else { removePersonalBTTV(userId: userId); return }
         if personalBTTV[userId] == nil { personalOrder.append(userId) }
         personalBTTV[userId] = map
         if personalOrder.count > 500 { personalBTTV[personalOrder.removeFirst()] = nil }

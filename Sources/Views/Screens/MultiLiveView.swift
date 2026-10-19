@@ -193,9 +193,11 @@ struct MultiLiveView: View {
         if let model = session.tiles[entry.id] {
             MultiLiveTile(entry: entry, model: model,
                           audible: session.audible == entry.id,
+                          others: multi.entries.filter { $0.id != entry.id },
                           onTap: { session.audible = entry.id },
                           onResume: { session.resumeStopped() },
                           onRemove: { multi.remove(id: entry.id) },
+                          onSwap: { other in withAnimation(.easeInOut(duration: 0.2)) { multi.swap(entry.id, other) } },
                           onWatch: { onWatch(entry, model.handOff()) })
         } else {
             Color.black
@@ -224,7 +226,8 @@ private struct MultiLiveChatPane: View {
                      style: store.chatStyle(chrome: true, translucent: false),
                      // Mosaïque plein écran : la page d'une chaîne s'ouvrirait
                      // dessous, sans qu'on la voie.
-                     opensChannelPages: false)
+                     opensChannelPages: false,
+                     allowsChatOnly: false)
                 // Autre direct, ou identifiant arrivé : chat reconstruit à neuf.
                 .id("\(model.login)-\(model.channelId ?? "")")
         }
@@ -236,10 +239,14 @@ struct MultiLiveTile: View {
     let entry: MultiLiveEntry
     @ObservedObject var model: MultiTileModel
     let audible: Bool
+    /// Les autres vidéos de la mosaïque : de quoi changer de place avec l'une d'elles.
+    let others: [MultiLiveEntry]
     let onTap: () -> Void
     /// « Lecture » sur une tuile arrêtée par iOS (voir `heldBySystem`).
     let onResume: () -> Void
     let onRemove: () -> Void
+    /// Échange de place avec cette autre vidéo (son identifiant).
+    let onSwap: (String) -> Void
     let onWatch: () -> Void
 
     @EnvironmentObject private var store: AppStore
@@ -298,6 +305,13 @@ struct MultiLiveTile: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black.opacity(0.55))
         case .playing:
+            // Lecture bloquée faute de données : une roue légère (la tuile
+            // passait pour « en lecture », image figée).
+            if model.buffering && !model.userPaused {
+                ProgressView().tint(.white)
+                    .scaleEffect(0.8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             // VOD en pause sans le son : rien ne le dirait autrement.
             if model.isVod && model.userPaused && !audible {
                 Image(systemName: "pause.fill")
@@ -342,6 +356,20 @@ struct MultiLiveTile: View {
             }
             Text(entry.displayName).lineLimit(1)
             Spacer(minLength: 4)
+            // Changer de place : avec la première, la vidéo passe en grand (à trois).
+            if !others.isEmpty {
+                Menu {
+                    ForEach(others) { other in
+                        Button { onSwap(other.id) } label: {
+                            Label(store.t("multi_swap").replacingOccurrences(of: "{n}", with: other.displayName),
+                                  systemImage: "arrow.left.arrow.right")
+                        }
+                    }
+                } label: {
+                    tileIcon("arrow.left.arrow.right")
+                }
+                .accessibilityLabel(store.t("multi_move"))
+            }
             tileButton("arrow.up.left.and.arrow.down.right", action: onWatch)
             tileButton("xmark", action: onRemove)
         }
@@ -353,14 +381,16 @@ struct MultiLiveTile: View {
     }
 
     private func tileButton(_ icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundColor(.white)
-                .frame(width: 30, height: 30)
-                .background(Circle().fill(Color.black.opacity(0.5)))
-        }
-        .buttonStyle(.plain)
+        Button(action: action) { tileIcon(icon) }
+            .buttonStyle(.plain)
+    }
+
+    private func tileIcon(_ icon: String) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 12, weight: .bold))
+            .foregroundColor(.white)
+            .frame(width: 30, height: 30)
+            .background(Circle().fill(Color.black.opacity(0.5)))
     }
 
     // MARK: VOD

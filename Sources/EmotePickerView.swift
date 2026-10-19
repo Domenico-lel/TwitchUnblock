@@ -10,6 +10,8 @@ struct EmotePickerView: View {
     @State private var groups:      [(label: String, emotes: [TwitchEmote])] = []
     @State private var selectedTab  = 0
     @State private var searchText   = ""
+    /// Recherche rognée : une recherche faite d'espaces masquait les onglets.
+    private var query: String { searchText.trimmingCharacters(in: .whitespaces) }
     @State private var isLoading    = true
 
     /// Index de recherche : toutes les emotes dédupliquées, nom déjà en
@@ -69,7 +71,7 @@ struct EmotePickerView: View {
             .padding(.bottom, 6)
 
             // ── Onglets sources (cachés pendant la recherche) ───────
-            if searchText.isEmpty && !groups.isEmpty {
+            if query.isEmpty && !groups.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(groups.indices, id: \.self) { i in
@@ -91,7 +93,7 @@ struct EmotePickerView: View {
                     .padding(.horizontal, 12)
                 }
                 .padding(.bottom, 6)
-            } else if !searchText.isEmpty && !isLoading {
+            } else if !query.isEmpty && !isLoading {
                 // Compteur résultats
                 HStack {
                     Text(store.t("emote_results")
@@ -121,10 +123,10 @@ struct EmotePickerView: View {
             } else if displayed.isEmpty {
                 Spacer()
                 VStack(spacing: 8) {
-                    Text(store.t(searchText.isEmpty ? "emotes_none" : "emotes_no_result"))
+                    Text(store.t(query.isEmpty ? "emotes_none" : "emotes_no_result"))
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.tMuted)
-                    if searchText.isEmpty {
+                    if query.isEmpty {
                         Text(store.t("emotes_open_live"))
                             .font(.system(size: 11))
                             .foregroundColor(.tMuted)
@@ -150,16 +152,27 @@ struct EmotePickerView: View {
         }
         .background(Color.tCard)
         .task {
-            let loaded = await EmoteService.shared.groupedEmotes(channelId: channelId)
-            // Index bâti une seule fois, trié ici plutôt qu'à chaque frappe.
-            var seen = Set<String>()
-            let index = loaded.flatMap { $0.emotes }
-                .filter { seen.insert($0.id).inserted }
-                .map { (emote: $0, lower: $0.name.lowercased()) }
-                .sorted { $0.lower < $1.lower }
-            groups      = loaded
-            searchIndex = index
-            isLoading   = false
+            // Chargements encore en cours à l'ouverture (direct tout juste
+            // ouvert, « Recharger ») : relu à 2, 5 et 10 s tant que la liste
+            // grandit — elle restait vide, ou sans l'onglet de la chaîne.
+            var lastCount = -1
+            for delay in [0, 2, 5, 10] as [UInt64] {
+                if delay > 0 { try? await Task.sleep(nanoseconds: delay * 1_000_000_000) }
+                if Task.isCancelled { return }
+                let loaded = await EmoteService.shared.groupedEmotes(channelId: channelId)
+                let count = loaded.reduce(0) { $0 + $1.emotes.count }
+                if count == lastCount { continue }
+                lastCount = count
+                // Index trié ici plutôt qu'à chaque frappe.
+                var seen = Set<String>()
+                let index = loaded.flatMap { $0.emotes }
+                    .filter { seen.insert($0.id).inserted }
+                    .map { (emote: $0, lower: $0.name.lowercased()) }
+                    .sorted { $0.lower < $1.lower }
+                groups      = loaded
+                searchIndex = index
+                isLoading   = false
+            }
         }
     }
 

@@ -92,6 +92,9 @@ final class VodChatService: ObservableObject {
     func update(offset: Double) async {
         guard !videoId.isEmpty, offset.isFinite, offset >= 0 else { return }
         if offline != nil { releaseOffline(at: offset); return }
+        // Pas avant que la chaîne (et ses emotes) soit connue : les premiers
+        // commentaires restaient en texte (« KEKW ») pendant une à deux minutes.
+        guard ready else { return }
 
         // Premier appel, retour en arrière, ou gros saut avant : on recharge la fenêtre.
         if lastOffset < 0 || offset < lastOffset - 2 || offset > lastOffset + 30 {
@@ -174,7 +177,9 @@ final class VodChatService: ObservableObject {
         }
         if let errs = res["errors"] as? [[String: Any]], !errs.isEmpty {
             let msgs = errs.compactMap { $0["message"] as? String }.joined(separator: " · ")
-            failed(msgs)
+            // Le texte anglais de Twitch reste dans le journal ; l'écran dit
+            // simplement que Twitch n'a pas rendu le chat.
+            failed("twitch")
             logger.error("VODCHAT", "Erreur GQL commentaires", msgs)
             return
         }

@@ -1,21 +1,58 @@
 import SwiftUI
+import CoreTransferable
+import UniformTypeIdentifiers
 
 struct LogsView: View {
     @ObservedObject private var appLogger = AppLogger.shared
     @State private var filter: LogLevel? = nil
     @State private var expandedIds: Set<Int> = []
     @State private var showClearAlert = false
+    /// Langue de l'app : le journal, écrit en français, s'affiche traduit
+    /// (LogTranslator) ; l'export suit la même langue.
+    @AppStorage("lang") private var langRaw = "en"
+
+    private var lang: Lang { Lang(rawValue: langRaw) ?? .en }
+    private func t(_ key: String) -> String { translate(key, lang) }
+    private func tr(_ text: String) -> String { LogTranslator.translate(text, lang) }
 
     private var filtered: [LogEntry] {
         guard let f = filter else { return appLogger.logs }
         return appLogger.logs.filter { $0.level == f }
     }
 
-    // Texte exporté — calculé une seule fois au moment du partage
+    // Texte exporté — calculé une seule fois au moment du partage. En tête :
+    // version, système, appareil et nombre de lignes par niveau, pour situer
+    // un rapport et repérer ses erreurs d'un coup d'œil.
     private var exportText: String {
-        appLogger.logs
-            .map { "[\($0.timestamp)] [\($0.level.rawValue.uppercased())] [\($0.category)] \($0.message)\($0.detail.map { "\n  → \($0)" } ?? "")" }
+        let info = Bundle.main.infoDictionary
+        let version = "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))"
+        let counts = LogLevel.allCases.map { "\($0.rawValue) \(appLogger.count($0))" }.joined(separator: " · ")
+        let header = "TwitchUnblock \(version) · \(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
+            + " · \(Self.deviceModel) · \(lang.rawValue)\n\(counts)\n\n"
+        return header + appLogger.logs
+            .map { e in
+                let times = e.repeats > 1 ? " (×\(e.repeats))" : ""
+                return "[\(e.timestamp)] [\(e.level.rawValue.uppercased())] [\(e.category)] \(tr(e.message))\(times)"
+                    + (e.detail.map { "\n  → \(tr($0))" } ?? "")
+            }
             .joined(separator: "\n")
+    }
+
+    /// Modèle exact de l'appareil (« iPhone15,2 »).
+    private static var deviceModel: String {
+        var info = utsname()
+        uname(&info)
+        return withUnsafeBytes(of: &info.machine) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+    }
+
+    /// « TwitchUnblock-logs-2026-10-16-0215.txt »
+    private var exportFileName: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd-HHmm"
+        return "TwitchUnblock-logs-\(f.string(from: Date())).txt"
     }
 
     var body: some View {
@@ -24,11 +61,16 @@ struct LogsView: View {
             // ── Filtres ─────────────────────────────────────────────
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    filterChip(label: "Tout (\(appLogger.logs.count))", active: filter == nil) {
+                    filterChip(label: t("logs_all").replacingOccurrences(of: "{n}", with: "\(appLogger.logs.count)"),
+                               active: filter == nil) {
                         filter = nil
                     }
+                    // Nombre de lignes de chaque niveau : les erreurs se voient
+                    // sans parcourir le journal.
                     ForEach(LogLevel.allCases, id: \.self) { level in
-                        filterChip(label: level.rawValue, active: filter == level) {
+                        let n = appLogger.count(level)
+                        filterChip(label: n > 0 ? "\(t("log_level_\(level.rawValue)")) \(n)" : t("log_level_\(level.rawValue)"),
+                                   active: filter == level) {
                             filter = (filter == level) ? nil : level
                         }
                     }
@@ -44,19 +86,22 @@ struct LogsView: View {
                 // ✅ ShareLink iOS 16+ — remplace UIActivityViewController dans .sheet
                 // (UIActivityViewController présenté dans un .sheet est cassé sur iOS 16)
                 ShareLink(item: exportText) {
-                    Text("📤 Exporter")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.tText)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(Color.tSurface)
-                        .cornerRadius(8)
+                    actionLabel(t("logs_share"))
+                }
+                .disabled(appLogger.logs.isEmpty)
+
+                // Fichier .txt : Enregistrer dans Fichiers, AirDrop, Mail…
+                // (écrit seulement quand on choisit où l'envoyer).
+                ShareLink(item: LogsFile(text: exportText, name: exportFileName),
+                          preview: SharePreview(exportFileName)) {
+                    actionLabel(t("logs_file"))
                 }
                 .disabled(appLogger.logs.isEmpty)
 
                 Button {
                     showClearAlert = true
                 } label: {
-                    Text("🗑 Effacer")
+                    Text(t("logs_clear"))
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.tDanger)
                         .padding(.horizontal, 12).padding(.vertical, 7)
@@ -66,7 +111,7 @@ struct LogsView: View {
                 .disabled(appLogger.logs.isEmpty)
 
                 Spacer()
-                Text("\(filtered.count) logs")
+                Text(translatePlural("logs_count", filtered.count, lang).replacingOccurrences(of: "{n}", with: "\(filtered.count)"))
                     .font(.system(size: 11)).foregroundColor(.tMuted)
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
@@ -75,13 +120,14 @@ struct LogsView: View {
             if filtered.isEmpty {
                 VStack(spacing: 8) {
                     Text("📋").font(.system(size: 48))
-                    Text(appLogger.logs.isEmpty
-                         ? "Aucun log"
-                         : "Aucun résultat pour ce filtre")
+                    Text(appLogger.logs.isEmpty ? t("logs_empty") : t("logs_no_match"))
                         .font(.system(size: 18, weight: .bold)).foregroundColor(.tText)
-                    Text("Lance une VOD ou un stream pour voir les logs")
-                        .font(.system(size: 13)).foregroundColor(.tMuted)
-                        .multilineTextAlignment(.center)
+                    // Le conseil seulement quand le journal est vide (pas quand un filtre ne trouve rien).
+                    if appLogger.logs.isEmpty {
+                        Text(t("logs_empty_hint"))
+                            .font(.system(size: 13)).foregroundColor(.tMuted)
+                            .multilineTextAlignment(.center)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(40)
@@ -97,12 +143,21 @@ struct LogsView: View {
             }
         }
         .background(Color.tDark)
-        .alert("Effacer les logs", isPresented: $showClearAlert) {
-            Button("Annuler", role: .cancel) {}
-            Button("Effacer", role: .destructive) { appLogger.clear() }
+        .alert(t("logs_clear_title"), isPresented: $showClearAlert) {
+            Button(t("cancel"), role: .cancel) {}
+            Button(t("logs_clear_btn"), role: .destructive) { appLogger.clear() }
         } message: {
-            Text("Confirmer ?")
+            Text(t("logs_clear_confirm"))
         }
+    }
+
+    private func actionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(.tText)
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(Color.tSurface)
+            .cornerRadius(8)
     }
 
     // MARK: – Log row
@@ -123,23 +178,32 @@ struct LogsView: View {
                 Text(entry.category)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundColor(color)
+                // Même ligne arrivée plusieurs fois de suite.
+                if entry.repeats > 1 {
+                    Text("×\(entry.repeats)")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundColor(color)
+                        .padding(.horizontal, 5)
+                        .background(color.opacity(0.15))
+                        .clipShape(Capsule())
+                }
             }
 
-            Text(entry.message)
+            Text(tr(entry.message))
                 .font(.system(size: 12))
                 .foregroundColor(.tText)
                 .lineLimit(isExpanded ? nil : 2)
 
             if let detail = entry.detail {
                 if isExpanded {
-                    Text(detail)
+                    Text(tr(detail))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.tMuted)
                         .padding(8)
                         .background(Color(hex: "111111"))
                         .cornerRadius(6)
                 } else {
-                    Text("▼ Détails")
+                    Text(t("logs_details"))
                         .font(.system(size: 10))
                         .foregroundColor(.tPrimary)
                 }
@@ -172,6 +236,21 @@ struct LogsView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(active ? Color.tPrimary : Color.tBorder, lineWidth: 1)
                 )
+        }
+    }
+}
+
+/// Journal en fichier texte (.txt) : Enregistrer dans Fichiers, AirDrop,
+/// Mail… Le fichier n'est écrit qu'au moment de l'envoi.
+struct LogsFile: Transferable {
+    let text: String
+    let name: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .plainText) { file in
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(file.name)
+            try file.text.write(to: url, atomically: true, encoding: .utf8)
+            return SentTransferredFile(url)
         }
     }
 }

@@ -4,6 +4,7 @@ import AVFoundation
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
     @State private var activeTab: TabName = .home
+    @State private var headerSafeTop = HeaderView.windowSafeTop
 
     // ── Player state ─────────────────────────────────────────────────────
     @State private var playerMode: PlayerMode? = nil
@@ -80,6 +81,8 @@ struct MainTabView: View {
     @State private var feedbackContext: String? = nil
     /// Qualité retenue par le lecteur immersif (vide = meilleure disponible).
     @State private var immersiveQuality = ""
+    /// « Connexion lente » annoncé dans le lecteur après une baisse de qualité.
+    @State private var slowNetworkNotice: String? = nil
     /// Largeur du chat au début d'un glissement : la translation du geste est
     /// relative à son point de départ, que la vue ne connaît plus une fois
     /// qu'elle a commencé à rétrécir.
@@ -234,44 +237,58 @@ struct MainTabView: View {
     }
 
     /// Y a-t-il un chat à afficher sous le lecteur ?
+    /// Paysage permis (iPhone) : lecteur ouvert en grand, ou multi-live.
+    private var landscapeAllowed: Bool {
+        (playerMode != nil && playerVisible && !closingPlayer) || showMultiLive
+    }
+
     private var chatTarget: String? {
         if let ch = currentChannelName { return ch }
         return currentVodId
     }
 
-    /// Trois destinations seulement. « Streamer » et « Lien / ID » ont fusionné
-    /// dans Recherche, et les Réglages sont passés derrière l'avatar de l'en-tête.
+    /// « Streamer » et « Lien / ID » ont fusionné dans Recherche, et les
+    /// Réglages sont passés derrière l'avatar de l'en-tête. Découvrir (fil de
+    /// lives et de clips) se masque dans les Réglages.
     enum TabName: String, CaseIterable {
-        case home, search, library
+        case home, discover, search, library
 
         var icon: String {
             switch self {
-            case .home:    return "play.tv"
-            case .search:  return "magnifyingglass"
-            case .library: return "clock.arrow.circlepath"
+            case .home:     return "play.tv"
+            case .discover: return "play.rectangle.on.rectangle"
+            case .search:   return "magnifyingglass"
+            case .library:  return "clock.arrow.circlepath"
             }
         }
         var iconFilled: String {
             switch self {
-            case .home:    return "play.tv.fill"
-            case .search:  return "magnifyingglass"
-            case .library: return "clock.arrow.circlepath"
+            case .home:     return "play.tv.fill"
+            case .discover: return "play.rectangle.on.rectangle.fill"
+            case .search:   return "magnifyingglass"
+            case .library:  return "clock.arrow.circlepath"
             }
         }
         func label(_ store: AppStore) -> String {
             switch self {
-            case .home:    return store.t("tab_home")
-            case .search:  return store.t("tab_search")
-            case .library: return store.t("tab_library")
+            case .home:     return store.t("tab_home")
+            case .discover: return store.t("tab_discover")
+            case .search:   return store.t("tab_search")
+            case .library:  return store.t("tab_library")
             }
         }
         /// Onglets que la visite guidée fait toucher.
         var tourTarget: TourTarget? {
             switch self {
-            case .home:    return nil
+            case .home, .discover: return nil
             case .search:  return .tabSearch
             case .library: return .tabLibrary
             }
+        }
+
+        /// Onglets de la barre : Découvrir seulement s'il n'est pas masqué.
+        static func visible(_ store: AppStore) -> [TabName] {
+            allCases.filter { $0 != .discover || store.showDiscoverTab }
         }
     }
 
@@ -282,7 +299,8 @@ struct MainTabView: View {
             VStack(spacing: 0) {
                 HeaderView(title: activeTab.label(store),
                            onOpenSettings: { showSettings = true },
-                           onFeedback: { feedbackContext = nil; showFeedback = true })
+                           onFeedback: { feedbackContext = nil; showFeedback = true },
+                           safeTop: headerSafeTop)
                     .zIndex(10)
 
                 Group {
@@ -292,6 +310,11 @@ struct MainTabView: View {
                     // comme valeur, donc `playLive` vaudrait ici
                     // `(String, Bool) -> Void` et ne collerait pas au callback.
                     case .home:    HomeView(onPlayStream: { playLive($0) })
+                    // Aperçus seulement sans lecteur ouvert (ni réduit, ni multi-live).
+                    case .discover: DiscoverView(active: playerMode == nil && !showMultiLive
+                                                     && channelSheet == nil && !showSettings,
+                                                 onPlayLive: { playLive($0) },
+                                                 onPlayClip: { playClip($0, $1) })
                     case .search:  SearchView(onPlayVod: { playVod($0, $1, $2, $3) },
                                               onPlayLive: { playLive($0) },
                                               onPlayClip: { playClip($0, $1) },
@@ -319,6 +342,15 @@ struct MainTabView: View {
             // pour qu'aucune vue ne garde les anciennes couleurs. Le lecteur et
             // la feuille des réglages, hors de ce bloc, restent en place.
             .id(store.themeID)
+            // Découvrir masqué pendant qu'il est affiché : retour à l'accueil.
+            .onChange(of: store.showDiscoverTab) { on in
+                if !on, activeTab == .discover { activeTab = .home }
+            }
+            // Multi-live ouvert ou fermé : aperçus de Découvrir bloqués ou permis.
+            .onChange(of: showMultiLive) { on in DiscoverGate.shared.blocked = on || playerMode != nil }
+            // iPhone : portrait, sauf lecteur ouvert en grand ou multi-live.
+            .onChange(of: landscapeAllowed) { OrientationLock.allowLandscape($0) }
+            .onAppear { OrientationLock.allowLandscape(landscapeAllowed) }
 
             // ── Mini bar ──────────────────────────────────────────────
             // `!closingPlayer` : sans lui, la mini-barre apparaîtrait le temps du
@@ -403,6 +435,7 @@ struct MainTabView: View {
                 multiLiveFull: multi.isFull
             )
             .presentationDetents([.medium])
+            .inAppNoticeHost()
         }
         // Multi-live : jusqu'à quatre vidéos côte à côte, directs et VODs.
         .fullScreenCover(isPresented: $showMultiLive) {
@@ -465,13 +498,20 @@ struct MainTabView: View {
                     icon: "arrow.down.circle.fill",
                     title: store.t("update_title"),
                     message: store.t(up.changes.isEmpty ? "update_msg_short" : "update_whats_new"),
-                    detail: "\(UpdateChecker.installedVersion)  →  \(up.version)",
+                    // Même version (builds de test) : le numéro de build les distingue.
+                    detail: UpdateChecker.installedVersion == up.version
+                        ? "\(up.version) (\(UpdateChecker.installedBuild))  →  \(up.version) (\(up.build))"
+                        : "\(UpdateChecker.installedVersion)  →  \(up.version)",
                     primary: store.t("update_open"),
                     secondary: store.t("later"),
                     onPrimary: { withAnimation(.spring(response: 0.3)) { updater.dismiss() }; UpdateChecker.openSource() },
                     onSecondary: { withAnimation(.spring(response: 0.3)) { updater.dismiss() } },
                     // Nouveautés de chaque build manquant, du plus récent au plus ancien.
-                    sections: up.changes.map { .init(title: $0.version, items: $0.items) })
+                    sections: up.changes.map { c -> TPromptCard.PromptSection in
+                        let twin = up.changes.contains { $0.version == c.version && $0.build != c.build }
+                        return TPromptCard.PromptSection(title: twin ? "\(c.version) (build \(c.build))" : c.version,
+                                                         items: c.items, key: "\(c.build)")
+                    })
                 .zIndex(10)
             } else if onboardingDone, showDiscordPrompt {
                 TPromptCard(
@@ -495,6 +535,14 @@ struct MainTabView: View {
                 .zIndex(10)
             }
         }
+        // Marge haute de l'en-tête suivie par la mise en page : elle change
+        // avec la rotation (0 en paysage sur iPhone, l'encoche passe sur le
+        // côté). Un 0 en portrait (lecture ratée) reprend la valeur d'UIKit.
+        .background(GeometryReader { geo in
+            Color.clear
+                .onAppear { updateHeaderSafeTop(geo.safeAreaInsets.top) }
+                .onChange(of: geo.safeAreaInsets.top) { updateHeaderSafeTop($0) }
+        })
         // Visite guidée (premier lancement, ou revue depuis les réglages) :
         // par-dessus tout, elle éclaire les vrais boutons de l'app, dont les
         // positions remontent par `TourAnchorKey`.
@@ -560,6 +608,19 @@ struct MainTabView: View {
             guard let login = note.userInfo?["login"] as? String, !login.isEmpty else { return }
             afterClosingPresentations { playLive(login) }
         }
+        // Téléchargement supprimé pendant qu'on le regarde (mini-lecteur) :
+        // le lecteur se ferme au lieu de rester figé sur des fichiers effacés.
+        .onReceive(NotificationCenter.default.publisher(for: .vodDownloadDeleted)) { note in
+            guard let id = note.object as? String,
+                  case .recovered(let rec)? = playerMode, rec.streamID == "offline-\(id)" else { return }
+            stopPlayer()
+        }
+        // Calages répétés dans le lecteur immersif : qualité trop haute pour le
+        // débit (données mobiles, Wi-Fi faible) → Auto, ou un cran en dessous.
+        .onReceive(NotificationCenter.default.publisher(for: .tuPlaybackStalling)) { note in
+            guard note.object as? String == "immersive" else { return }
+            lowerQualityAfterStalls()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .openMyFeedback)) { _ in
             guard !showMyFeedback else { return }
             afterClosingPresentations { showMyFeedback = true }
@@ -574,6 +635,7 @@ struct MainTabView: View {
         .sheet(isPresented: $showSleepSheet) {
             SleepTimerSheet()
                 .presentationDetents([.medium, .large])
+                .inAppNoticeHost()
         }
         // Session web : vérifiée une fois au lancement. Sans ça on ne s'aperçoit
         // de son expiration que quand les points cessent de répondre.
@@ -585,6 +647,10 @@ struct MainTabView: View {
         // relu tout de suite, avec la nouvelle session ou le jeton anonyme,
         // sans bouger le lecteur (réduit, chat seul).
         .onChange(of: store.twitchWebToken) { _ in
+            // Drops : la pulsation repart avec la nouvelle session.
+            if case .live(let channel)? = playerMode, dvrSourceChannel == nil, !closingPlayer {
+                startDropsHeartbeat(channel: channel)
+            }
             guard case .live(let channel)? = playerMode, dvrSourceChannel == nil,
                   liveSourceUsed == "account", !closingPlayer else { return }
             logger.info("LECTEUR", "Session web changée : direct relu", channel)
@@ -592,6 +658,12 @@ struct MainTabView: View {
             playLive(channel, soft: true)
             playerVisible = visible
             chatOnly = onlyChat
+        }
+        // Progression des drops activée pendant un direct : elle démarre.
+        .onChange(of: store.dropsProgress) { on in
+            guard on, case .live(let channel)? = playerMode, dvrSourceChannel == nil,
+                  !closingPlayer else { return }
+            startDropsHeartbeat(channel: channel)
         }
         // Minuteur de veille écoulé → on coupe la lecture.
         .onChange(of: sleepTimer.fireCount) { _ in
@@ -601,6 +673,20 @@ struct MainTabView: View {
             stopPlayer(wakeOthers: false)
         }
         .onChange(of: keepScreenOn) { ScreenAwake.set("player", $0) }
+        // Lecteur réduit (ou fermé) après le bouton de rotation : sur iPhone,
+        // le reste de l'app revient au portrait au lieu de rester couché. Le
+        // clavier du chat se ferme aussi : il restait par-dessus l'app.
+        .onChange(of: playerVisible) { visible in
+            guard !visible else { return }
+            PlayerOrientation.restorePortraitIfForced()
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
+        }
+    }
+
+    private func updateHeaderSafeTop(_ top: CGFloat) {
+        let value = top > 0 ? top : HeaderView.windowSafeTop
+        if abs(value - headerSafeTop) > 0.5 { headerSafeTop = value }
     }
 
     /// Feuilles et mosaïque attachées à cet écran : une notification touchée
@@ -909,7 +995,7 @@ struct MainTabView: View {
                 nowPlaying: nowPlayingMeta,
                 speed: playbackSpeed,
                 onSpeedChange: { setPlaybackSpeed($0) },
-                notice: accountNotice,
+                notice: slowNetworkNotice ?? accountNotice,
                 onProgress: { time in
                     // Pendant une bascule, `playerMode` désigne déjà la
                     // nouvelle source alors que le lecteur en place joue encore
@@ -962,7 +1048,7 @@ struct MainTabView: View {
                 onLatency: { updateLatency($0) },
                 onBehind: { updateBehind($0) },
                 onPlaying: { playerPlaying = $0 },
-                notice: accountNotice,
+                notice: slowNetworkNotice ?? accountNotice,
                 onChat: nil,
                 onRewind: rewindAction,
                 onBackToLive: backToLiveAction
@@ -1007,9 +1093,16 @@ struct MainTabView: View {
                         if liveViewerCount > 0 {
                             TMeta(icon: "eye.fill", text: formatViewers(liveViewerCount))
                         }
+                        // Un appui ramène au bord du direct, sans recharger.
                         if store.showLatency, liveLatency > 0 {
-                            TMeta(icon: "waveform.path.ecg",
-                                  text: String(format: "%.0f s", liveLatency))
+                            Button {
+                                NotificationCenter.default.post(name: .tuGoLive, object: nil)
+                            } label: {
+                                TMeta(icon: "waveform.path.ecg",
+                                      text: String(format: "%.0f s", liveLatency))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(store.t("back_to_live"))
                         }
                     } else {
                         Text(statusTitle).font(.tMeta).foregroundColor(.tMuted).lineLimit(1)
@@ -1072,11 +1165,34 @@ struct MainTabView: View {
         .padding(.top, TSpace.sm)
     }
 
+    /// Qualité baissée après des calages répétés : « Auto » (la qualité suit
+    /// le débit) si le flux l'a, sinon le cran du dessous. La préférence
+    /// enregistrée ne change pas : seul ce lecteur passe plus bas.
+    private func lowerQualityAfterStalls() {
+        guard let links = qualityLinks, !links.isEmpty else { return }
+        let current = currentQuality(links)
+        guard !isAutoQuality(current), !isAudioQuality(current) else { return }
+        var next = links.keys.first(where: isAutoQuality)
+        if next == nil {
+            let keys = Array(links.keys)
+            let height = { (k: String) in qualityHeight(k, among: keys, variants: qualityVariants) }
+            let video = keys.filter { !isAudioQuality($0) && !isAutoQuality($0) }.sorted { height($0) > height($1) }
+            if let i = video.firstIndex(of: current), i + 1 < video.count { next = video[i + 1] }
+        }
+        guard let next, next != current else { return }
+        logger.warn("LECTEUR", "Calages répétés : qualité baissée", "\(current) → \(next)")
+        immersiveQuality = next
+        slowNetworkNotice = store.t("slow_network_quality")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { slowNetworkNotice = nil }
+    }
+
     /// Qualité en cours pour le lecteur immersif : celle choisie, sinon la
     /// qualité préférée (ou la plus proche en dessous).
     private func currentQuality(_ links: QualityLinks) -> String {
         if !immersiveQuality.isEmpty, links[immersiveQuality] != nil { return immersiveQuality }
-        return preferredQualityKey(Array(links.keys), pref: store.preferredQuality, variants: qualityVariants)
+        // En données mobiles : la qualité choisie pour elles (Auto par défaut).
+        return launchQualityKey(Array(links.keys), pref: store.preferredQuality, cellularPref: store.cellularQuality,
+                                cellular: NetworkStatus.shared.isCellular, variants: qualityVariants)
     }
 
     /// Arrondi à la seconde : sinon la vue se recalculerait à chaque tick.
@@ -1378,6 +1494,7 @@ struct MainTabView: View {
     /// Un seul son à la fois : le lecteur se ferme.
     private func openMultiLive() {
         if playerMode != nil { stopPlayer() }
+        DiscoverGate.shared.blocked = true
         showMultiLive = true
     }
 
@@ -1447,6 +1564,8 @@ struct MainTabView: View {
     /// résout, au lieu d'être démonté et remplacé par un écran d'attente.
     /// `keepVisibility` : voir playVod.
     private func startPlayback(_ mode: PlayerMode, soft: Bool = false, keepVisibility: Bool = false) {
+        // Plus d'aperçu de Découvrir sous le lecteur (son en double).
+        DiscoverGate.shared.blocked = true
         // Referme le clavier s'il était ouvert (recherche en cours) : sinon il
         // restait affiché par-dessus le lecteur.
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
@@ -1738,6 +1857,8 @@ struct MainTabView: View {
             liveGame           = ""
             liveSourceUsed     = nil
             playerMode         = nil
+            // Lecteur fermé : les aperçus de Découvrir peuvent reprendre.
+            DiscoverGate.shared.blocked = showMultiLive
             qualityLinks       = nil
             linksContentID     = ""
             linksAreLive       = false
@@ -1784,10 +1905,16 @@ struct MainTabView: View {
         // Direct lu par le compte : c'est déjà le cas, une seconde session du
         // compte ne servirait à rien ; la pulsation garde alors seulement
         // l'état de la page Drops et la réclamation automatique.
-        if store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty {
-            DropsHeartbeat.shared.start(login: channel, token: web,
-                                        pollSegments: liveSourceUsed != "account")
-        }
+        startDropsHeartbeat(channel: channel)
+    }
+
+    /// Progression des drops pour le direct en cours. Appelée aussi quand on
+    /// l'active ou qu'on connecte la session web pendant le direct : rien ne
+    /// progressait avant de rouvrir le live.
+    private func startDropsHeartbeat(channel: String) {
+        guard store.dropsProgress, let web = store.twitchWebToken, !web.isEmpty else { return }
+        DropsHeartbeat.shared.start(login: channel, token: web,
+                                    pollSegments: liveSourceUsed != "account")
     }
 
     private func stopLiveTimers() {
@@ -1847,7 +1974,7 @@ struct CustomTabBar: View {
 
     private var tabs: some View {
         HStack(spacing: 0) {
-            ForEach(MainTabView.TabName.allCases, id: \.self) { tab in
+            ForEach(MainTabView.TabName.visible(store), id: \.self) { tab in
                 let isActive = activeTab == tab
                 Button {
                     withAnimation(.easeOut(duration: 0.15)) { activeTab = tab }

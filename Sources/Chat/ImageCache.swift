@@ -88,32 +88,57 @@ final class ImageCache {
         return img
     }
 
+    /// Côté le plus long au-delà duquel une image est réduite au décodage :
+    /// les emotes (128 px au plus) n'y sont pas touchées ; un GIF de GIPHY
+    /// (480 px et plus, des dizaines d'images) prenait sinon des dizaines de Mo.
+    private static let maxSide = 256
+
     // MARK: Décodage (gère GIF / WebP animé / APNG via ImageIO)
     private static func decode(_ data: Data, maxFrames: Int) -> CachedImage? {
         guard let src = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let count = CGImageSourceGetCount(src)
-
-        if count <= 1 {
-            guard let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
-            return CachedImage(frames: [UIImage(cgImage: cg)], duration: 0, bytes: max(1, data.count))
+        let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any]
+        let side = max((props?[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue ?? 0,
+                       (props?[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue ?? 0)
+        let big = side > maxSide
+        let thumb: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                      kCGImageSourceCreateThumbnailWithTransform: true,
+                                      kCGImageSourceThumbnailMaxPixelSize: maxSide]
+        func frame(_ i: Int) -> CGImage? {
+            big ? CGImageSourceCreateThumbnailAtIndex(src, i, thumb as CFDictionary)
+                : CGImageSourceCreateImageAtIndex(src, i, nil)
         }
 
-        // Animée : on sous-échantillonne si l'emote a trop de frames.
-        let step = max(1, Int(ceil(Double(count) / Double(maxFrames))))
+        // Coût en mémoire : les images décodées (largeur × hauteur × 4), pas le
+        // fichier compressé — une emote 7TV animée de 150 Ko en pèse ~4,5 Mo, et
+        // le plafond de 48 Mo laissait monter le cache à des centaines de Mo.
+        func cost(_ cg: CGImage) -> Int { cg.bytesPerRow * cg.height }
+
+        if count <= 1 {
+            guard let cg = frame(0) else { return nil }
+            return CachedImage(frames: [UIImage(cgImage: cg)], duration: 0, bytes: max(1, cost(cg)))
+        }
+
+        // Animée : on sous-échantillonne si l'emote a trop de frames (moins
+        // pour une grande image, réduite elle aussi).
+        let cap = big ? min(maxFrames, 48) : maxFrames
+        let step = max(1, Int(ceil(Double(count) / Double(cap))))
         var frames: [UIImage] = []
         var total: TimeInterval = 0
+        var bytes = 0
         var i = 0
         while i < count {
-            if let cg = CGImageSourceCreateImageAtIndex(src, i, nil) {
+            if let cg = frame(i) {
                 frames.append(UIImage(cgImage: cg))
+                bytes += cost(cg)
                 total += delay(src, i) * Double(step)   // la frame gardée couvre `step` frames
             }
             i += step
         }
         guard !frames.isEmpty else { return nil }
-        if frames.count == 1 { return CachedImage(frames: frames, duration: 0, bytes: max(1, data.count)) }
+        if frames.count == 1 { return CachedImage(frames: frames, duration: 0, bytes: max(1, bytes)) }
         if total <= 0 { total = Double(frames.count) * 0.1 }
-        return CachedImage(frames: frames, duration: total, bytes: max(1, data.count))
+        return CachedImage(frames: frames, duration: total, bytes: max(1, bytes))
     }
 
     private static func delay(_ src: CGImageSource, _ index: Int) -> TimeInterval {

@@ -80,6 +80,20 @@ struct VodMarkers {
     var createdAt: Date? = nil
 }
 
+/// Clip du fil Découvrir : un clip populaire d'une chaîne du top.
+struct FeedClip: Identifiable, Equatable {
+    let id: String            // slug
+    let title: String
+    let thumbnailURL: String
+    let viewCount: Int
+    let durationSeconds: Int
+    let game: String
+    let login: String
+    let channelId: String
+    let channelName: String
+    let avatar: String?
+}
+
 /// Clip d'une chaîne (liste de la page chaîne).
 struct ClipData: Identifiable {
     let id: String            // slug
@@ -264,7 +278,7 @@ enum PlayerMode {
 }
 
 // MARK: – Log
-enum LogLevel: String, CaseIterable {
+enum LogLevel: String, CaseIterable, Codable {
     case info, success, warn, error, debug
 
     var icon: String {
@@ -287,11 +301,14 @@ enum LogLevel: String, CaseIterable {
     }
 }
 
-struct LogEntry: Identifiable {
+/// Une ligne du journal. Gardée dans un fichier (journal relu au lancement
+/// suivant) ; `repeats` : même ligne arrivée plusieurs fois de suite.
+struct LogEntry: Identifiable, Codable {
     let id: Int
-    let timestamp: String
+    var timestamp: String
     let level: LogLevel
     let category: String
     let message: String
     let detail: String?
+    var repeats = 1
 }

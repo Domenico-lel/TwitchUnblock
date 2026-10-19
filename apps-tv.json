@@ -1,0 +1,124 @@
+{
+  "name": "TwitchUnblock TV",
+  "subtitle": "Apple TV test builds of TwitchUnblock",
+  "description": "Unsigned test builds of the TwitchUnblock Apple TV app, from the test-17d298 branch. Add this source in ATVLoadly (or any tool that reads AltStore sources) to get updates automatically.",
+  "iconURL": "https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/assets/icon.png",
+  "website": "https://github.com/MXFia19/TwitchUnblock",
+  "tintColor": "#9146ff",
+  "featuredApps": [
+    "com.mxfia19.TwitchUnblockTV"
+  ],
+  "apps": [
+    {
+      "name": "TwitchUnblock TV",
+      "bundleIdentifier": "com.mxfia19.TwitchUnblockTV",
+      "developerName": "MXFia19",
+      "subtitle": "Twitch lives and VODs on Apple TV (test)",
+      "localizedDescription": "Followed channels, top streams, categories and search, lives and VODs with the chat on the picture.",
+      "iconURL": "https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/assets/icon.png",
+      "tintColor": "#9146ff",
+      "category": "entertainment",
+      "screenshots": [],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      },
+      "versions": [
+        {
+          "version": "0.1.20",
+          "buildVersion": "20",
+          "date": "2026-10-19",
+          "localizedDescription": "- The remote's Play button starts the focused live or VOD, like Select\n- Play on an offline channel (Following, Search) opens it and plays its latest broadcast\n- Following reloads when you come back to it from the tab bar",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-20/TwitchUnblockTV.ipa",
+          "size": 2448068,
+          "commit": "5a576edaf32ad79ca29af01fa92909a0b58b67be"
+        },
+        {
+          "version": "0.1.19",
+          "buildVersion": "19",
+          "date": "2026-10-18",
+          "localizedDescription": "- Account → Recent errors lists the latest warnings and errors, and failed lives or VODs are logged",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-19/TwitchUnblockTV.ipa",
+          "size": 2432299,
+          "commit": "0419353b6041cfa41e2fd49a71de5d7c176949d5"
+        },
+        {
+          "version": "0.1.18",
+          "buildVersion": "18",
+          "date": "2026-10-18",
+          "localizedDescription": "- A live source that doesn't answer no longer leaves you on a checked source that isn't playing (the current one keeps playing and a notice says so), and changing quality while paused stays paused\n- Chat reconnects within 2 seconds after a drop, says \"Chat connected\" on quiet channels, retries BTTV/FFZ/7TV emotes after a failed first load, and VOD chat shows emotes from the very first messages\n- Signing in with a code keeps waiting when you switch tabs (with a Cancel button), and a network hiccup at launch no longer signs you out\n- Russian wording for followed channels fixed",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-18/TwitchUnblockTV.ipa",
+          "size": 2362373,
+          "commit": "c91dbbed694d1196ed819b11b036c4b4aed41ca0"
+        },
+        {
+          "version": "0.1.17",
+          "buildVersion": "17",
+          "date": "2026-10-18",
+          "localizedDescription": "- When the account couldn't load at launch, the Following tab loads it again instead of showing \"No live\" all session",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-17/TwitchUnblockTV.ipa",
+          "size": 2356231,
+          "commit": "fd5015e425cac43a5f78e783b3dfefdbf4da2d1f"
+        },
+        {
+          "version": "0.1.16",
+          "buildVersion": "16",
+          "date": "2026-10-18",
+          "localizedDescription": "- The Following tab refreshes on its own (when you come back to it or to the app, every 2 minutes while it's shown, and when you pick the tab again), so ended lives no longer linger",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-16/TwitchUnblockTV.ipa",
+          "size": 2354923,
+          "commit": "f0f73f5e29d67f3d87b6462d38973216097857ba"
+        },
+        {
+          "version": "0.1.15",
+          "buildVersion": "15",
+          "date": "2026-10-17",
+          "localizedDescription": "- On a channel page, the Watch live button can now be reached by pressing up from any video in the first row\n- Anonymous usage count for the stats page, like the iPhone app (Account → Share my usage to turn it off and erase it)",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-15/TwitchUnblockTV.ipa",
+          "size": 2342832,
+          "commit": "739946f10ca39ecd829c77525f47cffdf61e14d0"
+        },
+        {
+          "version": "0.1.14",
+          "buildVersion": "14",
+          "date": "2026-10-17",
+          "localizedDescription": "- Showing or hiding the chat is now remembered per channel, like its position (handy for streamers who already show their chat on screen); Account → Chat by default sets it for the others",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-14/TwitchUnblockTV.ipa",
+          "size": 2327050,
+          "commit": "b3af975cfe7f313f986080298b834c5f03299fd2"
+        },
+        {
+          "version": "0.1.13",
+          "buildVersion": "13",
+          "date": "2026-10-17",
+          "localizedDescription": "- The channel page opened from the player now has its own background instead of showing the Following tab through it",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-13/TwitchUnblockTV.ipa",
+          "size": 2324379,
+          "commit": "9528b3bd88332de8f57ae95c3dd95d5078756422"
+        },
+        {
+          "version": "0.1.12",
+          "buildVersion": "12",
+          "date": "2026-10-17",
+          "localizedDescription": "- View channel in the player's bar opens the channel's page with its past broadcasts; a video started there plays on top of it, and Menu goes back",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-12/TwitchUnblockTV.ipa",
+          "size": 2320632,
+          "commit": "bc92c3ea5705f0014ed44934588261c3d9c4d979"
+        },
+        {
+          "version": "0.1.10",
+          "buildVersion": "10",
+          "date": "2026-10-16",
+          "localizedDescription": "- The Following tab also lists the channels you follow that are offline (most recently live first); open one to see its videos\n- Move the chat left or right, full height or into a corner from the player's Chat menu, remembered per channel; the Account tab no longer traps the remote's focus\n- Other improvements and fixes",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-10/TwitchUnblockTV.ipa",
+          "size": 2309056,
+          "commit": "f190db7aacfac668c8d385753e5d5a90e8fc05db"
+        }
+      ],
+      "version": "0.1.20",
+      "versionDate": "2026-10-19",
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/tv-test-20/TwitchUnblockTV.ipa",
+      "size": 2448068
+    }
+  ]
+}

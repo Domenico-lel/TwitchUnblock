@@ -217,6 +217,11 @@ final class AppStore: ObservableObject {
     @Published var preferredQuality: String = "source" {
         didSet { UserDefaults.standard.set(preferredQuality, forKey: "cfg_quality_pref") }
     }
+    /// Qualité au lancement en données mobiles (`kCellularQualityPrefs`) :
+    /// « auto » par défaut, la qualité suit le débit (NetworkStatus).
+    @Published var cellularQuality: String = "auto" {
+        didSet { UserDefaults.standard.set(cellularQuality, forKey: "cfg_quality_cellular") }
+    }
     /// Audio seul préféré : ce que retenaient les versions d'avant (gardé
     /// dans la sauvegarde pour elles).
     var preferAudioOnly: Bool { preferredQuality == "audio" }
@@ -240,6 +245,15 @@ final class AppStore: ObservableObject {
     /// Activé par défaut : c'est le lecteur de l'app, le natif est le repli.
     @Published var immersivePlayer: Bool = true {
         didSet { UserDefaults.standard.set(immersivePlayer, forKey: "cfg_immersive") }
+    }
+
+    /// Activité en direct du lecteur (écran verrouillé, Dynamic Island).
+    /// Coupée, celle en cours disparaît aussitôt et aucune autre ne démarre.
+    @Published var liveActivity: Bool = true {
+        didSet {
+            UserDefaults.standard.set(liveActivity, forKey: PlayerActivity.key)
+            if !liveActivity { PlayerActivity.end() }
+        }
     }
 
     /// Ordre des sources du direct (« as », « al », « eu », « twitch ») :
@@ -354,6 +368,11 @@ final class AppStore: ObservableObject {
     @Published var chatTimestamps: Bool = true {
         didSet { UserDefaults.standard.set(chatTimestamps, forKey: "cfg_chat_time") }
     }
+    /// Heure du chat et du journal : « auto » (celle de l'appareil), « 12 » ou « 24 ».
+    @Published var timeFormat: String = "auto" {
+        didSet { UserDefaults.standard.set(timeFormat, forKey: ClockFormat.key) }
+    }
+    var clock12h: Bool { ClockFormat.uses12h(timeFormat) }
     /// Part de la largeur prise par le chat en paysage (colonne ou calque).
     @Published var chatWidthRatio: Double = 0.32 {
         didSet { UserDefaults.standard.set(chatWidthRatio, forKey: "cfg_chat_width") }
@@ -381,6 +400,11 @@ final class AppStore: ObservableObject {
     /// Proposer emotes et pseudos pendant la frappe.
     @Published var chatAutocomplete: Bool = true {
         didSet { UserDefaults.standard.set(chatAutocomplete, forKey: "cfg_chat_autocomplete") }
+    }
+    /// Suggestions du clavier iOS (mots proposés au-dessus, correction) dans
+    /// le chat. Coupées, iOS ne touche plus aux noms d'emotes.
+    @Published var chatKeyboardSuggestions: Bool = true {
+        didSet { UserDefaults.standard.set(chatKeyboardSuggestions, forKey: "cfg_chat_kbd_suggest") }
     }
     /// Garder les messages supprimés, barrés, au lieu de les faire disparaître.
     @Published var chatShowDeleted: Bool = false {
@@ -532,6 +556,10 @@ final class AppStore: ObservableObject {
     @Published var showRecentChannels: Bool = true {
         didSet { UserDefaults.standard.set(showRecentChannels, forKey: "cfg_recent") }
     }
+    /// Onglet Découvrir (fil de lives et de clips) dans la barre d'onglets.
+    @Published var showDiscoverTab: Bool = true {
+        didSet { UserDefaults.standard.set(showDiscoverTab, forKey: "cfg_discover_tab") }
+    }
 
     /// Langue du top des lives ; nil = celle de l'appareil.
     @Published var topLang: String? = nil {
@@ -636,6 +664,7 @@ final class AppStore: ObservableObject {
             case .text(let s), .link(let s): return s
             case .mention(let s): return "@" + s
             case .emote(let e): return e.name
+            case .gif(_, let alt): return alt
             }
         }.joined(separator: " ")
         if chatHideCommands && text.hasPrefix("!") { return true }
@@ -683,6 +712,7 @@ final class AppStore: ObservableObject {
         vodSpeed           = VodSpeed.nearest(ud.object(forKey: "cfg_vod_speed") as? Double ?? 1)
         multiLiveChat      = ud.object(forKey: "cfg_multi_chat") as? Bool ?? true
         immersivePlayer    = ud.object(forKey: "cfg_immersive")   as? Bool ?? true
+        liveActivity       = PlayerActivity.enabled
         // Ordre des sources ; avant lui, une seule source préférée
         // (« liveSource »), mise en tête. Réécrit pour getLive.
         liveSourceOrder    = liveSourceSteps().filter { $0 != "worker" }
@@ -703,9 +733,11 @@ final class AppStore: ObservableObject {
         chatBadgeScale     = Self.clamped(ud.object(forKey: "cfg_chat_badge")   as? Double ?? 1, to: Self.chatScaleRange)
         chatEmoteScale     = Self.clamped(ud.object(forKey: "cfg_chat_emote")   as? Double ?? 1, to: Self.chatScaleRange)
         chatTimestamps     = ud.object(forKey: "cfg_chat_time")    as? Bool   ?? true
+        timeFormat         = ["auto", "12", "24"].contains(ud.string(forKey: ClockFormat.key) ?? "") ? ud.string(forKey: ClockFormat.key)! : "auto"
         chatWidthRatio     = Self.clamped(ud.object(forKey: "cfg_chat_width")   as? Double ?? 0.32, to: Self.chatWidthRange)
         chatLoadRecent     = ud.object(forKey: "cfg_chat_recent")       as? Bool ?? true
         chatAutocomplete   = ud.object(forKey: "cfg_chat_autocomplete") as? Bool ?? true
+        chatKeyboardSuggestions = ud.object(forKey: "cfg_chat_kbd_suggest") as? Bool ?? true
         chatShowDeleted    = ud.object(forKey: "cfg_chat_deleted")      as? Bool ?? false
         shareUsage         = ud.object(forKey: "cfg_share_usage") as? Bool ?? true
         // « zh_hk » importé du site par une version d'avant : ramené à « zh-hk ».
@@ -726,12 +758,16 @@ final class AppStore: ObservableObject {
         }
         homeListLayout     = ud.bool(forKey: "cfg_home_list")
         showRecentChannels = ud.object(forKey: "cfg_recent") as? Bool ?? true
+        showDiscoverTab = ud.object(forKey: "cfg_discover_tab") as? Bool ?? true
         // Qualité préférée ; avant elle, seul l'audio seul était retenu.
         if let pref = ud.string(forKey: "cfg_quality_pref"), kQualityPrefs.contains(pref) {
             preferredQuality = pref
         } else {
             preferredQuality = ud.bool(forKey: "cfg_audio_only") ? "audio" : "source"
             ud.set(preferredQuality, forKey: "cfg_quality_pref")
+        }
+        if let cell = ud.string(forKey: "cfg_quality_cellular"), kCellularQualityPrefs.contains(cell) {
+            cellularQuality = cell
         }
         showLatency        = ud.object(forKey: "dbg_latency")    as? Bool ?? false
         autoChatDelay      = ud.object(forKey: "dbg_chat_delay") as? Bool ?? false
@@ -791,6 +827,10 @@ final class AppStore: ObservableObject {
 
     // MARK: – Translation
     func t(_ key: String) -> String { translate(key, lang) }
+    /// Texte accordé au nombre `n` (voir `translatePlural`).
+    func tn(_ key: String, _ n: Int, abbreviated: Bool = false) -> String {
+        translatePlural(key, n, lang, abbreviated: abbreviated)
+    }
 
     // MARK: – Auth
     /// Nouveau jeton après une connexion. S'il change, l'identité gardée

@@ -297,6 +297,7 @@ final class VodDownloads: ObservableObject {
         try? FileManager.default.removeItem(at: Self.folder(id))
         items.removeAll { $0.id == id }
         save()
+        NotificationCenter.default.post(name: .vodDownloadDeleted, object: id)
     }
 
     private func stopWork(_ id: String) {
@@ -366,7 +367,12 @@ final class VodDownloads: ObservableObject {
     // MARK: Préparation
     private func prepare(_ id: String) {
         guard preparing[id] == nil, runners[id] == nil else { return }
+        // Un peu de temps demandé à iOS pour la préparation (playlist,
+        // sondage) : l'app quittée juste après « Télécharger » la coupait.
+        let time = BackgroundTaskBox()
+        time.id = UIApplication.shared.beginBackgroundTask(withName: "download-prepare") { time.end() }
         preparing[id] = Task {
+            defer { time.end() }
             let plan = await self.makePlan(id)
             // Arrêtée (pause, suppression) : une autre a peut-être pris sa place.
             guard !Task.isCancelled else { return }
@@ -384,7 +390,10 @@ final class VodDownloads: ObservableObject {
         if let saved = Self.loadPlan(id) { return saved }
         logger.info("DOWNLOAD", "Téléchargement…", "\(current.title) · \(current.quality)")
         guard let url = URL(string: current.playlist), let text = await VodDownloadPlan.fetch(url) else {
-            if !Task.isCancelled { fail(id, VodDownloadFailure.playlist) }
+            // Hors premier plan : l'élément reste « en cours » et repart au
+            // retour (sceneActive) — l'échec était définitif (« playlist
+            // introuvable ») pour une simple mise en arrière-plan.
+            if !Task.isCancelled, foreground { fail(id, VodDownloadFailure.playlist) }
             return nil
         }
         var made = VodDownloadPlan.make(text, base: url, from: current.start, to: current.end)
@@ -642,11 +651,30 @@ final class VodDownloads: ObservableObject {
             let count = await VodChatArchive.download(vodId: d.vodId, from: from, to: to, into: VodDownloads.folder(id))
             guard let self, !Task.isCancelled else { return }
             self.chats[id] = nil
-            guard let count else { return }
+            guard let count else {
+                // Chat introuvable (VOD supprimée par la chaîne…) : trois essais
+                // espacés, puis le téléchargement s'en passe — il restait « chat
+                // en cours » à vie, et repartait du début à chaque retour.
+                let tries = (self.chatAttempts[id] ?? 0) + 1
+                self.chatAttempts[id] = tries
+                guard tries < 3 else {
+                    logger.warn("DOWNLOAD", "Chat du téléchargement indisponible", d.title)
+                    self.update(id) { $0.withChat = false }
+                    self.save()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if !Task.isCancelled { self.startChat(id) }
+                return
+            }
+            self.chatAttempts[id] = nil
             self.update(id) { $0.chatCount = count }
             self.save()
         }
     }
+
+    /// Essais du chat de chaque téléchargement (session en cours).
+    private var chatAttempts: [String: Int] = [:]
 
     // MARK: Export
     /// Un seul fichier (.ts, ou .mp4 pour les VODs en fMP4), pour Fichiers,
@@ -720,15 +748,22 @@ final class VodDownloads: ObservableObject {
     }
 
     /// Son d'origine encore là ? Quatre premiers passages coupés : tous
-    /// refusés, la VOD est trop ancienne — inutile d'essayer les autres.
+    /// refusés (403/404), la VOD est trop ancienne — inutile d'essayer les
+    /// autres. Sans réponse (réseau lent, app quittée), on essaie quand même,
+    /// segment par segment (repli muet sur refus) : « non » restait figé dans
+    /// le plan, « Réessayer » et la reprise compris.
     nonisolated private static func originalsAvailable(_ plan: VodDownloadPlan) async -> Bool {
+        var probed = 0, refused = 0
         for s in plan.segments.lazy.filter({ $0.original != nil }).prefix(4) {
             guard let original = s.original else { continue }
+            probed += 1
             var req = URLRequest(url: original, timeoutInterval: 6)
             req.httpMethod = "HEAD"
-            if (try? await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode == 200 { return true }
+            let code = (try? await URLSession.shared.data(for: req).1 as? HTTPURLResponse)?.statusCode
+            if code == 200 { return true }
+            if code == 403 || code == 404 { refused += 1 }
         }
-        return false
+        return probed > 0 && refused < probed
     }
 
     nonisolated private static func writePlaylist(_ plan: VodDownloadPlan, folder: URL, names: [Int: String]) throws {
@@ -799,17 +834,19 @@ enum VodFetcher {
                     return .saved(name, fileSize(dest) ?? 0)
                 }
                 try? fm.removeItem(at: tmp)
-                // Son d'origine effacé du CDN : la version muette.
+                // Erreur passagère (429, 5xx) : nouvel essai d'abord, original
+                // compris — il passait aussitôt à la version muette, pour de bon.
+                if code == 429 || code >= 500, attempt < 3 {
+                    attempt += 1
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
+                    continue
+                }
+                // Son d'origine effacé du CDN (ou toujours refusé) : la version muette.
                 if kind == .original, let fallback = job.fallback {
                     url = fallback
                     name = VodDownloader.mutedName(job.fileName)
                     kind = .muted
                     attempt = 0
-                    continue
-                }
-                if code == 429 || code >= 500, attempt < 3 {
-                    attempt += 1
-                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 2_000_000_000)
                     continue
                 }
                 return .refused("http:\(code)")
@@ -1010,6 +1047,15 @@ final class VodDownloader: NSObject, URLSessionDownloadDelegate {
         }
         if let code = refused.removeValue(forKey: task.taskIdentifier) {
             if code == -1 { return }
+            // Erreur passagère (429, 5xx) : trois nouveaux essais avant de
+            // conclure (un original passait sinon aussitôt en version muette).
+            if code == 429 || code >= 500, (retries[key] ?? 0) < 3, let url = task.originalRequest?.url {
+                retries[key] = (retries[key] ?? 0) + 1
+                start(Job(item: job.item, kind: job.kind, url: url, fallback: job.fallback, fileName: job.fileName),
+                      generation: generation)
+                return
+            }
+            retries[key] = nil
             // Son d'origine refusé (effacé du CDN) : la version muette.
             if job.kind == .original, let fallback = job.fallback {
                 start(Job(item: job.item, kind: .muted, url: fallback, fallback: nil,
@@ -1060,4 +1106,10 @@ private final class Once {
         done = true
         return true
     }
+}
+
+extension Notification.Name {
+    /// Téléchargement supprimé (objet : son identifiant) : le lecteur qui le
+    /// lisait se ferme.
+    static let vodDownloadDeleted = Notification.Name("VodDownloadDeleted")
 }

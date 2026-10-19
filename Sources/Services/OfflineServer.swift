@@ -23,21 +23,32 @@ final class OfflineServer {
     private var waiting: [(UInt16?) -> Void] = []
 
     private init() {
-        // iOS ferme le serveur pendant que l'app est suspendue : relancé au retour.
-        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
-                                               object: nil, queue: nil) { [weak self] _ in
-            guard let self else { return }
-            self.queue.async { if self.lastPort != nil { self.ensureStarted { _ in } } }
+        // iOS ferme le serveur pendant que l'app est suspendue : relancé au
+        // retour (premier plan, ou app réactivée sans y passer).
+        for name in [UIApplication.willEnterForegroundNotification, UIApplication.didBecomeActiveNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+                guard let self else { return }
+                self.queue.async { if self.lastPort != nil { self.ensureStarted { _ in } } }
+            }
         }
     }
 
-    /// http://127.0.0.1:<port>, serveur démarré au besoin. nil s'il ne peut pas.
+    /// Préfixe secret tiré à chaque lancement : une autre app de l'appareil,
+    /// qui parcourrait les ports, ne lit ni la liste des téléchargements ni
+    /// leurs chats (tout le dossier était servi sans contrôle).
+    private let secret = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+
+    /// http://127.0.0.1:<port>/<secret>, serveur démarré au besoin. nil s'il ne peut pas.
     func baseURL() async -> URL? {
         let port: UInt16? = await withCheckedContinuation { cont in
             queue.async { self.ensureStarted { cont.resume(returning: $0) } }
         }
-        return port.flatMap { URL(string: "http://127.0.0.1:\($0)") }
+        return port.flatMap { URL(string: "http://127.0.0.1:\($0)/\(secret)") }
     }
+
+    /// Seuls la playlist et les segments vidéo sont servis (ni index.json,
+    /// ni plan.json, ni chat.json : l'app les lit sur le disque).
+    private static let servedExtensions: Set<String> = ["m3u8", "ts", "mp4", "m4s", "aac", "m4a", "mp3"]
 
     private func ensureStarted(_ done: @escaping (UInt16?) -> Void) {
         if let port { done(port); return }
@@ -68,7 +79,13 @@ final class OfflineServer {
                 let wasReady = self.port != nil
                 self.port = nil
                 self.listener = nil
-                if !wasReady, self.lastPort != nil, !self.waiting.isEmpty {
+                if wasReady, self.lastPort != nil {
+                    // Fermé par iOS pendant une suspension : une lecture hors
+                    // ligne peut reprendre sans repasser au premier plan (écran
+                    // verrouillé, PiP) et calait. Relancé aussitôt sur le même
+                    // port : les adresses données à AVPlayer restent bonnes.
+                    self.startListener()
+                } else if self.lastPort != nil, !self.waiting.isEmpty {
                     // L'ancien port est pris : un autre.
                     self.lastPort = nil
                     self.startListener()
@@ -119,10 +136,17 @@ final class OfflineServer {
             return
         }
         let rawPath = String(parts[1]).components(separatedBy: "?").first ?? ""
-        let path = (rawPath.removingPercentEncoding ?? rawPath).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let full = (rawPath.removingPercentEncoding ?? rawPath).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // Préfixe secret obligatoire, retiré avant de chercher le fichier.
+        guard full.hasPrefix(secret + "/") else {
+            send(conn, status: "404 Not Found", headers: [:], body: Data())
+            return
+        }
+        let path = String(full.dropFirst(secret.count + 1))
         let file = VodDownloads.directory.appendingPathComponent(path)
-        // Rien en dehors du dossier des téléchargements.
+        // Rien en dehors du dossier des téléchargements, et seulement la vidéo.
         guard !path.isEmpty, !path.contains(".."),
+              Self.servedExtensions.contains(file.pathExtension.lowercased()),
               let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
             send(conn, status: "404 Not Found", headers: [:], body: Data())
             return
@@ -131,10 +155,17 @@ final class OfflineServer {
         var body = data
         var headers = ["Content-Type": Self.mime(file.pathExtension), "Accept-Ranges": "bytes"]
         if let line = lines.first(where: { $0.lowercased().hasPrefix("range:") }),
-           let range = Self.byteRange(line, size: data.count) {
-            status = "206 Partial Content"
-            body = data.subdata(in: range)
-            headers["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(data.count)"
+           let asked = Self.byteRange(line, size: data.count) {
+            switch asked {
+            case .range(let range):
+                status = "206 Partial Content"
+                body = data.subdata(in: range)
+                headers["Content-Range"] = "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(data.count)"
+            case .unsatisfiable:
+                status = "416 Range Not Satisfiable"
+                body = Data()
+                headers["Content-Range"] = "bytes */\(data.count)"
+            }
         }
         headers["Content-Length"] = "\(body.count)"
         send(conn, status: status, headers: headers, body: parts[0] == "HEAD" ? Data() : body)
@@ -149,15 +180,25 @@ final class OfflineServer {
         conn.send(content: out, completion: .contentProcessed { _ in conn.cancel() })
     }
 
-    /// « Range: bytes=début-fin » (fin facultative).
-    private static func byteRange(_ line: String, size: Int) -> Range<Int>? {
-        guard size > 0, let spec = line.split(separator: "=", maxSplits: 1).last else { return nil }
+    private enum ByteRange { case range(Range<Int>), unsatisfiable }
+
+    /// « Range: bytes=début-fin » (fin facultative), ou « bytes=-N » : les N
+    /// derniers octets (servi comme « depuis 0 » avant). Hors du fichier : 416
+    /// (un 200 avec tout le fichier était renvoyé).
+    private static func byteRange(_ line: String, size: Int) -> ByteRange? {
+        guard let spec = line.split(separator: "=", maxSplits: 1).last else { return nil }
         let bounds = spec.split(separator: "-", omittingEmptySubsequences: false)
         guard bounds.count == 2 else { return nil }
-        let start = Int(bounds[0].trimmingCharacters(in: .whitespaces)) ?? 0
-        let end = Int(bounds[1].trimmingCharacters(in: .whitespaces)).map { min($0, size - 1) } ?? size - 1
-        guard start <= end, start < size else { return nil }
-        return start ..< end + 1
+        let first = bounds[0].trimmingCharacters(in: .whitespaces)
+        let last = bounds[1].trimmingCharacters(in: .whitespaces)
+        if first.isEmpty {
+            guard let n = Int(last), n > 0, size > 0 else { return .unsatisfiable }
+            return .range(max(0, size - n) ..< size)
+        }
+        guard let start = Int(first) else { return nil }
+        let end = Int(last).map { min($0, size - 1) } ?? size - 1
+        guard start < size, start <= end else { return .unsatisfiable }
+        return .range(start ..< end + 1)
     }
 
     private static func mime(_ ext: String) -> String {

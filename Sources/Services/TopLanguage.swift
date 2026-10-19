@@ -15,7 +15,11 @@ enum TopLanguage {
     static var device: String {
         for raw in Locale.preferredLanguages {
             let tag = raw.lowercased()
-            if tag.hasPrefix("zh-hk") || tag.hasPrefix("zh-mo") || tag.hasPrefix("zh-hant") { return "zh-hk" }
+            // « zh-hk » (cantonais) pour Hong Kong, Macao et le cantonais ;
+            // tout autre chinois, traditionnel de Taïwan compris, est « zh »
+            // (le top de Taïwan était presque uniquement hongkongais).
+            if tag.hasPrefix("yue") || tag.hasPrefix("zh-hk") || tag.hasPrefix("zh-mo")
+                || (tag.hasPrefix("zh-") && (tag.hasSuffix("-hk") || tag.hasSuffix("-mo"))) { return "zh-hk" }
             let base = String(tag.split(separator: "-").first ?? "")
             let code = aliases[base] ?? base
             if codes.contains(code) { return code }

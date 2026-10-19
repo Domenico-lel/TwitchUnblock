@@ -26,62 +26,239 @@ enum TVPlayback: Identifiable, Hashable {
     }
 }
 
+/// Page d'une chaîne ouverte depuis le lecteur (bouton « Chaîne »).
+struct TVChannelRoute: Identifiable {
+    let login: String
+    var id: String { login }
+}
+
+/// Chaîne hors ligne choisie avec le bouton Play : sa page s'ouvre et sa
+/// dernière vidéo (ou son live, s'il a commencé entre-temps) se lance.
+struct TVAutoplay: Hashable {
+    let login: String
+}
+
 struct TVRootView: View {
     @EnvironmentObject private var session: TVSession
+    @Environment(\.scenePhase) private var scenePhase
     @State private var playing: TVPlayback?
+    /// « Chaîne » touché dans le lecteur : sa page s'ouvre une fois celui-ci fermé.
+    @State private var pendingChannel: String?
+    @State private var channelPage: TVChannelRoute?
+
+    enum Tab: Hashable { case following, top, categories, search, account }
+    @State private var tab = Tab.following
 
     var body: some View {
-        TabView {
+        // Choisir de nouveau « Suivies » ne passe pas par la sélection sur
+        // tvOS (elle suit le focus) : l'onglet se recharge quand le focus
+        // revient de la barre des onglets (TVFollowingTab.cardFocus).
+        TabView(selection: $tab) {
             TVFollowingTab(play: play)
                 .tabItem { Text(session.t("tv_following")) }
+                .tag(Tab.following)
             TVTopTab(play: play)
                 .tabItem { Text(session.t("tv_top")) }
+                .tag(Tab.top)
             TVCategoriesTab(play: play)
                 .tabItem { Text(session.t("tv_categories")) }
+                .tag(Tab.categories)
             TVSearchTab(play: play)
                 .tabItem { Text(session.t("tv_search")) }
+                .tag(Tab.search)
             TVAccountTab()
                 .tabItem { Text(session.t("tv_account")) }
+                .tag(Tab.account)
         }
-        .fullScreenCover(item: $playing) { item in
-            TVPlayerScreen(item: item)
+        .fullScreenCover(item: $playing, onDismiss: openPendingChannel) { item in
+            TVPlayerScreen(item: item, onChannel: { login in
+                pendingChannel = login
+                playing = nil
+            })
+            .environmentObject(session)
+        }
+        .fullScreenCover(item: $channelPage) { route in
+            TVChannelCover(login: route.login)
                 .environmentObject(session)
         }
-        .task { await session.restore() }
+        .task {
+            await session.restore()
+            await TVUsage.ping(token: session.token, lang: session.lang)
+        }
+        // Retour dans l'app : signal d'utilisation (/stats), un par heure au plus.
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            Task { await TVUsage.ping(token: session.token, lang: session.lang) }
+        }
     }
 
     private func play(_ item: TVPlayback) { playing = item }
+
+    private func openPendingChannel() {
+        guard let login = pendingChannel else { return }
+        pendingChannel = nil
+        channelPage = TVChannelRoute(login: login)
+    }
+}
+
+/// Page d'une chaîne par-dessus les onglets, avec son propre lecteur : une
+/// vidéo lancée d'ici s'ouvre au-dessus, Menu ramène à la page puis aux onglets.
+struct TVChannelCover: View {
+    let login: String
+    @EnvironmentObject private var session: TVSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var playing: TVPlayback?
+
+    var body: some View {
+        NavigationStack {
+            TVChannelView(login: login, play: { playing = $0 })
+                // Sur la page elle-même (pas une page ouverte depuis) : Menu
+                // referme et rend les onglets.
+                .onExitCommand { dismiss() }
+                .navigationDestination(for: String.self) { other in
+                    TVChannelView(login: other, play: { playing = $0 })
+                }
+        }
+        // Fond opaque : la feuille plein écran de tvOS n'en a pas, l'onglet
+        // d'où l'on venait se voyait à travers la page.
+        .background(Color.black.ignoresSafeArea())
+        // « Chaîne » dans ce lecteur-ci : la page est juste dessous.
+        .fullScreenCover(item: $playing) { item in
+            TVPlayerScreen(item: item, onChannel: { _ in playing = nil })
+                .environmentObject(session)
+        }
+    }
 }
 
 // MARK: – Suivies
 struct TVFollowingTab: View {
     let play: (TVPlayback) -> Void
     @EnvironmentObject private var session: TVSession
+    @Environment(\.scenePhase) private var scenePhase
+    /// Chargée une fois, la liste gardait des lives finis jusqu'au
+    /// redémarrage de l'app : relue au retour sur l'onglet ou dans l'app (au
+    /// bout d'une minute), et toutes les 2 minutes tant qu'elle est affichée.
+    @State private var lastLoad = Date.distantPast
+    @State private var visible = false
     @State private var streams: [TwitchStream] = []
+    /// Chaînes suivies hors ligne, dernier live le plus récent d'abord : leur
+    /// page s'ouvre pour voir leurs vidéos.
+    @State private var offline: [ChannelBrief] = []
     @State private var loading = false
     @State private var failed = false
+    @State private var path = NavigationPath()
+    /// Cartes de la liste qui ont le focus (0 : il est dans la barre des
+    /// onglets, ou sur une page ouverte d'ici), et depuis quand aucune.
+    @State private var focusedCards = 0
+    @State private var unfocusedSince = Date.distantPast
+    private let offlineColumns = Array(repeating: GridItem(.flexible(), spacing: 40), count: 6)
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 if session.token == nil {
                     TVMessage(text: session.t("tv_need_login"))
-                } else if streams.isEmpty {
-                    TVMessage(text: loading ? session.t("loading")
-                              : (failed ? session.t("tv_error") : session.t("tv_no_live")))
                 } else {
-                    TVStreamGrid(streams: streams, play: play)
+                    if streams.isEmpty {
+                        TVMessage(text: loading ? session.t("loading")
+                                  : (failed ? session.t("tv_error") : session.t("tv_no_live")))
+                    } else {
+                        TVStreamGrid(streams: streams, play: play)
+                    }
+                    if !offline.isEmpty { offlineSection }
                 }
+            }
+            .environment(\.tvCardFocusReport, cardFocus)
+            .navigationDestination(for: String.self) { login in
+                TVChannelView(login: login, play: play)
+            }
+            .navigationDestination(for: TVAutoplay.self) { target in
+                TVChannelView(login: target.login, play: play, autoplay: true)
             }
         }
         // Relancé quand le compte arrive (connexion, ou lancement).
         .task(id: session.user?.id) { await load() }
+        .onAppear {
+            visible = true
+            if Date().timeIntervalSince(lastLoad) > 60 { Task { await load() } }
+        }
+        .onDisappear { visible = false }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active, visible, Date().timeIntervalSince(lastLoad) > 60 { Task { await load() } }
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 120 * 1_000_000_000)
+                if visible, scenePhase == .active { await load() }
+            }
+        }
+    }
+
+    private var offlineSection: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text(session.t("tv_offline_channels")).font(.title3.bold())
+            LazyVGrid(columns: offlineColumns, spacing: 48) {
+                ForEach(offline) { c in
+                    NavigationLink(value: c.login) {
+                        VStack(spacing: 12) {
+                            TVAvatar(url: c.avatar, size: 120)
+                            Text(c.name).font(.callout.bold()).lineLimit(1)
+                            if let end = c.lastEnd {
+                                Text(lastLive(end)).font(.caption2).foregroundColor(.secondary).lineLimit(1)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .tvCard()
+                    // Play : la page de la chaîne, et sa dernière vidéo lancée.
+                    .onPlayPauseCommand { path.append(TVAutoplay(login: c.login)) }
+                }
+            }
+        }
+        .padding(.horizontal, 64)
+        .padding(.vertical, 32)
+    }
+
+    /// Le focus revient sur la liste depuis la barre des onglets (Sélection
+    /// sur « Suivies » déjà affiché), ou depuis une page ouverte d'ici : la
+    /// liste est relue, au plus toutes les 10 s. Passer d'une carte à
+    /// l'autre ne laisse aucune carte sans focus plus d'un instant.
+    private func cardFocus(_ on: Bool) {
+        if on {
+            if focusedCards == 0, Date().timeIntervalSince(unfocusedSince) > 0.4,
+               Date().timeIntervalSince(lastLoad) > 10 {
+                Task { await load() }
+            }
+            focusedCards += 1
+        } else {
+            focusedCards = max(0, focusedCards - 1)
+            if focusedCards == 0 { unfocusedSince = Date() }
+        }
+    }
+
+    /// « il y a 2 j » : fin du dernier live, dans la langue de l'app.
+    private func lastLive(_ date: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.locale = Locale(identifier: session.lang.rawValue)
+        f.unitsStyle = .short
+        return f.localizedString(for: date, relativeTo: Date())
     }
 
     private func load() async {
-        guard let uid = session.user?.id, let token = session.token else { streams = []; return }
+        // Compte pas chargé au lancement (Apple TV sortie de veille avant le
+        // Wi-Fi) : relu ici. Sinon « Aucun live » restait toute la séance ;
+        // toujours absent, c'est une erreur (Réessayer en revenant), pas un vide.
+        if session.user == nil, session.token != nil { await session.restore() }
+        guard let uid = session.user?.id, let token = session.token else {
+            streams = []; offline = []
+            failed = session.token != nil
+            return
+        }
+        // Deux demandes rapprochées (retour sur l'onglet, puis minuterie) : une seule.
+        guard !loading else { return }
+        lastLoad = Date()
         loading = true
-        defer { loading = false }
         if let list = try? await getFollowedStreams(token: token, userId: uid) {
             streams = list
             failed = false
@@ -93,6 +270,21 @@ struct TVFollowingTab: View {
         } else {
             failed = true
         }
+        loading = false
+        // Ensuite : les lives s'affichent sans attendre la liste hors ligne.
+        await loadOffline(userId: uid)
+    }
+
+    /// Tous les suivis (Helix, les 200 plus récents) sauf ceux en live, avec
+    /// avatar et fin du dernier live (GQL public). Échec : la liste reste.
+    private func loadOffline(userId: String) async {
+        guard let token = session.token,
+              let logins = await getFollowedLogins(token: token, userId: userId) else { return }
+        let live = Set(streams.map { $0.userLogin.lowercased() })
+        let rest = Array(logins.map { $0.lowercased() }.filter { !live.contains($0) }.prefix(200))
+        guard let infos = await getChannelsGQL(logins: rest) else { return }
+        offline = infos.filter { $0.stream == nil }
+            .sorted { ($0.lastEnd ?? .distantPast) > ($1.lastEnd ?? .distantPast) }
     }
 }
 
@@ -258,9 +450,10 @@ struct TVSearchTab: View {
     @EnvironmentObject private var session: TVSession
     @State private var query = ""
     @State private var results: [AutocompleteSuggestion] = []
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(results) { r in
@@ -279,6 +472,12 @@ struct TVSearchTab: View {
                             }
                             .padding(12)
                         }
+                        // Play : le live s'il y en a un, sinon la page de la
+                        // chaîne et sa dernière vidéo.
+                        .onPlayPauseCommand {
+                            if r.viewers != nil { play(.live(login: r.login, name: r.name)) }
+                            else { path.append(TVAutoplay(login: r.login)) }
+                        }
                     }
                 }
                 .padding(.horizontal, 64)
@@ -286,6 +485,9 @@ struct TVSearchTab: View {
             .searchable(text: $query, prompt: session.t("tv_search_prompt"))
             .navigationDestination(for: String.self) { login in
                 TVChannelView(login: login, play: play)
+            }
+            .navigationDestination(for: TVAutoplay.self) { target in
+                TVChannelView(login: target.login, play: play, autoplay: true)
             }
         }
         .task(id: query) {
@@ -303,11 +505,15 @@ struct TVSearchTab: View {
 struct TVChannelView: View {
     let login: String
     let play: (TVPlayback) -> Void
+    /// Ouverte avec le bouton Play : le live, sinon la dernière vidéo, se
+    /// lance une fois chargée (une seule fois : pas à chaque retour du lecteur).
+    var autoplay = false
     @EnvironmentObject private var session: TVSession
     @State private var videos: [VodData] = []
     @State private var avatar: String?
     @State private var live: TwitchStream?
     @State private var loaded = false
+    @State private var autoplayed = false
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 48), count: 4)
 
     var body: some View {
@@ -328,8 +534,13 @@ struct TVChannelView: View {
                         } label: {
                             Label(session.t("tv_watch_live"), systemImage: "play.fill")
                         }
+                        .onPlayPauseCommand { play(.live(login: login, name: live.userName)) }
                     }
                 }
+                // Toute la largeur reçoit le focus : « Regarder le live », à
+                // droite, n'était atteint en montant que depuis la vidéo
+                // juste dessous (tvOS cherche ce qui est au-dessus).
+                .focusSection()
 
                 Text(session.t("tv_videos")).font(.title3.bold())
                 if videos.isEmpty {
@@ -343,6 +554,7 @@ struct TVChannelView: View {
                                 TVVodCard(video: v)
                             }
                             .tvCard()
+                            .onPlayPauseCommand { play(.vod(id: v.id, title: v.title, channel: login)) }
                         }
                     }
                 }
@@ -359,6 +571,15 @@ struct TVChannelView: View {
             avatar = result.avatar
             live = streams?.first
             loaded = true
+            if autoplay, !autoplayed {
+                autoplayed = true
+                if let live {
+                    play(.live(login: login, name: live.userName))
+                } else if let last = videos.first {
+                    // Vidéos du plus récent au plus ancien : le dernier live.
+                    play(.vod(id: last.id, title: last.title, channel: login))
+                }
+            }
         }
     }
 }
@@ -366,9 +587,9 @@ struct TVChannelView: View {
 // MARK: – Compte et réglages
 struct TVAccountTab: View {
     @EnvironmentObject private var session: TVSession
-    @State private var code: TVSession.DeviceCode?
-    @State private var failed = false
-    @State private var loginTask: Task<Void, Never>?
+    @ObservedObject private var appLogger = AppLogger.shared
+    /// Signal d'utilisation pour /stats (TVUsage) : coupé, le serveur oublie tout.
+    @AppStorage(TVUsage.enabledKey) private var shareUsage = true
 
     var body: some View {
         ScrollView {
@@ -386,13 +607,13 @@ struct TVAccountTab: View {
                     // Toute la largeur : en remontant depuis « Langue », le
                     // focus trouve ce bouton puis la barre des onglets.
                     .focusSection()
-                } else if let code {
+                } else if let code = session.pendingCode {
                     loginPanel(code)
                 } else {
                     VStack(alignment: .leading, spacing: 24) {
                         Text(session.t("tv_login_intro")).font(.title3)
-                        Button(session.t("tv_login")) { startLogin() }
-                        if failed {
+                        Button(session.t("tv_login")) { session.startLogin() }
+                        if session.loginFailed {
                             Text(session.t("tv_login_expired")).foregroundColor(Color.tWarning)
                         }
                     }
@@ -415,6 +636,10 @@ struct TVAccountTab: View {
                                          : pref == "audio" ? session.t("tv_audio") : "\(pref)p")
                                 },
                                 selection: $session.qualityPref)
+                    TVChoiceRow(title: session.t("tv_chat_default"),
+                                options: [("on", session.t("tv_chat_on")), ("off", session.t("tv_chat_off"))],
+                                selection: Binding(get: { session.tvChat ? "on" : "off" },
+                                                   set: { session.tvChat = $0 == "on" }))
                     TVChoiceRow(title: session.t("tv_chat_side"),
                                 options: TVChatLayout.Side.allCases.map { ($0.rawValue, session.t("tv_chat_\($0.rawValue)")) },
                                 selection: Binding(get: { session.chatLayout.side.rawValue },
@@ -424,24 +649,65 @@ struct TVAccountTab: View {
                                 selection: Binding(get: { session.chatLayout.height.rawValue },
                                                    set: { session.chatLayout.height = TVChatLayout.Height(rawValue: $0) ?? .full }))
                     Text(session.t("tv_chat_layout_hint")).foregroundColor(.secondary)
-                    if !session.channelChatLayouts.isEmpty {
-                        Button("\(session.t("tv_chat_forget")) (\(session.channelChatLayouts.count))") {
+                    if session.channelsWithOwnChat > 0 {
+                        Button("\(session.t("tv_chat_forget")) (\(session.channelsWithOwnChat))") {
                             session.forgetChannelChatLayouts()
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .focusSection()
                     }
+                    TVChoiceRow(title: session.t("usage_share"),
+                                options: [("on", session.t("tv_on")), ("off", session.t("tv_off"))],
+                                selection: Binding(get: { shareUsage ? "on" : "off" }, set: { value in
+                                    let on = value == "on"
+                                    guard on != shareUsage else { return }
+                                    shareUsage = on
+                                    let token = session.token, lang = session.lang
+                                    Task {
+                                        if on { await TVUsage.ping(token: token, lang: lang) }
+                                        else { await TVUsage.forget(token: token) }
+                                    }
+                                }))
+                    Text(session.t("tv_usage_sub")).foregroundColor(.secondary)
                 }
 
                 hiddenSection
+
+                logsSection
             }
             .padding(64)
         }
-        .onDisappear {
-            loginTask?.cancel()
-            loginTask = nil
-            code = nil
+        // L'attente du code n'est plus annulée en quittant l'onglet (TVSession).
+    }
+
+    /// Erreurs et alertes récentes du journal (gardé entre les lancements) :
+    /// l'Apple TV n'avait aucun moyen de les voir pour décrire un problème.
+    @ViewBuilder private var logsSection: some View {
+        let recent = Array(appLogger.logs.filter { $0.level == .error || $0.level == .warn }.prefix(30))
+        VStack(alignment: .leading, spacing: 24) {
+            Text(session.t("tv_logs_title")).font(.title3.bold())
+            if recent.isEmpty {
+                Text(session.t("tv_logs_empty")).foregroundColor(.secondary)
+            } else {
+                ForEach(recent) { e in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(e.timestamp) · \(e.category)\(e.repeats > 1 ? " ×\(e.repeats)" : "")")
+                            .font(.caption)
+                            .foregroundColor(e.level == .error ? .red : .orange)
+                        Text(LogTranslator.translate(e.message, session.lang)).font(.callout)
+                        if let d = e.detail {
+                            Text(LogTranslator.translate(d, session.lang))
+                                .font(.caption2).foregroundColor(.secondary).lineLimit(3)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    // Lignes atteignables à la télécommande : la liste défile.
+                    .focusable()
+                }
+                Button(session.t("logs_clear")) { appLogger.clear() }
+            }
         }
+        .focusSection()
     }
 
     /// Chaînes et catégories masquées : un bouton par élément pour le
@@ -480,18 +746,6 @@ struct TVAccountTab: View {
         }
     }
 
-    private func startLogin() {
-        failed = false
-        loginTask?.cancel()
-        loginTask = Task {
-            guard let c = await session.requestCode() else { failed = true; return }
-            code = c
-            let ok = await session.waitForApproval(c)
-            code = nil
-            if !ok && !Task.isCancelled { failed = true }
-        }
-    }
-
     private func loginPanel(_ c: TVSession.DeviceCode) -> some View {
         HStack(alignment: .center, spacing: 80) {
             if let qr = tvQRCode(c.verificationURL) {
@@ -513,6 +767,9 @@ struct TVAccountTab: View {
                     ProgressView()
                     Text(session.t("tv_login_waiting")).foregroundColor(.secondary)
                 }
+                // L'attente ne s'arrête plus en changeant d'onglet : on peut
+                // l'abandonner ici.
+                Button(session.t("cancel")) { session.cancelLogin() }
             }
         }
     }
@@ -586,6 +843,8 @@ struct TVStreamGrid: View {
                     TVStreamCard(stream: s)
                 }
                 .tvCard()
+                // Bouton Play de la télécommande : comme Sélection.
+                .onPlayPauseCommand { play(.live(login: s.userLogin, name: s.userName)) }
                 .contextMenu {
                     if hideable {
                         Button(role: .destructive) {
@@ -709,16 +968,31 @@ struct TVThumbnail: View {
     }
 }
 
+/// Focus d'une carte, signalé à l'écran qui veut savoir quand la
+/// télécommande revient sur ses cartes (Suivies : rechargement).
+private struct TVCardFocusReportKey: EnvironmentKey {
+    static let defaultValue: ((Bool) -> Void)? = nil
+}
+
+extension EnvironmentValues {
+    var tvCardFocusReport: ((Bool) -> Void)? {
+        get { self[TVCardFocusReportKey.self] }
+        set { self[TVCardFocusReportKey.self] = newValue }
+    }
+}
+
 /// Carte à la télécommande (style « card » de tvOS) : celle qui a le focus
 /// grandit et passe devant ses voisines, au lieu de glisser dessous.
 private struct TVCardFocus: ViewModifier {
     @FocusState private var focused: Bool
+    @Environment(\.tvCardFocusReport) private var report
 
     func body(content: Content) -> some View {
         content
             .buttonStyle(.card)
             .focused($focused)
             .zIndex(focused ? 1 : 0)
+            .onChange(of: focused) { on in report?(on) }
     }
 }
 

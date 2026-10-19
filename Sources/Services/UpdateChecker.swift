@@ -72,23 +72,28 @@ final class UpdateChecker: ObservableObject {
         Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "") ?? 0
     }
 
+    /// Issue d'une vérification : « Rechercher une mise à jour » affichait
+    /// « À jour » hors ligne (un échec ne se distinguait pas).
+    enum Outcome { case upToDate, available, failed, skipped }
+
     /// `atLaunch` : au lancement, on vérifie toujours et on reprévient même si
     /// « Plus tard » a été choisi lors d'un lancement précédent.
-    func checkIfDue(force: Bool = false, atLaunch: Bool = false) async {
+    @discardableResult
+    func checkIfDue(force: Bool = false, atLaunch: Bool = false) async -> Outcome {
         let force = force || atLaunch
         if atLaunch { UserDefaults.standard.removeObject(forKey: dismissedKey) }
         let ud = UserDefaults.standard
         let last = ud.double(forKey: lastCheckKey)
-        guard force || Date().timeIntervalSince1970 - last > minInterval else { return }
+        guard force || Date().timeIntervalSince1970 - last > minInterval else { return .skipped }
         // Build local (Xcode) : pas de numéro fiable, rien à comparer.
-        guard Self.installedBuild > 1 else { return }
+        guard Self.installedBuild > 1 else { return .failed }
 
         guard let versions = await Self.fetchVersions(),
               let latest = versions.first,
-              let buildStr = latest["buildVersion"] as? String, let build = Int(buildStr) else { return }
+              let buildStr = latest["buildVersion"] as? String, let build = Int(buildStr) else { return .failed }
         ud.set(Date().timeIntervalSince1970, forKey: lastCheckKey)
 
-        guard build > Self.installedBuild else { available = nil; return }
+        guard build > Self.installedBuild else { available = nil; return .upToDate }
         // Notes de tous les builds plus récents que celui installé.
         let changes = versions.compactMap(Changes.init(entry:)).filter { $0.build > Self.installedBuild }
         let update = Update(version: latest["version"] as? String ?? "build \(build)",
@@ -98,6 +103,7 @@ final class UpdateChecker: ObservableObject {
         available = update
         logger.info("UPDATE", "Mise à jour disponible", "\(Self.installedVersion) → \(update.version)")
         if ud.integer(forKey: dismissedKey) < build { showAlert = true }
+        return .available
     }
 
     /// Historique de la source (`versions`, du plus récent au plus ancien).

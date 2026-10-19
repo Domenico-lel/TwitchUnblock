@@ -50,6 +50,7 @@ enum Backup {
             "topLang": store.topLang.map { siteTopLang($0) as Any } ?? NSNull(),
             "homeList": store.homeListLayout,
             "showRecent": store.showRecentChannels,
+            "ios_showDiscoverTab": store.showDiscoverTab,
             "timestamps": store.chatTimestamps,
             "keepDeleted": store.chatShowDeleted,
             "loadHistory": store.chatLoadRecent,
@@ -74,6 +75,8 @@ enum Backup {
             "ios_lowLatency": store.lowLatency,
             "ios_subAdFree": store.subAdFree,
             "ios_immersivePlayer": store.immersivePlayer,
+            "ios_liveActivity": store.liveActivity,
+            "ios_cellularQuality": store.cellularQuality,
             "ios_fillScreen": store.fillScreen,
             "ios_landscapeChat": store.landscapeChat.rawValue,
             "ios_chatFontSize": store.chatFontSize,
@@ -82,6 +85,7 @@ enum Backup {
             "ios_chatEmoteScale": store.chatEmoteScale,
             "ios_chatWidthRatio": store.chatWidthRatio,
             "ios_chatAutocomplete": store.chatAutocomplete,
+            "ios_chatKeyboardSuggestions": store.chatKeyboardSuggestions,
             // Pour les versions d'avant « qualityPref » (audio seul retenu).
             "ios_preferAudioOnly": store.preferAudioOnly,
         ]
@@ -161,6 +165,7 @@ enum Backup {
         }
         bool("homeList") { store.homeListLayout = $0 }
         bool("showRecent") { store.showRecentChannels = $0 }
+        bool("ios_showDiscoverTab") { store.showDiscoverTab = $0 }
         bool("timestamps") { store.chatTimestamps = $0 }
         bool("keepDeleted") { store.chatShowDeleted = $0 }
         bool("loadHistory") { store.chatLoadRecent = $0 }
@@ -184,6 +189,8 @@ enum Backup {
         bool("ios_lowLatency") { store.lowLatency = $0 }
         bool("ios_subAdFree") { store.subAdFree = $0 }
         bool("ios_immersivePlayer") { store.immersivePlayer = $0 }
+        bool("ios_liveActivity") { store.liveActivity = $0 }
+        if let q = s["ios_cellularQuality"] as? String, kCellularQualityPrefs.contains(q) { store.cellularQuality = q }
         bool("ios_fillScreen") { store.fillScreen = $0 }
         if let v = s["ios_landscapeChat"] as? String, let lc = LandscapeChat(rawValue: v) { store.landscapeChat = lc }
         size("ios_chatFontSize", AppStore.chatFontRange) { store.chatFontSize = $0 }
@@ -192,6 +199,7 @@ enum Backup {
         size("ios_chatEmoteScale", AppStore.chatScaleRange) { store.chatEmoteScale = $0 }
         size("ios_chatWidthRatio", AppStore.chatWidthRange) { store.chatWidthRatio = $0 }
         bool("ios_chatAutocomplete") { store.chatAutocomplete = $0 }
+        bool("ios_chatKeyboardSuggestions") { store.chatKeyboardSuggestions = $0 }
         // Qualité préférée (nom du site). « auto » du site devient « source »
         // tant que l'app n'a pas d'Auto ; une hauteur hors paliers retenue
         // par le lecteur du site (« 1440 », « 936 ») prend le palier le plus

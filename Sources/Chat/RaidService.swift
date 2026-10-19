@@ -13,6 +13,7 @@ final class RaidService: ObservableObject {
     struct RaidInfo { let id: String; let targetLogin: String; let targetName: String; let viewers: Int }
 
     @Published var raid: RaidInfo? = nil     // raid en préparation (bannière)
+    private var expiry: Task<Void, Never>?
     @Published var joinTarget: String? = nil // login à rejoindre (raid parti)
 
     private var ws: URLSessionWebSocketTask?
@@ -58,6 +59,7 @@ final class RaidService: ObservableObject {
         reconnectTask?.cancel(); reconnectTask = nil
         ws?.cancel(with: .normalClosure, reason: nil); ws = nil
         raid = nil; joinTarget = nil
+        expiry?.cancel(); expiry = nil
         retryDelay = 2
     }
 
@@ -152,6 +154,15 @@ final class RaidService: ObservableObject {
                     targetName: (r["target_display_name"] as? String) ?? login,
                     viewers: (r["viewer_count"] as? Int) ?? 0)
                 logger.success("RAID", "🚀 Raid en préparation", "→ \(login) (\(raid?.viewers ?? 0) spect.)")
+                // Un raid part en 90 s au plus : sans nouvelles 3 min plus tard
+                // (message perdu), le bandeau restait affiché pour de bon.
+                let id = raid?.id
+                expiry?.cancel()
+                expiry = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 180_000_000_000)
+                    guard let self, !Task.isCancelled, self.raid?.id == id else { return }
+                    self.raid = nil
+                }
             }
         case "raid_go_v2", "raid_go":
             let login = (r?["target_login"] as? String) ?? raid?.targetLogin

@@ -23,6 +23,8 @@ struct MessageSheet: View {
     @State private var avatar: String? = nil
     @State private var replying = false
     @State private var replyText = ""
+    /// Raison d'une réponse non partie (trop longue, chat pas connecté).
+    @State private var replyFailed: String? = nil
     @State private var copied = false
     /// Emote ou badge touché dans le fil : sa fiche, par-dessus cette feuille.
     @State private var infoItem: ChatInfoItem? = nil
@@ -97,7 +99,7 @@ struct MessageSheet: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if canSend {
+            if canSend, !message.id.hasPrefix("local-") {
                 actionButton(icon: "arrowshape.turn.up.left.fill") {
                     replying = true
                     focused  = true
@@ -116,7 +118,8 @@ struct MessageSheet: View {
                 }
                 if canSend {
                     Button {
-                        onMention(message.displayName)
+                        onMention(message.displayName.lowercased() == message.userName.lowercased()
+                                  ? message.displayName : message.userName)
                         dismiss()
                     } label: {
                         Label(store.t("mention_user"), systemImage: "at")
@@ -191,7 +194,7 @@ struct MessageSheet: View {
                       text: $replyText)
                 .focused($focused)
                 .foregroundColor(.tText)
-                .autocorrectionDisabled()
+                .autocorrectionDisabled(!store.chatKeyboardSuggestions)
                 .padding(.horizontal, TSpace.md).padding(.vertical, 10)
                 .background(Color.tSurface).cornerRadius(TRadius.control)
                 .overlay(RoundedRectangle(cornerRadius: TRadius.control)
@@ -209,6 +212,13 @@ struct MessageSheet: View {
         }
         .padding(.horizontal, TSpace.md).padding(.vertical, TSpace.sm)
         .background(Color.tCard)
+        if let replyFailed {
+            Text(replyFailed)
+                .font(.tMeta).foregroundColor(.tDanger)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, TSpace.md).padding(.bottom, TSpace.sm)
+                .background(Color.tCard)
+        }
     }
 
     /// Texte brut du message, emotes remplacées par leur nom (c'est ce qu'on
@@ -220,19 +230,27 @@ struct MessageSheet: View {
             case .emote(let e):   return e.name
             case .mention(let m): return "@\(m)"
             case .link(let l):    return l
+            case .gif(let u, _):  return u
             }
         }.joined(separator: " ")
     }
 
+    /// La feuille ne se ferme que si la réponse est partie : trop longue
+    /// (500 caractères) ou chat pas connecté, elle était perdue sans un mot.
     private func sendReply() {
         let t = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        replyText = ""
+        replyFailed = nil
         Task {
-            await chat.sendMessage(t, replyParentId: message.id,
-                                   replyRootId: rootId,
-                                   replyToName: message.displayName)
+            let sent = await chat.sendMessage(t, replyParentId: message.id,
+                                              replyRootId: rootId,
+                                              replyToName: message.displayName)
+            if sent {
+                replyText = ""
+                dismiss()
+            } else {
+                replyFailed = store.t(t.count > 500 ? "reply_too_long" : "reply_not_connected")
+            }
         }
-        dismiss()
     }
 }

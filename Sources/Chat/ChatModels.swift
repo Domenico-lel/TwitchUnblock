@@ -158,6 +158,9 @@ enum MessageToken: Identifiable {
     case emote(TwitchEmote)
     case mention(String)
     case link(String)
+    /// GIF du clavier GIF de Twitch (tag `gifs`) : adresse GIPHY telle que
+    /// reçue, et le texte qu'il remplace (« [… GIF by …] »).
+    case gif(url: String, alt: String)
 
     var id: String {
         switch self {
@@ -165,6 +168,7 @@ enum MessageToken: Identifiable {
         case .emote(let e):   return "e_\(e.id)"
         case .mention(let m): return "m_\(m)"
         case .link(let l):    return "l_\(l.hashValue)"
+        case .gif(let u, _):  return "g_\(u.hashValue)"
         }
     }
 }
@@ -279,6 +283,7 @@ struct IRCMessage {
     var color: String { tags["color"] ?? "" }
     var badgesRaw: String { tags["badges"] ?? "" }
     var emotesRaw: String { tags["emotes"] ?? "" }
+    var gifsRaw: String { tags["gifs"] ?? "" }
     var isReply: Bool { tags["reply-parent-msg-id"] != nil }
     var replyUser: String? { tags["reply-parent-display-name"] }
     var replyParentMsgId: String? { tags["reply-parent-msg-id"] }
@@ -286,9 +291,6 @@ struct IRCMessage {
 
     /// Corps du message auquel on répond (Twitch échappe les espaces en \s)
     var replyParentBody: String? {
-        tags["reply-parent-msg-body"]?
-            .replacingOccurrences(of: "\\s", with: " ")
-            .replacingOccurrences(of: "\\:", with: ";")
-            .replacingOccurrences(of: "\\\\", with: "\\")
+        tags["reply-parent-msg-body"].map(ircUnescape)
     }
 }

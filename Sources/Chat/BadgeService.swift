@@ -49,7 +49,19 @@ actor BadgeService {
     func loadChannel(channelId: String, token: String?) async {
         guard !loadedChannels.contains(channelId) else { return }
         loadedChannels.insert(channelId)
+        await fetchChannel(channelId: channelId, token: token)
+        // Ni Helix ni GQL n'ont répondu (coupure, erreur 5xx) : nouvel essai
+        // 30 s plus tard, une fois — les badges d'abonné manquaient jusqu'au
+        // redémarrage de l'app.
+        if channel[channelId] == nil {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                await self?.fetchChannel(channelId: channelId, token: token)
+            }
+        }
+    }
 
+    private func fetchChannel(channelId: String, token: String?) async {
         guard let token, !token.isEmpty, let url = URL(string:
             "https://api.twitch.tv/helix/chat/badges?broadcaster_id=\(channelId)"
         ) else { await loadChannelPublic(channelId: channelId); return }
@@ -129,8 +141,10 @@ actor BadgeService {
         if let cid = channelId, let url = channel[cid]?[setId]?[version] { return url }
         if let url = global[setId]?[version] { return url }
 
-        // CDN statique : fonctionne pour broadcaster, moderator, staff, vip…
-        return "https://static-cdn.jtvnw.net/badges/v1/\(setId)/\(version)/2"
+        // Inconnu : rien. L'adresse « badges/v1/<set>/<version>/2 » n'existe
+        // pas chez Twitch (les badges ont des identifiants) : une requête
+        // perdue (404) par badge, à chaque ligne du chat.
+        return ""
     }
 
     /// Titre et description d'un badge (canal d'abord), nil si inconnu.

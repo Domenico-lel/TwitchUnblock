@@ -41,6 +41,9 @@ if [ ! -d "$DD_APP_PATH" ]; then
   exit 1
 fi
 
+# Restes d'un essai précédent (raté) : l'app était copiée dans l'ancienne,
+# et le zip mettait à jour l'ancienne IPA au lieu d'en faire une neuve.
+rm -rf "$TARGET_APP" Payload "$APPLICATION_NAME.ipa"
 cp -r "$DD_APP_PATH" "$TARGET_APP"
 
 # Icônes au choix (assets/icons/loose, faites par make_icons.py) : fichiers
@@ -77,10 +80,10 @@ if [ -e "$TARGET_APP/embedded.mobileprovision" ]; then
 fi
 
 echo "--- Packaging IPA ---"
-mkdir Payload
+mkdir -p Payload
 cp -r "$APPLICATION_NAME.app" "Payload/$APPLICATION_NAME.app"
 strip "Payload/$APPLICATION_NAME.app/$APPLICATION_NAME"
-zip -vr "$APPLICATION_NAME.ipa" Payload
+zip -qry "$APPLICATION_NAME.ipa" Payload
 
 rm -rf "$APPLICATION_NAME.app"
 rm -rf Payload

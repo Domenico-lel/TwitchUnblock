@@ -189,8 +189,12 @@ func accountPlaybackToken(login: String, webToken: String,
     let body: [String: Any] = ["query": q, "variables": ["l": login]]
     var res = await accountGQL(body, webToken: webToken, integrity: nil)
     if res.status == 401 || res.status == 403 { return .expired }
-    if gqlErrorText(res.json).lowercased().contains("integrity"), let integrity,
-       let it = await integrity() {
+    // Intégrité demandée : le jeton gardé, puis, s'il est refusé à son tour,
+    // un second appel — qui en donne un neuf (voir dropsIntegrity).
+    var tries = 0
+    while tries < 2, gqlErrorText(res.json).lowercased().contains("integrity"), let integrity,
+          let it = await integrity() {
+        tries += 1
         res = await accountGQL(body, webToken: webToken, integrity: it)
         if res.status == 401 || res.status == 403 { return .expired }
     }
@@ -375,8 +379,15 @@ private func workerJSON(_ path: String) async -> [String: Any]? {
 func playableMutedLinks(_ links: QualityLinks) async -> QualityLinks {
     guard let source = links["Source"] ?? links.values.first, let url = URL(string: source),
           let (data, _) = try? await URLSession.shared.data(from: url),
-          String(decoding: data, as: UTF8.self).contains("-unmuted.ts"),
-          let base = await workingProxyBase(for: source) else { return links }
+          String(decoding: data, as: UTF8.self).contains("-unmuted.ts") else { return links }
+    // Aucun Worker ne répond (quota du jour, panne) : réécrites sur l'appareil
+    // (VodUnmuteLoader, sans chercher le son d'origine). Les playlists brutes
+    // arrêtaient la lecture au premier passage coupé ; AirPlay, qui ne lit pas
+    // ces adresses, retombe alors sur le CDN.
+    guard let base = await workingProxyBase(for: source) else {
+        logger.warn("M3U8", "Passages coupés : aucun Worker, playlists réécrites sur l'appareil")
+        return VodUnmuteLoader.wrapMuted(links)
+    }
     var out: QualityLinks = [:]
     for (label, link) in links { out[label] = proxiedPlaylistURL(link, base: base) }
     logger.info("M3U8", "Passages coupés : playlists réécrites par le Worker", base)
@@ -454,7 +465,9 @@ func getM3U8(vodId: String) async -> M3U8Data {
     if let json = await workerJSON("/api/get-m3u8?id=\(vodId)&proxy=false"),
        let links = json["links"] as? QualityLinks, !links.isEmpty {
         logger.success("M3U8", "[3/3] ✅ Worker \(links.count) qualités")
-        return M3U8Data(links: links, error: nil, variants: workerVariants(json["variants"]))
+        // Playlists du CDN (proxy=false) : mêmes passages coupés que le storyboard.
+        return M3U8Data(links: await playableMutedLinks(links), error: nil,
+                        variants: workerVariants(json["variants"]))
     }
 
     logger.error("M3U8", "❌ Toutes les tentatives ont échoué pour VOD \(vodId)")
@@ -1026,12 +1039,18 @@ func fetchTwitchUser(token: String) async throws -> TwitchUser? {
     var req = URLRequest(url: url)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-    guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return nil }
+    guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
+        logger.warn("HELIX", "Lecture du compte : pas de réponse (réseau)", nil)
+        return nil
+    }
     let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
     if status == 401 { throw URLError(.userAuthenticationRequired) }
     guard status == 200,
           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let arr  = json["data"] as? [[String: Any]], let u = arr.first else { return nil }
+          let arr  = json["data"] as? [[String: Any]], let u = arr.first else {
+        logger.warn("HELIX", "Lecture du compte refusée", "HTTP \(status)")
+        return nil
+    }
     logger.success("HELIX", "Connecté en tant que \"\(u["display_name"] as? String ?? "")\"")
     return TwitchUser(
         id: u["id"] as? String ?? "",
@@ -1505,7 +1524,26 @@ let kQualityPrefs = ["source", "1080", "720", "480", "360", "160", "audio"]
 func isSourceQuality(_ key: String) -> Bool { ["source", "chunked"].contains(key.lowercased()) }
 func isAudioQuality(_ key: String) -> Bool { key.lowercased().contains("audio") }
 /// « Auto » : la liste maîtresse, que seuls les liens du Worker proposent.
-private func isAutoQuality(_ key: String) -> Bool { key.lowercased() == "auto" }
+func isAutoQuality(_ key: String) -> Bool { key.lowercased() == "auto" }
+
+/// Choix possibles pour les données mobiles : « auto » (la liste adaptative :
+/// la qualité suit le débit), « same » (comme en Wi-Fi), ou un palier.
+let kCellularQualityPrefs = ["auto", "same", "720", "480", "360", "audio"]
+
+/// Qualité à lancer selon la connexion. En données mobiles, la préférence
+/// des données mobiles : « auto » prend la liste adaptative si le flux en a
+/// une, sinon 720p au plus — une qualité fixe trop haute pour le débit
+/// gelait l'image (calages en boucle) pendant que le chat continuait.
+func launchQualityKey(_ keys: [String], pref: String, cellularPref: String, cellular: Bool,
+                      variants: [String: VariantInfo] = [:]) -> String {
+    guard cellular, cellularPref != "same" else { return preferredQualityKey(keys, pref: pref, variants: variants) }
+    if cellularPref == "auto" {
+        if pref == "audio" { return preferredQualityKey(keys, pref: pref, variants: variants) }
+        if let auto = keys.first(where: isAutoQuality) { return auto }
+        return preferredQualityKey(keys, pref: String(min(Int(pref) ?? 720, 720)), variants: variants)
+    }
+    return preferredQualityKey(keys, pref: cellularPref, variants: variants)
+}
 
 /// Hauteur écrite dans le nom : « 720p60 » → 720, « 1920x1080 » → 1080.
 private func nameHeight(_ key: String) -> Int? {
@@ -1696,8 +1734,21 @@ private func gqlRequest(_ query: String, _ variables: [String: Any]) async -> [S
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = body
     guard let (data, _) = try? await URLSession.shared.data(for: req),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        logger.warn("GQL", "Requête sans réponse (réseau)", String(query.prefix(60)))
+        return nil
+    }
+    if json["errors"] != nil { logger.warn("GQL", "Requête refusée", gqlErrorSummary(json)) }
     return json["data"] as? [String: Any]
+}
+
+/// Messages d'erreur d'une réponse GQL (codes compris), pour le journal.
+func gqlErrorSummary(_ json: [String: Any]?) -> String {
+    guard let errors = json?["errors"] as? [[String: Any]], !errors.isEmpty else { return "réponse inattendue" }
+    return errors.prefix(3).map { e in
+        let code = (e["extensions"] as? [String: Any])?["code"] as? String
+        return [e["message"] as? String, code].compactMap { $0 }.joined(separator: " · ")
+    }.joined(separator: " | ")
 }
 
 // MARK: – Pages suivantes des listes (Client-ID Android)
@@ -1852,9 +1903,15 @@ func getFollowedLogins(token: String, userId: String) async -> [String]? {
         var req = URLRequest(url: url)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-        guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
+            logger.warn("HELIX", "Chaînes suivies : pas de réponse (réseau)", "page \(logins.count / 100 + 1)")
+            return nil
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            logger.warn("HELIX", "Chaînes suivies refusées", "HTTP \(status)")
+            return nil
+        }
         for f in json["data"] as? [[String: Any]] ?? [] {
             if let l = f["broadcaster_login"] as? String { logins.append(l) }
         }
@@ -1879,9 +1936,15 @@ func getFollowedCategoriesGQL(webToken: String) async -> [TwitchCategory]? {
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = body
     guard let (data, _) = try? await URLSession.shared.data(for: req),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let nodes = (((json["data"] as? [String: Any])?["currentUser"] as? [String: Any])?["followedGames"] as? [String: Any])?["nodes"] as? [[String: Any]]
-    else { return nil }
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        logger.warn("GQL", "Catégories suivies : pas de réponse (réseau)", nil)
+        return nil
+    }
+    guard let nodes = (((json["data"] as? [String: Any])?["currentUser"] as? [String: Any])?["followedGames"] as? [String: Any])?["nodes"] as? [[String: Any]]
+    else {
+        logger.warn("GQL", "Catégories suivies refusées", gqlErrorSummary(json))
+        return nil
+    }
     return nodes.compactMap { n in
         guard let id = n["id"] as? String else { return nil }
         return TwitchCategory(id: id, name: n["displayName"] as? String ?? "",
@@ -2040,6 +2103,56 @@ func getClipsPage(login: String, period: String,
     return (list, gqlNextCursor(clips), more, false)
 }
 
+/// Clips les plus vus des dernières 24 h de quelques chaînes (fil Découvrir) :
+/// deux par chaîne au plus, les plus vus d'abord. Twitch refuse plus de 15
+/// alias par requête (« root field aliases limit ») : par paquets de 10,
+/// envoyés en même temps. nil si aucun paquet n'a eu de réponse.
+func getTopClipsGQL(logins: [String]) async -> [FeedClip]? {
+    let list = Array(logins.prefix(20))
+    guard !list.isEmpty else { return [] }
+    let chunks = stride(from: 0, to: list.count, by: 10).map { Array(list[$0..<min($0 + 10, list.count)]) }
+    var results: [[FeedClip]?] = Array(repeating: nil, count: chunks.count)
+    await withTaskGroup(of: (Int, [FeedClip]?).self) { group in
+        for (i, chunk) in chunks.enumerated() {
+            group.addTask { (i, await topClipsChunk(chunk)) }
+        }
+        for await (i, r) in group { results[i] = r }
+    }
+    let answered = results.compactMap { $0 }
+    guard !answered.isEmpty else { return nil }
+    return answered.flatMap { $0 }.sorted { $0.viewCount > $1.viewCount }
+}
+
+/// Un paquet de getTopClipsGQL : une requête, un alias par chaîne.
+private func topClipsChunk(_ list: [String]) async -> [FeedClip]? {
+    let fields = "id login displayName profileImageURL(width: 70) "
+        + "clips(first: 2, criteria: { period: LAST_DAY, sort: VIEWS_DESC }) { edges { node { "
+        + "slug title viewCount durationSeconds thumbnailURL(width: 480, height: 272) game { displayName } } } }"
+    let q = "query { " + list.enumerated().map { i, login in
+        "c\(i): user(login: \"\(gqlStr(login.lowercased()))\") { \(fields) }"
+    }.joined(separator: " ") + " }"
+    guard let d = await gqlRequest(q, [:]) else { return nil }
+    var out: [FeedClip] = []
+    for i in list.indices {
+        guard let u = d["c\(i)"] as? [String: Any], let login = u["login"] as? String else { continue }
+        let edges = (u["clips"] as? [String: Any])?["edges"] as? [[String: Any]] ?? []
+        for e in edges {
+            guard let n = e["node"] as? [String: Any], let slug = n["slug"] as? String else { continue }
+            out.append(FeedClip(id: slug,
+                                title: n["title"] as? String ?? "",
+                                thumbnailURL: n["thumbnailURL"] as? String ?? "",
+                                viewCount: n["viewCount"] as? Int ?? 0,
+                                durationSeconds: n["durationSeconds"] as? Int ?? 0,
+                                game: (n["game"] as? [String: Any])?["displayName"] as? String ?? "",
+                                login: login,
+                                channelId: u["id"] as? String ?? "",
+                                channelName: u["displayName"] as? String ?? login,
+                                avatar: u["profileImageURL"] as? String))
+        }
+    }
+    return out
+}
+
 /// Suite des clips avec le compte (Helix) : même période, même ordre (vues
 /// décroissantes). Helix repart du début : ses 100 premiers recouvrent ceux
 /// de GQL, l'appelant écarte les doublons. `cursor` nil = depuis le début.
@@ -2058,9 +2171,15 @@ func getClipsHelix(token: String, broadcasterId: String, period: String,
     var req = URLRequest(url: url)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue(kHelixClientID, forHTTPHeaderField: "Client-Id")
-    guard let (data, resp) = try? await URLSession.shared.data(for: req),
-          (resp as? HTTPURLResponse)?.statusCode == 200,
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], nil) }
+    guard let (data, resp) = try? await URLSession.shared.data(for: req) else {
+        logger.warn("HELIX", "Clips : pas de réponse (réseau)", nil)
+        return ([], nil)
+    }
+    let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+    guard status == 200, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        logger.warn("HELIX", "Clips refusés", "HTTP \(status)")
+        return ([], nil)
+    }
     let arr = json["data"] as? [[String: Any]] ?? []
     let next = (json["pagination"] as? [String: Any])?["cursor"] as? String
     let list: [ClipData] = arr.compactMap { c in

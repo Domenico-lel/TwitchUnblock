@@ -202,15 +202,21 @@ final class DropsService: ObservableObject {
             return
         }
         var claimedSome = false
+        var unclaimed: [TimedDrop] = []
         for c in campaigns where !c.needsAccountLink {
             for d in c.drops where d.canClaim {
                 guard !ended(token) else { return }
                 if await claim(d, token: token) {
                     claimedSome = true
                     notify(d, claimed: true)
+                } else {
+                    unclaimed.append(d)
                 }
             }
         }
+        // Réclamation ratée (jeton d'intégrité bloqué…) : on prévient quand
+        // même qu'un drop attend — il restait non réclamé sans un mot.
+        for d in unclaimed { notify(d, claimed: false) }
         // Une réclamation se vérifie dans l'inventaire (Twitch peut répondre
         // « éligible » sans rien donner à un compte non lié).
         if claimedSome { await refresh(token: token, autoClaim: false) }
@@ -301,6 +307,9 @@ final class DropsService: ObservableObject {
         integrityToken = token
         return fresh
     }
+
+    /// Jeton d'intégrité refusé : le prochain sera neuf.
+    func invalidateIntegrity() { integrity = nil }
 
     /// Le même, en types simples : pour accountPlaybackToken (TwitchAPI.swift,
     /// compilé aussi pour l'Apple TV, qui n'a pas TwitchWebGQL).
@@ -487,6 +496,10 @@ final class DropsHeartbeat: ObservableObject {
         var lastCheck = Date.distantPast
         var lastInventory = Date()
         var failures = 0
+        /// 404 de suite sur la playlist (fin du live à confirmer).
+        var offlineHits = 0
+        /// Refus de suite (401/403) des segments.
+        var refusals = 0
         while !Task.isCancelled {
             // Campagnes de la chaîne : au départ, puis toutes les 10 min (des
             // drops peuvent commencer en cours de live).
@@ -494,38 +507,65 @@ final class DropsHeartbeat: ObservableObject {
                 lastCheck = Date()
                 let found = await Self.dropsChannelId(login)
                 guard !Task.isCancelled else { return }   // arrêté entre-temps
-                if let id = found {
+                switch found {
+                case .found(let id):
                     channelId = id
                     status = .active(login)
                     logger.success("DROPS", "Drops sur \(login)",
                                    pollSegments ? "progression : HEAD des segments toutes les 10 s"
                                                 : "progression : flux du lecteur (direct par le compte)")
-                } else {
+                case .absent:
                     status = .noDrops(login)
                     logger.debug("DROPS", "Pas de drops sur \(login)", nil)
+                case .unknown:
+                    // Pas de réponse (passage 4G/Wi-Fi…) : rien n'est conclu,
+                    // nouvel essai dans 45 s (« pas de drops » coûtait 10 min).
+                    lastCheck = Date().addingTimeInterval(-600 + 45)
+                    logger.debug("DROPS", "Drops de \(login) : pas de réponse", "nouvel essai dans 45 s")
                 }
             }
             if channelId != nil {
                 if pollSegments, variant == nil {
                     variant = await Self.lowestVariant(login: login, token: token)
                     guard !Task.isCancelled else { return }
-                    failures = variant == nil ? failures + 1 : 0
+                    if variant == nil, offlineHits > 0 {
+                        // Liste maîtresse absente aussi, juste après un 404 :
+                        // la fin du live se confirme.
+                        offlineHits += 1
+                    } else {
+                        failures = variant == nil ? failures + 1 : 0
+                    }
                     // Plusieurs échecs de suite : jeton anonyme ou session web
-                    // expirée, à signaler sur la page Drops.
-                    status = failures > 2 ? .failing(login) : .active(login)
+                    // expirée (ou refus répétés), à signaler sur la page Drops.
+                    status = failures > 2 || refusals > 2 ? .failing(login) : .active(login)
                 }
                 if let v = variant {
                     switch await poll(v) {
-                    case .ok: break
-                    case .expired: variant = nil   // jeton expiré (~20 min) : un neuf
+                    case .ok:
+                        offlineHits = 0
+                        refusals = 0
+                    case .expired:
+                        // Jeton expiré (~20 min) : un neuf. Refusé encore et
+                        // encore (live réservé aux abonnés, pays) : « en échec »
+                        // et une minute d'attente — un jeton toutes les 10 s,
+                        // avec « tes drops progressent », sinon.
+                        variant = nil
+                        refusals += 1
                     case .offline:
-                        logger.info("DROPS", "Live terminé", login)
-                        channelId = nil
-                        status = .idle
-                        // Plus rien à relancer si la session web change.
-                        if !Task.isCancelled { runningLogin = nil; runningToken = nil }
-                        return
+                        // Un 404 seul : variante changée (streamer reconnecté) ou
+                        // coupure de quelques secondes — la liste maîtresse est
+                        // relue. Trois de suite : le live est fini.
+                        variant = nil
+                        offlineHits += 1
                     }
+                }
+                if offlineHits >= 3 {
+                    logger.info("DROPS", "Live terminé", login)
+                    channelId = nil
+                    status = .idle
+                    // Plus rien à relancer si la session web change.
+                    if !Task.isCancelled { runningLogin = nil; runningToken = nil }
+                    return
                 }
                 // Inventaire toutes les 5 min : drops terminés réclamés si l'option est active.
                 if Date().timeIntervalSince(lastInventory) > 300 {
@@ -534,7 +574,7 @@ final class DropsHeartbeat: ObservableObject {
                     await DropsService.shared.refresh(token: token, autoClaim: auto)
                 }
             }
-            let pause: UInt64 = channelId == nil || !pollSegments ? 60 : (failures > 2 ? 60 : 10)
+            let pause: UInt64 = channelId == nil || !pollSegments ? 60 : (failures > 2 || refusals > 2 ? 60 : 10)
             try? await Task.sleep(nanoseconds: pause * 1_000_000_000)
         }
     }
@@ -564,15 +604,18 @@ final class DropsHeartbeat: ObservableObject {
         return .ok
     }
 
-    /// Identifiant de la chaîne si elle a des campagnes de drops, nil sinon.
-    private static func dropsChannelId(_ login: String) async -> String? {
+    private enum ChannelDrops { case found(String), absent, unknown }
+
+    /// Drops de la chaîne : trouvés (son identifiant), aucun, ou inconnu (pas
+    /// de réponse — une panne passait pour « pas de drops »).
+    private static func dropsChannelId(_ login: String) async -> ChannelDrops {
         let q = "query($l: String!) { user(login: $l) { id channel { viewerDropCampaigns { id } } } }"
         guard let json = await webGQL(["query": q, "variables": ["l": login]], token: nil),
-              let user = (json["data"] as? [String: Any])?["user"] as? [String: Any],
-              let id = user["id"] as? String,
+              let data = json["data"] as? [String: Any] else { return .unknown }
+        guard let user = data["user"] as? [String: Any], let id = user["id"] as? String,
               let list = (user["channel"] as? [String: Any])?["viewerDropCampaigns"] as? [Any],
-              !list.isEmpty else { return nil }
-        return id
+              !list.isEmpty else { return .absent }
+        return .found(id)
     }
 
     /// Plus petite qualité du live, lue avec un jeton de lecture lié au compte.
@@ -617,5 +660,16 @@ final class DropsHeartbeat: ObservableObject {
 /// Jeton d'intégrité de la session web `webToken`, à donner à
 /// accountPlaybackToken (WebView éphémère si besoin, voir DropsService).
 func dropsIntegrity(for webToken: String) -> () async -> (token: String, deviceId: String)? {
-    { await DropsService.shared.integrityPair(token: webToken) }
+    // Une closure par demande : rappelée par le même accountPlaybackToken, le
+    // jeton gardé vient d'être refusé (autre compte, invalidé chez Twitch) —
+    // on l'oublie et on en génère un neuf, au lieu de resservir le même
+    // jusqu'à son expiration (la progression des drops restait bloquée).
+    let calls = IntegrityCalls()
+    return {
+        calls.count += 1
+        if calls.count > 1 { await DropsService.shared.invalidateIntegrity() }
+        return await DropsService.shared.integrityPair(token: webToken)
+    }
 }
+
+private final class IntegrityCalls { var count = 0 }

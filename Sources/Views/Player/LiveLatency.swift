@@ -44,9 +44,19 @@ struct LiveLatencyController {
     /// Distance au bord jouable qu'il faut garder pour rester au-dessus de
     /// `minDelay`, d'après le dernier retard mesuré (0 tant qu'on ne sait pas).
     private(set) var floorBehind: Double = 0
+    /// Avance gagnée après des calages (s) : chaque calage recule la cible de
+    /// 4 s (16 au plus), rendues 2 s par 2 s après 2 min sans calage. Tenu à
+    /// quelques secondes du bord, un débit qui faiblit (données mobiles)
+    /// vidait la mémoire tampon, et le retour au bord la revidait : l'image
+    /// gelait en boucle pendant que le chat continuait.
+    private(set) var stallMargin: Double = 0
+    private var lastStallAt = Date.distantPast
+    /// Avance de plus en données mobiles : leur débit varie.
+    static var cellularMargin: Double { NetworkStatus.shared.isCellular ? 4 : 0 }
 
     /// Nouvelle source (qualité, direct ↔ enregistrement, audio spatial) : on
-    /// repart de zéro, recalage du démarrage compris.
+    /// repart de zéro, recalage du démarrage compris. L'avance gagnée sur les
+    /// calages reste : le débit, lui, n'a pas changé.
     mutating func reset() {
         lastSeek = .distantPast
         lastFloorSeek = .distantPast
@@ -55,6 +65,14 @@ struct LiveLatencyController {
         holdingBehind = false
         driftSince = nil
         floorBehind = 0
+    }
+
+    /// Calage du direct en cours : plus d'avance sur le bord, et pas de retour
+    /// au bord tant que la dérive vient de là.
+    mutating func noteStall() {
+        stallMargin = min(16, stallMargin + 4)
+        lastStallAt = Date()
+        driftSince = nil
     }
 
     /// Recul voulu (vrai) ou retour près du bord (faux).
@@ -75,7 +93,9 @@ struct LiveLatencyController {
 
     /// Recul à garder sur le bord jouable : la cible du flux, ou plus pour
     /// tenir le plancher du retard affiché.
-    func minBehind(for item: AVPlayerItem) -> Double { max(Self.target(for: item), floorBehind) }
+    func minBehind(for item: AVPlayerItem) -> Double {
+        max(Self.target(for: item), floorBehind) + stallMargin + Self.cellularMargin
+    }
 
     /// Après une coupure de `since` secondes (appel, Siri), le moment lu est-il
     /// encore dans la fenêtre du direct (les 30 dernières secondes chez
@@ -112,6 +132,11 @@ struct LiveLatencyController {
         // Une vitesse restée au-dessus de 1 (ancienne tenue du direct) est
         // remise à la normale ; on n'en pose jamais d'autre.
         if player.rate > 1.01 { player.rate = 1 }
+        // Plus de calage depuis 2 min : l'avance gagnée se rend peu à peu.
+        if stallMargin > 0, Date().timeIntervalSince(lastStallAt) > 120 {
+            stallMargin = max(0, stallMargin - 2)
+            lastStallAt = Date()
+        }
 
         // 1. Plancher. Une horloge en retard donne un retard affiché inférieur
         //    à la distance au bord : le calcul n'a alors plus de sens.
@@ -292,4 +317,13 @@ struct LiveSyncEstimator {
         let freshest = sorted[sorted.count / 10]
         return max(0, latency - freshest)
     }
+}
+
+extension Notification.Name {
+    /// Appui sur la latence affichée : le lecteur ouvert revient au bord du
+    /// direct par un saut, sans recharger le flux (comme le bouton « Direct »).
+    static let tuGoLive = Notification.Name("TUGoLive")
+    /// Calages répétés (objet : « immersive » ou « native », le lecteur) : la
+    /// qualité est trop haute pour le débit, on la baisse.
+    static let tuPlaybackStalling = Notification.Name("TUPlaybackStalling")
 }

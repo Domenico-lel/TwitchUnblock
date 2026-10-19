@@ -24,7 +24,7 @@ struct ChannelAboutView: View {
                 .font(.tSection).foregroundColor(.tText)
             if let f = about.followers {
                 (Text(formatViewers(f)).bold().foregroundColor(.tText)
-                 + Text(" \(store.t("followers"))").foregroundColor(.tMuted))
+                 + Text(" \(store.tn("followers", f, abbreviated: f >= 1000))").foregroundColor(.tMuted))
                     .font(.tMeta)
             }
             if about.description.isEmpty {

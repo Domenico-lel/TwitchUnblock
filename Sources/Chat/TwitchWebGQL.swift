@@ -27,15 +27,29 @@ final class TwitchWebGQL: NSObject, WKNavigationDelegate {
 
     private var webView: WKWebView?
     private var loadCont: CheckedContinuation<Bool, Never>?
-    private var minting = false
+    /// Génération en cours : le garde-fou de 15 s d'une génération finie ne
+    /// doit pas interrompre la suivante (nouvel essai en chaîne des drops).
+    private var loadGen = 0
+    /// Génération en cours, partagée par tous les appelants.
+    private var minting: Task<Integrity?, Never>?
 
     struct Integrity { let token: String; let deviceId: String; let expiry: Date }
 
     /// Génère un token Client-Integrity via une WebView éphémère, puis se détruit.
+    /// Une seule génération à la fois : un second appelant (points, drops,
+    /// suivre, pari) attend la même au lieu de recevoir nil — le coffre, le
+    /// pari ou le suivi échouaient pendant les 5 à 20 s de la première.
     func mintIntegrity(token: String) async -> Integrity? {
-        guard !minting else { return nil }   // une seule génération à la fois
-        minting = true
-        defer { minting = false; teardown() }
+        if let running = minting { return await running.value }
+        let task = Task { await self.mintNow(token: token) }
+        minting = task
+        let result = await task.value
+        minting = nil
+        return result
+    }
+
+    private func mintNow(token: String) async -> Integrity? {
+        defer { teardown() }
 
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()   // partage les cookies (auth-token, unique_id)
@@ -58,8 +72,11 @@ final class TwitchWebGQL: NSObject, WKNavigationDelegate {
         // Attend le chargement (avec garde-fou 15s).
         let loaded = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
             loadCont = c
+            loadGen += 1
+            let gen = loadGen
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-                self?.loadCont?.resume(returning: false); self?.loadCont = nil
+                guard let self, self.loadGen == gen else { return }
+                self.loadCont?.resume(returning: false); self.loadCont = nil
             }
         }
         guard loaded else { logger.warn("INTEGRITY", "Page twitch.tv non chargée", nil); return nil }

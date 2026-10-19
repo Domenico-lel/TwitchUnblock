@@ -20,11 +20,19 @@ on:
       - 'buildipa.sh'
       - 'assets/icon.png'
       - 'assets/icons/**'
-      - '.github/workflows/build.yml'
+      # Pas build.yml : une modification de la CI seule publiait un « nouveau »
+      # build sous le même numéro de version (lancement à la main pour l'essayer).
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# Un build à la fois par branche : deux builds rapprochés réécrivaient la même
+# source en même temps. Celui en cours finit ; un build en attente est remplacé
+# par le plus récent (qui contient tout).
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-ios:
@@ -157,6 +165,10 @@ jobs:
           if [ "${{ steps.vars.outputs.channel }}" = "test" ]; then
             plutil -replace CFBundleIdentifier -string "com.mxfia19.TwitchUnblock.test" "$APP_PLIST"
             plutil -replace CFBundleDisplayName -string "TU Test" "$APP_PLIST"
+            # Son propre schéma de lien : avec le même que l'app, iOS ouvrait
+            # l'une ou l'autre au toucher d'une notification ntfy.
+            plutil -replace CFBundleURLTypes.0.CFBundleURLSchemes.0 -string "twitchunblock-test" "$APP_PLIST"
+            plutil -replace CFBundleURLTypes.0.CFBundleURLName -string "com.mxfia19.TwitchUnblock.test" "$APP_PLIST"
           else
             plutil -replace CFBundleIdentifier -string "com.mxfia19.TwitchUnblock" "$APP_PLIST"
           fi
@@ -276,26 +288,43 @@ jobs:
           BUILD: ${{ github.run_number }}
           DATE: ${{ steps.vars.outputs.date }}
           URL: ${{ steps.vars.outputs.download_url }}
+          COMMIT: ${{ github.sha }}
         run: |
           IPA_SIZE=$(stat -f%z build/TwitchUnblock.ipa || echo "1048576")
-          # Chaque build ajoute une entrée en tête de l'historique (30 gardées),
-          # avec ses notes : l'app cumule celles des builds qu'il lui manque.
+          export ENTRY="$RUNNER_TEMP/source-entry.json"
+          # L'entrée de ce build (notes, taille, commit), préparée une fois.
           IPA_SIZE=$IPA_SIZE python3 - <<'PY'
-          import json, os, subprocess
-          src = os.environ['SOURCE']
-          d = json.load(open(src))
-          a = d['apps'][0]
-          entry = {
+          import json, os
+          json.dump({
               'version': os.environ['VERSION'], 'buildVersion': os.environ['BUILD'],
               'date': os.environ['DATE'], 'localizedDescription': open('changelog.md').read().strip(),
               'downloadURL': os.environ['URL'], 'size': int(os.environ['IPA_SIZE']),
-              'commit': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
-          }
-          a.update(version=entry['version'], versionDate=entry['date'], downloadURL=entry['downloadURL'], size=entry['size'])
-          a['versions'] = [entry] + [v for v in a.get('versions', []) if v.get('buildVersion') != entry['buildVersion']][:29]
+              'commit': os.environ['COMMIT'],
+          }, open(os.environ['ENTRY'], 'w'), ensure_ascii=False)
+          PY
+          # Chaque build ajoute son entrée à l'historique (30 gardées, de la plus
+          # récente à la plus ancienne), avec ses notes : l'app cumule celles des
+          # builds qu'il lui manque. La tête de la source reste le build le plus
+          # récent, même quand un build plus ancien finit après lui.
+          apply() {
+            python3 - <<'PY'
+          import json, os
+          def build(v):
+              try: return int(v.get('buildVersion') or 0)
+              except ValueError: return 0
+          src = os.environ['SOURCE']
+          entry = json.load(open(os.environ['ENTRY']))
+          d = json.load(open(src))
+          a = d['apps'][0]
+          versions = [entry] + [v for v in a.get('versions', []) if v.get('buildVersion') != entry['buildVersion']]
+          a['versions'] = sorted(versions, key=build, reverse=True)[:30]
+          top = a['versions'][0]
+          a.update(version=top['version'], versionDate=top['date'], downloadURL=top['downloadURL'], size=top['size'])
           json.dump(d, open(src, 'w'), indent=2, ensure_ascii=False)
           open(src, 'a').write('\n')
           PY
+          }
+          apply
 
           # Seules master (apps.json) et la branche de test (apps-test.json)
           # publient leur source ; un build lancé à la main ailleurs s'arrête là.
@@ -307,12 +336,54 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$SOURCE"
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: bump version to ${{ steps.vars.outputs.version }} [skip ci]"
-            # Le push peut être rejeté si la branche a bougé pendant le build :
-            # on rejoue par-dessus au lieu d'échouer sur une course bénigne.
-            git push origin HEAD:$BRANCH || {
-              git pull --rebase origin $BRANCH && git push origin HEAD:$BRANCH
-            }
+          # Le push peut être rejeté si la branche a bougé pendant le build
+          # (source de l'Apple TV, autre build…) : on repart de la branche à
+          # jour et on y remet l'entrée. Un rebase butait sur les lignes de tête
+          # que l'autre build venait de changer, et la source restait en arrière.
+          for attempt in 1 2 3 4; do
+            git add "$SOURCE"
+            git diff --cached --quiet && exit 0
+            git commit -q -m "chore: bump version to $VERSION [skip ci]"
+            git push origin HEAD:$BRANCH && exit 0
+            sleep $((attempt * 5))
+            git fetch -q origin $BRANCH
+            git reset -q --hard FETCH_HEAD
+            apply
+          done
+          exit 1
+
+      - name: Mirror test build into the main source (apps.json on master)
+        # Une seule source pour tout : apps.json (master) liste aussi « TU Test »
+        # (installée à côté de l'app normale), pour essayer les builds de test
+        # sans ajouter apps-test.json. Seul ce fichier change sur master, avec
+        # [skip ci] ; l'app normale lit toujours apps[0], qui reste la sienne.
+        if: github.ref_name == 'test-17d298'
+        continue-on-error: true
+        run: |
+          git fetch origin master
+          # Seulement une fois cette étape passée en prod (présente sur master) :
+          # avant le « push sur main », la source publique ne bouge pas.
+          if ! git show origin/master:.github/workflows/build.yml | grep -q "Mirror test build into the main source"; then
+            echo "Étape pas encore sur master : apps.json laissé tel quel."
+            exit 0
           fi
+          git worktree add --detach ../main-source origin/master
+          python3 - <<'PY'
+          import json
+          test = json.load(open('apps-test.json'))['apps'][0]
+          path = '../main-source/apps.json'
+          d = json.load(open(path))
+          entry = dict(test, versions=test.get('versions', [])[:10])
+          d['apps'] = [a for a in d['apps'] if a.get('bundleIdentifier') != entry['bundleIdentifier']] + [entry]
+          json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
+          open(path, 'a').write('\n')
+          PY
+          cd ../main-source
+          git add apps.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore: TU Test ${{ steps.vars.outputs.version }} dans la source principale [skip ci]"
+          for attempt in 1 2 3; do
+            git push origin HEAD:master && exit 0
+            git pull --rebase origin master || exit 1
+          done
+          exit 1

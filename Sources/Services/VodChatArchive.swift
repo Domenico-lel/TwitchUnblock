@@ -65,7 +65,9 @@ enum VodChatArchive {
         var position = Int(max(0, from))
         var pages = 0
         var failures = 0
-        while pages < 4000, Double(position) <= to {
+        // Plafond de sécurité (la boucle s'arrête sur la fin voulue) : à 4 000
+        // pages, le chat des très longs directs était tronqué en silence.
+        while pages < 20_000, Double(position) <= to {
             if Task.isCancelled { return nil }
             guard let page = await VodChatService.commentsPage(videoId: vodId, offset: position) else {
                 // Coupure passagère : deux nouveaux essais (2 s, puis 4 s)
@@ -96,7 +98,11 @@ enum VodChatArchive {
         }
         comments.sort { $0.o < $1.o }
 
+        // Téléchargement supprimé pendant la mise en forme : rien n'est écrit
+        // (le dossier était recréé, invisible et jamais nettoyé).
+        guard !Task.isCancelled, FileManager.default.fileExists(atPath: folder.path) else { return nil }
         let images = await saveImages(of: comments, into: folder.appendingPathComponent(imagesFolder, isDirectory: true))
+        guard !Task.isCancelled, FileManager.default.fileExists(atPath: folder.path) else { return nil }
         let chat = OfflineChat(base: from, channelLogin: owner?.login ?? "", comments: comments, images: images)
         guard let data = try? JSONEncoder().encode(chat),
               (try? data.write(to: folder.appendingPathComponent(fileName), options: .atomic)) != nil else { return nil }
@@ -133,6 +139,7 @@ enum VodChatArchive {
                     case .mention(let m): tokens.append(.init(k: "m", v: m))
                     case .link(let l):    tokens.append(.init(k: "l", v: l))
                     case .emote(let e):   tokens.append(.init(k: "e", v: e.name, u: e.url, id: e.id, s: e.source.rawValue))
+                    case .gif(_, let alt): tokens.append(.init(k: "t", v: alt))
                     }
                 }
             }
@@ -152,7 +159,9 @@ enum VodChatArchive {
             for b in c.badges { if let u = b.u { urls.insert(u) } }
             for t in c.tokens where t.k == "e" { if let u = t.u { urls.insert(u) } }
         }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Sans dossiers intermédiaires : celui du téléchargement effacé n'est
+        // pas recréé.
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)
         let list = Array(urls)
         var saved: [String: String] = [:]
         await withTaskGroup(of: (String, String?).self) { group in

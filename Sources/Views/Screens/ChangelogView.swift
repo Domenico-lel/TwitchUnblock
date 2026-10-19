@@ -45,7 +45,8 @@ struct ChangelogList: View {
         let installed = UpdateChecker.installedBuild
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text(v.version)
+                // Deux builds de même version (test) : le numéro les distingue.
+                Text(versions.contains { $0.version == v.version && $0.build != v.build } ? "\(v.version) · build \(v.build)" : v.version)
                     .font(.system(size: 15, weight: .bold).monospacedDigit())
                     .foregroundColor(.tText)
                 // Build local (Xcode) : pas de numéro fiable, donc pas de repère.

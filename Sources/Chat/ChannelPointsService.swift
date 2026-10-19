@@ -19,7 +19,11 @@ struct ChannelReward: Identifiable, Equatable {
 // MARK: – Service
 @MainActor
 final class ChannelPointsService: ObservableObject {
-    @Published var balance: Int = 0
+    @Published var balance: Int = 0 { didSet { balanceKnown = true } }
+    /// Solde lu au moins une fois pour ce compte et cette chaîne. Inconnu
+    /// (sans session web, lecture ratée), toutes les récompenses passaient
+    /// pour « Insuff. » avec un solde de 0.
+    @Published private(set) var balanceKnown = false
     @Published var rewards: [ChannelReward] = []
     @Published var isLoading = false
     @Published var errorMsg: String? = nil
@@ -50,11 +54,15 @@ final class ChannelPointsService: ObservableObject {
     // MARK: – Anti-spam claim
     /// Coffres dont le claim a échoué → on ne réessaie pas en boucle (évite le spam).
     private var failedClaims: Set<String> = []
+    /// Échecs passagers par coffre (voir claimBonus).
+    private var claimAttempts: [String: Int] = [:]
+    private var isClaiming = false
 
     // MARK: – Client-Integrity (token minté via WebView éphémère, réutilisé ~1h en natif)
     private var integrityTok:    String? = nil
     private var integrityDevice: String  = ""
     private var integrityExpiry: Date    = .distantPast
+    private var integrityFor:    String  = ""
 
     /// Device-Id persistant (cohérence des requêtes GQL de lecture).
     private var deviceId: String {
@@ -75,11 +83,13 @@ final class ChannelPointsService: ObservableObject {
         // Avant le changement de chaîne : c'est la précédente qui s'arrête
         // (sa session de points se termine).
         stopPolling()
+        let gen = presenceGeneration
         self.channelLogin = channelLogin
         self.channelId    = channelId
         self.token        = token
         self.viewerId     = viewerId ?? ""
         needsWebLogin     = false
+        balanceKnown      = false
 
         isLoading = true; errorMsg = nil
         let start = Date()
@@ -91,6 +101,7 @@ final class ChannelPointsService: ObservableObject {
         // Le solde est privé → nécessite le token de session web (cookie auth-token).
         guard !token.isEmpty else {
             balance = 0; pendingClaimId = nil
+            balanceKnown = false
             needsWebLogin = true
             isLoading = false
             logger.info("POINTS", "Token web absent",
@@ -104,8 +115,10 @@ final class ChannelPointsService: ObservableObject {
         let b = await fetchBalance()
         let elapsed = String(format: "%.0f ms", Date().timeIntervalSince(start) * 1000)
 
-        balance        = b.balance
-        pendingClaimId = b.claimId
+        if let b {
+            balance        = b.balance
+            pendingClaimId = b.claimId
+        }
 
         logger.success("POINTS", "Chargement terminé (\(elapsed))",
                        "\(formatted(balance)) pts · \(rewards.count) récompenses"
@@ -114,12 +127,21 @@ final class ChannelPointsService: ObservableObject {
         if rewards.isEmpty {
             logger.info("POINTS", "Aucune récompense", "canal sans custom rewards")
         }
+        // Direct quitté pendant le chargement (stopPolling entre-temps) : rien
+        // n'est relancé (minuteries orphelines, présence pour la chaîne quittée).
+        guard gen == presenceGeneration else { isLoading = false; return }
         // On ne lance le polling et la présence que si le token web est valide.
         if !needsWebLogin {
             startPolling()
             startWatchPresence()
         }
         isLoading = false
+        // Coffre déjà là à l'ouverture du direct : les sondages l'ignoraient
+        // (il était déjà « en attente ») et il n'était jamais réclamé seul.
+        if autoClaim, pendingClaimId != nil {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await claimBonus()
+        }
     }
 
     // MARK: – Polling
@@ -153,7 +175,8 @@ final class ChannelPointsService: ObservableObject {
     // MARK: – Refresh balance (60s)
     private func refreshBalance() async {
         // Polling silencieux : on ne logge que les vrais changements (gains/pertes/coffre).
-        let b = await fetchBalance(quiet: true)
+        guard let b = await fetchBalance(quiet: true) else { return }
+        balanceKnown = true
         let delta = b.balance - balance
         if delta > 0 {
             logger.success("POINTS", "Points passifs gagnés",
@@ -167,6 +190,8 @@ final class ChannelPointsService: ObservableObject {
             logger.warn("POINTS", "Balance diminuée", "\(formatted(balance)) → \(formatted(b.balance))")
             balance = b.balance
         }
+        // Plus annoncé par Twitch (réclamé ailleurs, expiré) : plus affiché.
+        if b.claimId == nil, pendingClaimId != nil { pendingClaimId = nil }
         if pendingClaimId == nil, let cid = b.claimId, !failedClaims.contains(cid) {
             pendingClaimId = cid
             logger.success("POINTS", "🎁 Coffre détecté", "claimId: \(cid.prefix(8))…")
@@ -176,7 +201,12 @@ final class ChannelPointsService: ObservableObject {
 
     // MARK: – Check bonus (10s)
     private func checkForBonus() async {
-        guard pendingClaimId == nil else { return }
+        // Coffre resté affiché après un échec passager : nouvel essai ici
+        // (réclamation automatique), au plus 4 en tout pour ce coffre.
+        if let pending = pendingClaimId {
+            if autoClaim, claimAttempts[pending] != nil { await claimBonus() }
+            return
+        }
         let query = """
         { channel(name: "\(gqlStr(channelLogin))") {
             self { communityPoints { availableClaim { id } } }
@@ -315,8 +345,13 @@ final class ChannelPointsService: ObservableObject {
     // Hash de la persisted query `ClaimCommunityPoints` (capturé sur le client web).
     private static let claimQueryHash = "46aaeebe02c99afdf4fc97c7c0cba964124bf6b0af229395f1f6d1feed05b3d0"
 
-    func claimBonus() async {
-        guard let claimId = pendingClaimId else { return }
+    /// Une seule à la fois (minuteries et bouton pouvaient réclamer le même
+    /// coffre en parallèle). Rend true si Twitch l'a accordé.
+    @discardableResult
+    func claimBonus() async -> Bool {
+        guard !isClaiming, let claimId = pendingClaimId else { return false }
+        isClaiming = true
+        defer { isClaiming = false }
         logger.info("POINTS", "Réclamation du coffre…", "claimId: \(claimId.prefix(8))…")
         // Claim en NATIF avec le token integrity (persisted query identique au client web).
         let body: [[String: Any]] = [[
@@ -328,14 +363,19 @@ final class ChannelPointsService: ObservableObject {
               let data  = json["data"]                  as? [String: Any],
               let claim = data["claimCommunityPoints"]  as? [String: Any]
         else {
-            // Échec → on mémorise pour ne pas spammer ce coffre.
-            logger.error("POINTS", "Claim coffre échoué", nil)
-            failedClaims.insert(claimId); pendingClaimId = nil; return
+            // Échec passager (jeton, réseau, réponse inattendue) : le coffre
+            // reste affiché et réclamable ; il était perdu pour la séance au
+            // premier raté. Abandon au 4e essai.
+            let n = (claimAttempts[claimId] ?? 0) + 1
+            claimAttempts[claimId] = n
+            logger.error("POINTS", "Claim coffre échoué", "essai \(n)/4")
+            if n >= 4 { failedClaims.insert(claimId); pendingClaimId = nil }
+            return false
         }
 
         if let err = claim["error"] as? [String: Any], let code = err["code"] as? String {
             logger.error("POINTS", "Claim refusé", "code: \(code)")
-            failedClaims.insert(claimId); pendingClaimId = nil; return
+            failedClaims.insert(claimId); pendingClaimId = nil; return false
         }
         // Pas d'erreur → succès. Le selection-set de la persisted query ne renvoie pas
         // toujours `currentPoints` : on nettoie le coffre et on rafraîchit le solde.
@@ -353,6 +393,7 @@ final class ChannelPointsService: ObservableObject {
             logger.success("POINTS", "🎉 Coffre réclamé !", "rafraîchissement du solde…")
             await refreshBalance()
         }
+        return true
     }
 
     // MARK: – Redeem
@@ -360,30 +401,34 @@ final class ChannelPointsService: ObservableObject {
     func redeem(reward: ChannelReward, userInput: String? = nil) async -> Bool {
         logger.info("POINTS", "Tentative rachat « \(reward.title) »",
                     "coût: \(formatted(reward.cost)) · balance: \(formatted(balance))")
+        // Solde inconnu : on le dit, plutôt que « il manque N points ».
+        guard balanceKnown else {
+            errorMsg = t(needsWebLogin ? "points_connect_title" : "points_network_error"); return false
+        }
         guard balance >= reward.cost else {
             let missing = reward.cost - balance
             logger.warn("POINTS", "Solde insuffisant", "manque \(formatted(missing)) pts")
-            errorMsg = "\(t("points_missing")) \(formatted(missing)) \(t("points_unit"))"; return false
+            errorMsg = "\(t("points_missing")) \(formatted(missing)) \(translatePlural("points_unit", missing, lang))"; return false
         }
         // Le vrai champ GQL Twitch est `redeemCommunityPointsCustomReward`.
         // ⚠️ Anti-triche `PROPERTIES_MISMATCH` : cost + title + prompt doivent
         // correspondre EXACTEMENT à la config serveur de la récompense.
         //   - reward SANS saisie → prompt = celui de la récompense (null si vide)
         //   - reward AVEC saisie requise → prompt = texte saisi par le viewer
-        func gqlEscape(_ s: String) -> String {
-            s.replacingOccurrences(of: "\\", with: "\\\\")
-             .replacingOccurrences(of: "\"", with: "\\\"")
-             .replacingOccurrences(of: "\n", with: " ")
+        /// Chaîne GraphQL exacte, guillemets compris (mêmes échappements que
+        /// JSON : retours à la ligne, tabulations…). Une invite sur deux lignes
+        /// devenait une seule : refusée (PROPERTIES_MISMATCH) à chaque rachat.
+        func gqlLiteral(_ s: String) -> String {
+            (try? JSONSerialization.data(withJSONObject: s, options: [.fragmentsAllowed]))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "\"\""
         }
         let txId      = UUID().uuidString
-        let safeTitle = gqlEscape(reward.title)
         let promptText = reward.isUserInputRequired ? (userInput ?? "") : (reward.prompt ?? "")
-        let promptField = promptText.isEmpty ? "prompt: null"
-                                             : "prompt: \"\(gqlEscape(promptText))\""
+        let promptField = promptText.isEmpty ? "prompt: null" : "prompt: \(gqlLiteral(promptText))"
         let mutation = """
         mutation { redeemCommunityPointsCustomReward(input: {
             channelID: "\(gqlStr(channelId))", cost: \(reward.cost), \(promptField),
-            rewardID: "\(gqlStr(reward.id))", title: "\(safeTitle)", transactionID: "\(txId)"
+            rewardID: "\(gqlStr(reward.id))", title: \(gqlLiteral(reward.title)), transactionID: "\(txId)"
         }) { redemption { id } error { code } } }
         """
         // Rachat en NATIF avec le token integrity.
@@ -454,7 +499,10 @@ final class ChannelPointsService: ObservableObject {
     }
 
     // MARK: – Fetch balance (AVEC auth OAuth)
-    private func fetchBalance(quiet: Bool = false) async -> (balance: Int, claimId: String?) {
+    /// nil : Twitch n'a pas répondu (réseau, jeton) — l'appelant garde le solde
+    /// affiché. Un échec rendait 0 : le solde tombait à 0, puis le sondage
+    /// suivant affichait « +12000 » (tout le solde) comme un gain.
+    private func fetchBalance(quiet: Bool = false) async -> (balance: Int, claimId: String?)? {
         if !quiet { logger.debug("POINTS", "fetchBalance → channel(name:\(channelLogin)).self", nil) }
         let query = """
         { channel(name: "\(gqlStr(channelLogin))") {
@@ -467,7 +515,7 @@ final class ChannelPointsService: ObservableObject {
               let selfObj = channel["self"]                                 as? [String: Any]
         else {
             logger.warn("POINTS", "fetchBalance : parsing échoué", nil)
-            return (0, nil)
+            return nil
         }
         guard let pts = selfObj["communityPoints"] as? [String: Any] else {
             logger.info("POINTS", "communityPoints null — premier visionnage ou token incompatible",
@@ -542,7 +590,10 @@ final class ChannelPointsService: ObservableObject {
     // MARK: – Mutations integrity (claim / redeem) — token minté via WebView, requête native
     /// Garantit un token Client-Integrity valide (le génère via WebView éphémère si besoin).
     private func validIntegrity() async -> Bool {
-        if let _ = integrityTok, integrityExpiry > Date().addingTimeInterval(60), !integrityDevice.isEmpty {
+        // Lié au jeton web : après un changement de compte, celui de l'ancien
+        // compte faisait échouer le premier coffre ou rachat.
+        if let _ = integrityTok, integrityFor == token, integrityExpiry > Date().addingTimeInterval(60),
+           !integrityDevice.isEmpty {
             return true
         }
         logger.info("POINTS", "Renouvellement du token integrity…", "WebView éphémère ~quelques s")
@@ -553,12 +604,14 @@ final class ChannelPointsService: ObservableObject {
         integrityTok    = mint.token
         integrityDevice = mint.deviceId.isEmpty ? deviceId : mint.deviceId
         integrityExpiry = mint.expiry
+        integrityFor    = token
         return true
     }
 
     /// Exécute une mutation EN NATIF avec le token Client-Integrity (pas de WebView).
     /// `body` = l'objet JSON GQL (persisted query en tableau, ou {query: ...}).
-    private func nativeMutation(body: Any, tag: String) async -> [String: Any]? {
+    /// Jeton refusé : régénéré et requête renvoyée une fois (même transaction).
+    private func nativeMutation(body: Any, tag: String, retried: Bool = false) async -> [String: Any]? {
         guard await validIntegrity(), let it = integrityTok else { return nil }
         guard let url = URL(string: "https://gql.twitch.tv/gql") else { return nil }
         var req = URLRequest(url: url)
@@ -586,6 +639,7 @@ final class ChannelPointsService: ObservableObject {
             // Token integrity probablement expiré → on l'invalide pour re-mint au prochain coup.
             if msgs.lowercased().contains("integrity") {
                 integrityTok = nil; integrityExpiry = .distantPast
+                if !retried { return await nativeMutation(body: body, tag: tag, retried: true) }
             }
         } else {
             logger.debug("POINTS/GQL", "← \(tag) OK (natif)", nil)

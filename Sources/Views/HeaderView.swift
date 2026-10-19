@@ -13,10 +13,14 @@ struct HeaderView: View {
     let onOpenSettings: () -> Void
     /// Signaler un bug ou proposer une idée : en vue sur tous les onglets.
     var onFeedback: (() -> Void)? = nil
+    /// Marge de l'encoche ou de la Dynamic Island, suivie par MainTabView
+    /// (lue ici une fois, elle restait celle d'avant une rotation).
+    var safeTop: CGFloat = HeaderView.windowSafeTop
 
     @EnvironmentObject private var store: AppStore
 
-    private var safeTop: CGFloat {
+    /// Marge haute de la fenêtre, lue dans UIKit (repli : 47).
+    static var windowSafeTop: CGFloat {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first?.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets.top ?? 47

@@ -35,13 +35,35 @@ struct MyFeedback: Codable, Identifiable, Hashable {
     var lastFrom: String = "u"
     var seen: Double
     var thread: [FeedbackMessage]? = nil
+    /// Worker qui a reçu le retour (absent pour ceux d'avant) : la discussion
+    /// s'y relit, même après être passé par un Worker personnel — qui
+    /// répondait « effacé » pour ceux de l'officiel, et l'app les oubliait.
+    var base: String? = nil
+    /// Discussion fermée par le développeur, ou pleine (100 messages) : plus
+    /// de champ de réponse (l'envoi échouait sans dire pourquoi).
+    var blocked: Bool? = nil
+    var full: Bool? = nil
+    var locked: Bool { blocked == true || full == true }
 
-    /// Réponse (ou nouvel état) du développeur pas encore lue.
+    /// Réponse (ou nouvel état) du développeur pas encore lue. `seen` est
+    /// une date du serveur (celle du dernier état vu) : l'horloge de
+    /// l'appareil, souvent décalée en sideload, faisait manquer des réponses
+    /// ou laissait une pastille rouge pour toujours.
     var unread: Bool { lastFrom == "a" && updatedAt > seen }
+    /// Worker à interroger pour ce retour.
+    var origin: String { base ?? APIConfig.base }
+    /// « Effacé » fait foi : réponse de son propre Worker, ou d'un retour
+    /// d'avant sans Worker personnel (tout partait alors à l'officiel).
+    func goneIsReliable(from queried: String) -> Bool {
+        base.map { $0 == queried } ?? (APIConfig.custom == nil)
+    }
     /// Terminé (fait ou refusé), dernier mot au développeur : plus rien
     /// n'est attendu, il n'est plus relu tout seul. Une réponse de la
     /// personne le remet au suivi (dernier mot à elle).
     var closed: Bool { (status == "done" || status == "refused") && lastFrom == "a" }
+    /// Terminé depuis moins de 30 jours : relu une fois par jour, le Worker y
+    /// ajoute « le correctif est en ligne » à la sortie du correctif.
+    var recentlyClosed: Bool { closed && updatedAt > (Date().timeIntervalSince1970 - 30 * 86_400) * 1000 }
     var messages: [FeedbackMessage] { thread ?? [FeedbackMessage(f: "u", m: text, at: at)] }
 }
 
@@ -53,9 +75,14 @@ private struct FeedbackState: Decodable {
     var updatedAt: Double? = nil
     var lastFrom: String? = nil
     var thread: [FeedbackMessage]? = nil
+    /// Fermée par le développeur, pleine (absents : ni l'un ni l'autre).
+    var closed: Bool? = nil
+    var full: Bool? = nil
 }
 private struct ThreadsResponse: Decodable { let items: [FeedbackState] }
 private struct ReplyResponse: Decodable { let item: FeedbackState? }
+/// Réponse refusée : discussion fermée (403) ou pleine (409).
+private struct ReplyRefusal: Decodable { var closed: Bool? = nil; var full: Bool? = nil }
 
 @MainActor
 final class FeedbackStore: ObservableObject {
@@ -66,6 +93,9 @@ final class FeedbackStore: ObservableObject {
 
     private let key = "my_feedback"
     private var checkedAt = Date.distantPast
+    /// Dernière réponse envoyée d'ici, par retour : une relecture partie
+    /// avant ne l'écrase pas.
+    private var localEdits: [String: Date] = [:]
     /// « Mes signalements » à l'écran (liste ou discussion) : la réponse s'y
     /// voit déjà, pas de bandeau par-dessus.
     var inboxViewers = 0
@@ -84,27 +114,32 @@ final class FeedbackStore: ObservableObject {
         }
         // Des retours encore suivis : iOS réveille aussi l'app pour leurs
         // réponses (LiveNotifier), même sans les notifications de live. Tous
-        // terminés : plus de réveil pour eux.
-        UserDefaults.standard.set(reports.contains { !$0.closed }, forKey: Self.hasReportsKey)
+        // terminés depuis plus de 30 jours : plus de réveil pour eux.
+        UserDefaults.standard.set(reports.contains { !$0.closed || $0.recentlyClosed }, forKey: Self.hasReportsKey)
     }
     nonisolated static let hasReportsKey = "fb_has_reports"
+    /// Dernière relecture des retours terminés (une par jour au plus).
+    private static let closedCheckKey = "fb_closed_checked"
 
-    func add(id: String, token: String, kind: String, text: String) {
+    /// `base` : le Worker qui vient de recevoir le retour.
+    func add(id: String, token: String, kind: String, text: String, base: String = APIConfig.base) {
         let now = Date().timeIntervalSince1970 * 1000
+        // `seen` à 0 : rien du développeur n'est encore arrivé (dernier mot
+        // à la personne), et la date du serveur prendra le relais.
         reports.insert(MyFeedback(id: id, token: token, at: now, kind: kind,
-                                  text: String(text.prefix(200)), updatedAt: now, seen: now), at: 0)
+                                  text: String(text.prefix(200)), updatedAt: now, seen: 0, base: base), at: 0)
         save()
     }
 
     func markSeen(_ id: String) {
         guard let i = reports.firstIndex(where: { $0.id == id }) else { return }
-        reports[i].seen = Date().timeIntervalSince1970 * 1000
+        reports[i].seen = reports[i].updatedAt
         save()
     }
 
     /// Adresse d'une photo de la discussion (le jeton du retour en donne l'accès).
     func photoURL(_ r: MyFeedback, _ n: Int) -> URL? {
-        var c = URLComponents(string: "\(APIConfig.base)/api/feedback/photo")
+        var c = URLComponents(string: "\(r.origin)/api/feedback/photo")
         c?.queryItems = [.init(name: "id", value: r.id), .init(name: "n", value: String(n)),
                          .init(name: "token", value: r.token)]
         return c?.url
@@ -115,18 +150,49 @@ final class FeedbackStore: ObservableObject {
     /// relu, sauf s'il est dans `including` (discussion qu'on ouvre, liste
     /// tirée pour rafraîchir). Un retour effacé ou expiré quitte la liste.
     func refresh(force: Bool = false, minInterval: TimeInterval = 180, including: Set<String> = []) async {
-        let followed = reports.filter { !$0.closed || including.contains($0.id) }
+        // Terminés depuis moins de 30 jours : relus une fois par jour, pour le
+        // « correctif en ligne » que le Worker ajoute à la sortie (il n'arrivait
+        // jamais : un retour terminé n'était plus relu).
+        let now = Date().timeIntervalSince1970
+        let closedDue = now - UserDefaults.standard.double(forKey: Self.closedCheckKey) > 86_400
+        let followed = reports.filter {
+            !$0.closed || including.contains($0.id) || (closedDue && $0.recentlyClosed)
+        }
         guard !followed.isEmpty, force || Date().timeIntervalSince(checkedAt) > minInterval else { return }
         checkedAt = Date()
-        let items = followed.map { ["id": $0.id, "token": $0.token] }
-        guard let data = await post("/api/feedback/thread", ["items": items]),
-              let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
-        else { return }
-        let byId = Dictionary(states.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let started = Date()
+        // Chacun à son Worker d'origine, par paquets de 30 : le Worker n'en
+        // relit pas plus par appel (au-delà, les plus anciens restaient figés).
+        var byId: [String: FeedbackState] = [:]
+        var reliablyGone: Set<String> = []
+        var reached = false
+        for (base, list) in Dictionary(grouping: followed, by: \.origin) {
+            for start in stride(from: 0, to: list.count, by: 30) {
+                let chunk = Array(list[start ..< min(start + 30, list.count)])
+                let items = chunk.map { ["id": $0.id, "token": $0.token] }
+                guard let data = await post("/api/feedback/thread", ["items": items], base: base),
+                      let states = try? JSONDecoder().decode(ThreadsResponse.self, from: data).items
+                else { continue }
+                reached = true
+                for st in states {
+                    byId[st.id] = st
+                    if st.gone == true, chunk.first(where: { $0.id == st.id })?.goneIsReliable(from: base) == true {
+                        reliablyGone.insert(st.id)
+                    }
+                }
+            }
+        }
+        guard reached else { return }
+        if closedDue, followed.contains(where: { $0.recentlyClosed }) {
+            UserDefaults.standard.set(now, forKey: Self.closedCheckKey)
+        }
         let before = Dictionary(reports.map { ($0.id, $0.updatedAt) }, uniquingKeysWith: { a, _ in a })
         reports = reports.compactMap { r in
             guard let st = byId[r.id] else { return r }
-            if st.gone == true { return nil }
+            if st.gone == true { return reliablyGone.contains(r.id) ? nil : r }
+            // Réponse envoyée pendant la relecture : l'état lu est plus ancien
+            // (le message disparaissait jusqu'à la relecture suivante).
+            if let edited = localEdits[r.id], edited > started { return r }
             return apply(st, to: r)
         }
         save()
@@ -135,7 +201,9 @@ final class FeedbackStore: ObservableObject {
         // « Mes signalements » est à l'écran : la réponse y est affichée.
         let fresh = reports.filter { $0.unread && $0.updatedAt > (before[$0.id] ?? 0) }
         let inboxOnScreen = inboxViewers > 0 && UIApplication.shared.applicationState == .active
-        if !fresh.isEmpty, !inboxOnScreen { notifyTeamUpdates(fresh) }
+        // Attendu : un réveil en arrière-plan (LiveNotifier) ne se termine
+        // qu'une fois les notifications posées — l'état, lui, est déjà noté.
+        if !fresh.isEmpty, !inboxOnScreen { await notifyTeamUpdates(fresh) }
     }
 
     /// App au premier plan : relue toutes les minutes. Avant, rien ne se
@@ -163,7 +231,7 @@ final class FeedbackStore: ObservableObject {
     /// ou notification (InAppNotices) ; le toucher ouvre « Mes signalements ».
     /// Identifiant = retour + date : la même mise à jour n'est jamais
     /// annoncée deux fois.
-    private func notifyTeamUpdates(_ list: [MyFeedback]) {
+    private func notifyTeamUpdates(_ list: [MyFeedback]) async {
         let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
         for r in list.prefix(3) {
             let notice: InAppNotice
@@ -174,8 +242,8 @@ final class FeedbackStore: ObservableObject {
                                      body: translate("fb_status_line", lang)
                                         .replacingOccurrences(of: "{s}", with: translate("fb_status_\(r.status)", lang)))
             }
-            InAppNotices.shared.deliver(notice, id: "fb-\(r.id)-\(Int(r.updatedAt))",
-                                        userInfo: ["feedback": r.id])
+            await InAppNotices.shared.deliverNow(notice, id: "fb-\(r.id)-\(Int(r.updatedAt))",
+                                                 userInfo: ["feedback": r.id])
         }
     }
 
@@ -185,6 +253,8 @@ final class FeedbackStore: ObservableObject {
         if let u = st.updatedAt { r.updatedAt = u }
         if let l = st.lastFrom { r.lastFrom = l }
         if let t = st.thread { r.thread = t }
+        r.blocked = st.closed == true ? true : nil
+        r.full = st.full == true ? true : nil
         return r
     }
 
@@ -193,29 +263,48 @@ final class FeedbackStore: ObservableObject {
         guard let r = reports.first(where: { $0.id == id }) else { return false }
         let body: [String: Any] = ["id": r.id, "token": r.token, "message": message,
                                    "photos": photos.map { $0.base64EncodedString() }]
-        guard let data = await post("/api/feedback/reply", body),
+        let (answer, status) = await send("/api/feedback/reply", body, base: r.origin)
+        // Fermée par le développeur, ou pleine, entre-temps : gardé avec le
+        // retour, la vue retire le champ de réponse et dit pourquoi.
+        if status == 403 || status == 409, let answer,
+           let refusal = try? JSONDecoder().decode(ReplyRefusal.self, from: answer),
+           refusal.closed == true || refusal.full == true,
+           let i = reports.firstIndex(where: { $0.id == id }) {
+            if refusal.closed == true { reports[i].blocked = true } else { reports[i].full = true }
+            save()
+            return false
+        }
+        guard status == 200, let data = answer,
               let item = try? JSONDecoder().decode(ReplyResponse.self, from: data).item,
               let i = reports.firstIndex(where: { $0.id == id }) else { return false }
         reports[i] = apply(item, to: reports[i])
-        reports[i].seen = Date().timeIntervalSince1970 * 1000
+        reports[i].seen = reports[i].updatedAt
+        localEdits[id] = Date()
         save()
         return true
     }
 
-    private func post(_ path: String, _ body: [String: Any]) async -> Data? {
-        guard let url = URL(string: APIConfig.base + path),
-              let payload = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+    private func post(_ path: String, _ body: [String: Any], base: String = APIConfig.base) async -> Data? {
+        let (data, status) = await send(path, body, base: base)
+        return status == 200 ? data : nil
+    }
+
+    /// Corps et code HTTP de la réponse (nil, nil : pas de réponse).
+    private func send(_ path: String, _ body: [String: Any], base: String = APIConfig.base) async -> (Data?, Int?) {
+        guard let url = URL(string: base + path),
+              let payload = try? JSONSerialization.data(withJSONObject: body) else { return (nil, nil) }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.cachePolicy = .reloadIgnoringLocalCacheData
         req.httpBody = payload
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200 else {
-            logger.warn("FEEDBACK", "Requête refusée", path)
-            return nil
+              let status = (resp as? HTTPURLResponse)?.statusCode else {
+            logger.warn("FEEDBACK", "Requête refusée", "\(path) · réseau")
+            return (nil, nil)
         }
-        return data
+        if status != 200 { logger.warn("FEEDBACK", "Requête refusée", "\(path) · HTTP \(status)") }
+        return (data, status)
     }
 }
 

@@ -24,13 +24,41 @@ no key to paste. The backend is already hosted and shared by every install.
 
 ---
 
+## 📲 Installation
+
+TwitchUnblock isn't on the App Store, so it has to be sideloaded.
+
+<h3 align="center">
+<a href="https://altdirect.app/?url=https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json" target="_blank"><img src="https://altdirect.app/assets/png/AltSource_Blue.png" alt="Add AltSource" width="200"></a>
+&nbsp;
+<a href="https://github.com/MXFia19/TwitchUnblock/releases/latest/download/TwitchUnblock.ipa" target="_blank"><img src="https://altdirect.app/assets/png/Download_Blue.png" alt="Download .ipa" width="200"></a>
+</h3>
+
+**Add AltSource** opens the source in AltStore, SideStore, Feather, LiveContainer,
+StikStore or TrollApps (automatic nightly builds): install **TwitchUnblock** from
+it. It also lists **TU Test**, the test builds (newest features, may be
+unstable), installed next to the normal app. **Download .ipa** gets the latest
+build, for Sideloadly or TrollStore. Source address, to add it by hand:
+
+```
+https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
+```
+
+**Apple TV**: see [Apple TV (test)](#-apple-tv-test) below. **No install**: the
+[web version](https://twitchunblock.vercel.app) runs in any browser.
+
+---
+
 ## ✨ Features
 
 ### Watching
 
 * 🚫 **No subscription required** — watch any VOD or live stream at full quality.
 * 🎬 **Immersive player** — custom controls drawn over the picture, the way
-  Twitch does it. Play/pause, scrubbing, quality, refresh, orientation. Apple's
+  Twitch does it. Play/pause, scrubbing, quality, refresh, a speaker button to
+  mute the stream, orientation. On iPhone the app stays in portrait;
+  landscape is for the player opened full size and multi-live, and closing
+  or shrinking the player in landscape brings the app back to portrait. Apple's
   native player stays available as a fallback in Settings. Changing quality
   keeps your place, in Apple's player too (a live you rewound keeps its delay);
   a VOD you had finished starts over from the beginning; when the stream drops for good, the
@@ -48,11 +76,18 @@ no key to paste. The backend is already hosted and shared by every install.
   ahead to: in landscape, double-tap shows or hides the chat instead, and once
   you fall behind (pause, network drop) a red **Live** button with the delay
   brings you back to the edge. Double-tapping works with the controls shown
-  too.
+  too. With **Show latency** on (Settings → Player), tapping the delay brings
+  you back to live as well, without reloading the stream.
 * 📺 **Picture-in-Picture** — keep watching while you use other apps, or the
   rest of the app with the player reduced. Closing the player, opening another
   video or switching to chat only ends it, along with its chat connection and
   lock screen activity.
+* 🔒 **Lock Screen and Dynamic Island** — the live or VOD you're watching
+  (channel, title, playback) as a Live Activity; turn it off in Settings →
+  Player → Live Activity if you don't need it.
+* 🏷️ **Full title** — tap the title at the top of the player (often cut off)
+  to read it in full, with the category, viewers, uptime and a shortcut to the
+  channel.
 * 🎵 **Leaves your music alone** — opening the app no longer stops music
   playing in another app: the sound switches over only when a video starts,
   and goes back to that app when you close the player (not when the sleep
@@ -120,6 +155,8 @@ no key to paste. The backend is already hosted and shared by every install.
   official Twitch.
 * 🖥 **Fill the screen** — crops the video to remove the black bars in
   landscape. Cuts off the top and bottom: 16:9 in a phone screen can't do both.
+  Otherwise the picture never goes under the Dynamic Island or the notch in
+  landscape, even when the chat takes a column next to it.
 * 🌙 **Sleep timer** — presets or a custom duration, with the countdown shown
   right in the player. It stops multi-live too. The screen only stays awake
   while a video plays on screen: paused, minimized or in audio only, it
@@ -136,7 +173,9 @@ no key to paste. The backend is already hosted and shared by every install.
   back automatically (Settings → Player; not over AirPlay). On VODs in the newer
   MP4 format, Twitch often still serves muted parts with their sound: the app
   plays and downloads them as they are instead of swapping in the silent
-  version.
+  version. Muted parts that Twitch lists under a name its CDN refuses are
+  fixed on the device when the backend can’t do it, and a VOD that stops on one
+  starts again at the same place on its own; **Skip** works even then.
 * 🗂 **Unlisted & deleted broadcasts** — streams whose VOD is hidden or was
   deleted show up among the channel's VODs as "Unlisted VOD", rebuilt from
   Twitch's CDN as long as it still has them (stream IDs from `vodvod.top`,
@@ -163,7 +202,9 @@ no key to paste. The backend is already hosted and shared by every install.
   tile resumes where you left off; the one you hear has play/pause, ±10 s
   and a seek bar, the others a thin progress line, and “Watch again” at the
   end. Its progress is saved and synced, and it joins your VOD history.
-  Side by side in landscape, stacked in portrait. On iPad (or a large iPhone
+  Side by side in landscape, stacked in portrait; the ⇄ button on a tile
+  swaps its place with another video (with three, the first one is the big
+  one). On iPad (or a large iPhone
   in landscape), the chat of the video you hear shows on the right (the
   replayed chat for a VOD) — a button in the mosaic and Settings → Player
   turn it on or off. Each tile plays 1080p alone, 720p with two, 480p
@@ -182,7 +223,8 @@ no key to paste. The backend is already hosted and shared by every install.
   account** button for when you're unbanned (remembered until the app
   closes). A timeout only adds a line saying for how long.
 * 😀 **Emotes** — Twitch, BetterTTV, FrankerFaceZ and 7TV, global and
-  per-channel, animated (FrankerFaceZ included). BetterTTV's live connection
+  per-channel, animated (FrankerFaceZ included); GIFs sent with Twitch's GIF
+  keyboard show in the chat on their own line. BetterTTV's live connection
   adds the personal emotes of BTTV Pro users (once BTTV announces them, i.e.
   when they open the chat) and the emotes added to the channel during the
   stream. The emote picker is translated; long-press an emote there to open
@@ -202,7 +244,11 @@ no key to paste. The backend is already hosted and shared by every install.
 * 🕘 **Recent messages** — Twitch sends nothing from before you join, so the
   last messages are fetched from `recent-messages.robotty.de` (third party) and
   marked with a clock.
-* ⌨️ **Autocomplete** — emotes and names suggested as you type.
+* ⌨️ **Autocomplete** — emotes and names suggested as you type. The iOS
+  keyboard’s predicted words and autocorrect are on (Settings → Chat →
+  Keyboard suggestions, to turn off if iOS corrects your emotes). Swipe the
+  chat down or tap it to hide the keyboard without sending; reducing the
+  player hides it too.
 * 🗑 **Deleted messages** — optionally kept struck through instead of vanishing.
 * 🎨 **Username colour** — changed through Helix (needs a re-login after the
   permission was added).
@@ -274,10 +320,22 @@ no key to paste. The backend is already hosted and shared by every install.
   picture, or folded away. The player's buttons shift with the chat's width so
   nothing is ever covered.
 * 🔠 **Sizing** — font size, message spacing, badge and emote scale,
-  timestamps, with a live preview.
+  timestamps, with a live preview. The time shows in 12 h or 24 h: Auto
+  follows the device, or pick one (Settings → Chat; the log follows it too).
 
 ### Finding things
 
+* 🎞️ **Discover** — a tab with one live per screen to swipe up through, like
+  Twitch's feed: top streams in your top language (hidden channels and
+  categories left out), each playing a muted preview (360p, 160p on mobile
+  data) through the usual live sources. The speaker button turns the sound
+  on (it stays on from one page to the next until you leave the tab). **Clips**
+  shows the most viewed clips of the last 24 hours from those channels, on a
+  loop. Name, title, tags, category, viewers, **Follow**, share, and hide the
+  channel or its category; tap the video for the full player (sound, chat), or
+  the name or picture for the channel's page. Previews stop as soon as a player
+  or multi-live opens, and come back when it closes. Settings → General →
+  **Discover tab** hides it.
 * 🏠 **Home** — your followed channels that are live (up to 300 at once), top
   streams (France or worldwide; without an account, **Load more** adds 30 at a
   time).
@@ -338,7 +396,8 @@ no key to paste. The backend is already hosted and shared by every install.
   the stream in TwitchUnblock. ntfy.sh counts free messages per address and
   turns away the backend's shared Cloudflare addresses, so they leave from the
   project's own server (the video relay); **Test** tells you when ntfy.sh is
-  refusing messages for now (sending limit reached).
+  refusing messages for now (sending limit reached). **Notified channels**
+  (same place) picks which followed channels notify you, for both.
 
 ### Look & feel
 
@@ -409,31 +468,10 @@ no key to paste. The backend is already hosted and shared by every install.
   at most once an hour. No channels watched, no IP address. Switching it off
   erases it server-side. Public numbers: [/stats](https://twitchunblock.vercel.app/stats). See
   [`Sources/Services/UsageService.swift`](Sources/Services/UsageService.swift).
-* 🪵 **System logs** — everything the app does, visible in Settings.
-
----
-
-## 📲 Installation
-
-TwitchUnblock isn't on the App Store, so it has to be sideloaded.
-
-### AltStore / SideStore / Feather (recommended)
-
-Automatic nightly builds, straight from your sideloader:
-
-1. Open AltStore, SideStore or Feather.
-2. Go to **Sources**.
-3. Add:
-   ```
-   https://raw.githubusercontent.com/MXFia19/TwitchUnblock/master/apps.json
-   ```
-4. Install **TwitchUnblock** from there.
-
-### Manual
-
-Download the latest `TwitchUnblock.ipa` from the
-[Releases](https://github.com/MXFia19/TwitchUnblock/releases) page and install it
-with Sideloadly, AltStore, or TrollStore if your device supports it.
+* 🪵 **System logs** — everything the app does, visible in Settings, in the
+  app's language (written in French, translated when shown: numbers and names
+  stay as they are). Share them as text or export them as a `.txt` file
+  (Files, AirDrop, Mail…).
 
 ---
 
@@ -443,14 +481,30 @@ A first Apple TV app lives in `TV/` (target `TwitchUnblockTV`, tvOS 16+),
 built on its own by `.github/workflows/build-tvos.yml` and published as an
 unsigned `tv-test-N` pre-release:
 
-* Followed channels (sign in with a code or a QR code on twitch.tv/activate),
-  top streams, categories, search, a channel's VODs.
+* Followed channels (sign in with a code or a QR code on twitch.tv/activate):
+  the live ones, then the offline ones (most recently live first) to open
+  their videos; top streams, categories, search, a channel's VODs. The
+  Following list refreshes on its own (back on the tab or in the app, every
+  2 minutes while it's shown, and when you come back down from the tab bar),
+  so ended lives don't linger.
+* The remote's **Play** button starts the focused live or VOD, like Select; on
+  an offline channel (Following, Search) it opens the channel and plays its
+  latest broadcast (or its live, if it just started).
 * tvOS's native player, with Quality, **Chat** and, for lives, Source in its
   bar: the chat (read-only, no account needed) sits on the picture — live, or
   a VOD's chat replayed in sync — with Twitch, BTTV, FFZ and 7TV emotes. The
   Chat menu shows or hides it and places it on the left or the right, full
-  height or in the top or bottom half (any of the four corners); that place is
-  remembered for the channel being watched, Account sets the default one.
+  height or in the top or bottom half (any of the four corners); shown or
+  hidden and its place are remembered for the channel being watched (a
+  streamer who already shows their chat on screen doesn’t need ours), and
+  Account sets the defaults.
+* **View channel** in the player's bar opens the channel's page, with its
+  past broadcasts; a video started there plays on top of it, and Menu goes
+  back.
+* Usage count, like the iPhone (Account → Share my usage): a random install ID,
+  or your Twitch account when signed in, the version, the language and how many
+  lives and VODs started (which source, failures), at most once an hour; never
+  the channels. It waits until the backend counts the Apple TV on its own.
 * Account's settings move one row at a time with the remote, land on the
   ticked option, and always lead back up to the tab bar.
 * A preferred quality (Account → Settings), same rule as the iPhone: the
@@ -463,8 +517,17 @@ unsigned `tv-test-N` pre-release:
   own layered icon and Top Shelf banners (`TV/make_tv_icons.py`, drawn from
   the iPhone app's logo).
 
-Installing it needs a Mac with Xcode and the Apple TV paired with it
-(AltStore, SideStore and Feather don't handle tvOS).
+Installing it needs a tool that can sideload on tvOS, or a Mac with Xcode and
+the Apple TV paired with it (AltStore, SideStore and Feather don't handle
+tvOS). **ATVLoadly** (or any tool that reads AltStore sources) can update it
+on its own from this source, rewritten by each build with its release notes
+(`Changelog: Apple TV: …` lines of the commits that touch the TV):
+
+```
+https://raw.githubusercontent.com/MXFia19/TwitchUnblock/test-17d298/apps-tv.json
+```
+
+Its GitHub releases can't be used for that: they also hold the iPhone IPAs.
 
 ---
 
@@ -498,20 +561,24 @@ site can read. For those, use the app.
 
 ## 🛠️ Building from source
 
-**Requirements:** macOS, Xcode 16+, iOS 16.0 deployment target.
+**Requirements:** macOS, Xcode 16+, iOS 16.0 deployment target, and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```bash
 git clone https://github.com/MXFia19/TwitchUnblock.git
 cd TwitchUnblock
+xcodegen generate
 open TwitchUnblock.xcodeproj
 ```
 
-Pick your development team under *Signing & Capabilities*, then build the
-`TwitchUnblock` scheme onto your device.
-
-The Xcode project is generated from `project.yml` with
-[XcodeGen](https://github.com/yonaskolb/XcodeGen): run `xcodegen` after adding
-files. GitHub Actions builds and publishes nightly IPAs from `master`.
+The Xcode project isn't in the repository: it is generated from
+[`project.yml`](project.yml) (run `xcodegen generate` again after adding files).
+Signing is turned off in `project.yml` because CI builds unsigned IPAs: to run
+the app on your device, pick your development team under *Signing &
+Capabilities* (and a bundle identifier of your own). The app icons are
+assembled by CI (step “Create App Icon Folder” in
+[`build.yml`](.github/workflows/build.yml)): a local build has none unless you
+run that step. GitHub Actions builds and publishes nightly IPAs from `master`.
 
 ### Versioning
 

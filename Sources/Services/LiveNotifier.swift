@@ -33,7 +33,10 @@ enum LiveNotifier {
     /// Programme le prochain réveil : pour les lives suivis (option), ou pour
     /// les réponses aux retours envoyés (FeedbackStore).
     static func schedule() {
-        guard isEnabled || UserDefaults.standard.bool(forKey: FeedbackStore.hasReportsKey) else { return }
+        // ntfy aussi : son sujet est renvoyé au Worker pendant ces réveils (il
+        // l'oubliait après 60 jours sans retour dans l'app).
+        guard isEnabled || NtfyNotifier.isEnabled
+                || UserDefaults.standard.bool(forKey: FeedbackStore.hasReportsKey) else { return }
         let req = BGAppRefreshTaskRequest(identifier: taskId)
         req.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
         do {
@@ -91,6 +94,12 @@ enum LiveNotifier {
             let ok = isEnabled ? await check(notify: true) : true
             // Réponses aux retours envoyés : notifiées par FeedbackStore.
             await FeedbackStore.shared.refresh(force: true)
+            // ntfy : chaînes suivies renvoyées si elles ont changé (et au moins
+            // une fois par jour), même sans ouvrir l'app.
+            if NtfyNotifier.isEnabled {
+                let lang = Lang(rawValue: UserDefaults.standard.string(forKey: "lang") ?? "en") ?? .en
+                _ = await NtfyNotifier.sync(lang: lang)
+            }
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: lastRunKey)
             UserDefaults.standard.set(ok, forKey: lastOkKey)
             task.setTaskCompleted(success: ok)
@@ -128,9 +137,14 @@ enum LiveNotifier {
         let known = Set(ud.stringArray(forKey: knownKey) ?? [])
         let now = Set(streams.map { $0.userLogin.lowercased() })
         // ntfy actif : c'est lui qui prévient (sans doublon, et plus vite).
-        if notify && !NtfyNotifier.isEnabled {
+        let firstPass = ud.object(forKey: knownKey) == nil
+        if notify && !firstPass && !(NtfyNotifier.isEnabled && !NtfyNotifier.isPending) {
             let lang = Lang(rawValue: ud.string(forKey: "lang") ?? "en") ?? .en
-            for s in streams where !known.contains(s.userLogin.lowercased()) {
+            // Chaînes coupées dans « Chaînes notifiées » : connues quand même,
+            // pour ne pas notifier un live en cours le jour où on les rallume.
+            let muted = NotifChannels.muted
+            for s in streams where !known.contains(s.userLogin.lowercased())
+                                && !muted.contains(s.userLogin.lowercased()) {
                 let content = UNMutableNotificationContent()
                 content.title = translate("notif_live_title", lang).replacingOccurrences(of: "{u}", with: s.userName)
                 content.body = s.title.isEmpty ? s.gameName : "\(s.title)\(s.gameName.isEmpty ? "" : " · \(s.gameName)")"

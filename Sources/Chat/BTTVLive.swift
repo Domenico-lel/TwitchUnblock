@@ -90,8 +90,14 @@ actor BTTVLive {
         let channelId = (d["channel"] as? String)?.components(separatedBy: ":").last ?? ""
         switch name {
         case "lookup_user":
-            guard d["pro"] as? Bool == true, let uid = d["providerId"] as? String,
-                  let list = d["emotes"] as? [[String: Any]], !list.isEmpty else { return }
+            guard let uid = d["providerId"] as? String else { return }
+            let list = d["emotes"] as? [[String: Any]] ?? []
+            // Plus Pro, ou plus aucune emote : les siennes disparaissent (elles
+            // restaient affichées jusqu'au redémarrage de l'app).
+            guard d["pro"] as? Bool == true, !list.isEmpty else {
+                await EmoteService.shared.removePersonalBTTV(userId: uid)
+                return
+            }
             await EmoteService.shared.setPersonalBTTV(userId: uid, emotes: list)
             logger.debug("EMOTES", "Emotes personnelles BTTV", "\(list.count) pour \(uid)")
         case "emote_create", "emote_update":

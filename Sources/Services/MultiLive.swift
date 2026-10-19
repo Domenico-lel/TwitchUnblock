@@ -109,6 +109,15 @@ final class MultiLive: ObservableObject {
         save()
     }
 
+    /// Échange deux vidéos de place (la première est la grande, à trois) ;
+    /// les lectures continuent, seule la disposition change.
+    func swap(_ a: String, _ b: String) {
+        guard let i = entries.firstIndex(where: { $0.id == a }),
+              let j = entries.firstIndex(where: { $0.id == b }), i != j else { return }
+        entries.swapAt(i, j)
+        save()
+    }
+
     /// Ce que la tuile a appris de la VOD à son démarrage (chaîne, titre…) ;
     /// une valeur vide ne remplace rien.
     func updateVod(id: String, login: String, name: String, title: String, thumb: String) {
@@ -170,6 +179,8 @@ final class MultiTileModel: ObservableObject {
     /// dure — seule la tuile qui a le son en a un à couper.
     let adBreaks = AdBreakWatcher()
     @Published private(set) var phase: Phase = .loading
+    /// En lecture mais à l'arrêt faute de données (roue légère sur la tuile).
+    @Published private(set) var buffering = false
     /// Identifiant Twitch de la chaîne (emotes et badges de son chat).
     @Published private(set) var channelId: String?
     /// VOD : position et durée, arrondies à la seconde (barre de la tuile,
@@ -191,6 +202,9 @@ final class MultiTileModel: ObservableObject {
     }
 
     private var task: Task<Void, Never>?
+    /// Chargement sans image depuis 20 s : relance (voir observe).
+    private var loadWatch: Task<Void, Never>?
+    private var failObserver: NSObjectProtocol?
     private var observers: [NSKeyValueObservation] = []
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
@@ -320,6 +334,9 @@ final class MultiTileModel: ObservableObject {
         observers = []
         if let o = timeObserver { player.removeTimeObserver(o); timeObserver = nil }
         if let o = endObserver { NotificationCenter.default.removeObserver(o); endObserver = nil }
+        if let o = failObserver { NotificationCenter.default.removeObserver(o); failObserver = nil }
+        loadWatch?.cancel(); loadWatch = nil
+        buffering = false
         pendingSeek = nil
         seeking = false
         player.pause()
@@ -340,6 +357,23 @@ final class MultiTileModel: ObservableObject {
                 Task { @MainActor in self?.statusChanged(playing: nowPlaying) }
             },
         ]
+        // Lecture arrêtée en route (réseau, segment refusé) : relance.
+        if let o = failObserver { NotificationCenter.default.removeObserver(o) }
+        failObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.interrupted() }
+        }
+        // Chargement sans fin (proxy qui accepte sans rien livrer) : au bout de
+        // 20 s sans image, la tuile relance, puis propose « Réessayer ».
+        loadWatch?.cancel()
+        loadWatch = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard let self, !Task.isCancelled, self.phase == .loading, !self.userPaused,
+                  self.player.currentItem === item else { return }
+            logger.warn("MULTI", "Tuile sans image depuis 20 s : relance", self.login)
+            self.interrupted()
+        }
     }
 
     /// Lecture partie, ou lecteur arrêté (voir `heldBySystem`).
@@ -347,6 +381,19 @@ final class MultiTileModel: ObservableObject {
         if nowPlaying { playing() }
         let paused = player.timeControlStatus == .paused
         if paused != playerPaused { playerPaused = paused }
+        let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        if waiting != buffering { buffering = waiting }
+    }
+
+    /// Nombre de tuiles changé : nouvelle qualité si le palier change (1080p
+    /// seul, 720p à deux, 480p au-delà). Un direct gardait sa qualité de
+    /// départ : 1080p à côté de trois 480p, ou 480p étiré une fois seul.
+    func adjust(count newCount: Int) {
+        let tier = { (n: Int) in n <= 1 ? 1080 : n == 2 ? 720 : 480 }
+        let changed = tier(newCount) != tier(count)
+        count = newCount
+        guard changed, phase == .playing || phase == .loading else { return }
+        start(count: newCount)
     }
 
     /// VOD : position et durée chaque seconde, fin de la vidéo (pour cet
@@ -557,7 +604,9 @@ final class MultiLiveSession: ObservableObject {
             model.stop()
             tiles[id] = nil
         }
-        for entry in entries where tiles[entry.id] == nil {
+        for entry in entries {
+            // Déjà là : qualité réajustée si le nombre de tuiles change de palier.
+            if let model = tiles[entry.id] { model.adjust(count: entries.count); continue }
             let model = MultiTileModel(entry: entry, accountToken: accountToken,
                                        resume: resume, save: save, onStarted: onStarted)
             tiles[entry.id] = model
