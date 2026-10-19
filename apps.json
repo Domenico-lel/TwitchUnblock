@@ -176,6 +176,15 @@
       "screenshots": [],
       "versions": [
         {
+          "version": "1.5.2",
+          "buildVersion": "330",
+          "date": "2026-10-19",
+          "localizedDescription": "- New Settings → General → Customize the app: show, hide and reorder the tabs, and pick the tab the app opens on\n- Customize the Home screen: reorder or hide the Followed / Top / Offline tabs, hide the announcement, poll, sign-in and web session cards or the Categories view\n- Customize the player's bottom bar: reorder or hide its buttons, add sleep timer, multi-live and rewind buttons, hide AirPlay\n- Chat banners: polls, predictions and the hype train can now be hidden one by one",
+          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-330/TwitchUnblock.ipa",
+          "size": 3949248,
+          "commit": "52a894bf3f24af5fcee63bcf8adb01cd0dc1ec5a"
+        },
+        {
           "version": "1.5.1",
           "buildVersion": "329",
           "date": "2026-10-19",
@@ -255,25 +264,16 @@
           "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-320/TwitchUnblock.ipa",
           "size": 3803685,
           "commit": "a87a8d04051698137d7fffde5f8e13d2e97836a3"
-        },
-        {
-          "version": "1.4.19",
-          "buildVersion": "319",
-          "date": "2026-10-18",
-          "localizedDescription": "- Multi-live: tiles change quality when you add or remove lives, a tile stuck loading retries by itself then offers Retry, a light spinner shows while a tile buffers, and raids no longer stop being detected\n- Chat: messages waiting for the delay sync are no longer lost when the chat reconnects, your own Twitch emotes show as emotes, highlight words can be several words or emote names, the ⋯ menu is available without an account, and closing the emote picker brings the keyboard back\n- Chat: switching or logging out of your account reconnects the chat correctly, a reply from a thread that couldn't be sent stays in the field with the reason, and chat name colors are translated\n- Polls and predictions keep showing when your web session has expired, a refused vote says why, and the emote picker fills in as emotes finish loading",
-          "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-319/TwitchUnblock.ipa",
-          "size": 3797716,
-          "commit": "4f936e2de844d8cb8ccb55150665fd381b6d7c1d"
         }
       ],
       "appPermissions": {
         "entitlements": [],
         "privacy": {}
       },
-      "version": "1.5.1",
+      "version": "1.5.2",
       "versionDate": "2026-10-19",
-      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-329/TwitchUnblock.ipa",
-      "size": 3898972
+      "downloadURL": "https://github.com/MXFia19/TwitchUnblock/releases/download/test-330/TwitchUnblock.ipa",
+      "size": 3949248
     }
   ],
   "news": []
